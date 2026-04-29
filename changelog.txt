@@ -1,1 +1,10 @@
-
+v1.1.0 (29.04.2026)
+- Fixed: clearing cache no longer logs out of account
+- Fixed: drag-and-drop no longer activates chats in the background
+- Fixed: header buttons (search, more) unclickable after closing right panel
+- Fixed: custom menu shadow now only visible when panel is open
+- Added: auto-updater with configurable check interval
+- Added: manual update check button in menu
+- Added: changelog panel in menu
+- Added: custom corner notifications (replaces browser popups)
+- Added: toast notifications now styled like Telegram
