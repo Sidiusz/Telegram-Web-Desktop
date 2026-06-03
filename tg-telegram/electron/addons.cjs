@@ -1,0 +1,183 @@
+'use strict';
+const fs   = require('fs');
+const path = require('path');
+const { app, shell } = require('electron');
+const AdmZip = require('adm-zip');
+const Store  = require('electron-store').default;
+
+const addonStore = new Store({ name: 'addon-states' });
+
+// ── Папки ─────────────────────────────────────────────────────────────────────
+
+// Встроенные аддоны — внутри пакета, рядом с этим файлом
+function embeddedAddonsDir() {
+    return path.join(__dirname, 'embedded_addons');
+}
+
+// Пользовательские аддоны — в userData
+function userAddonsDir() {
+    const dir = path.join(app.getPath('userData'), 'addons');
+    if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+    return dir;
+}
+
+// Обратная совместимость — старый код звал addonsDir()
+function addonsDir() { return userAddonsDir(); }
+
+// ── Парсинг метаданных из JS-файла ───────────────────────────────────────────
+
+function parseMeta(content) {
+    const get = (tag) => {
+        const m = content.match(new RegExp('@' + tag + '\\s+(.+)'));
+        return m ? m[1].trim() : null;
+    };
+    return {
+        name:        get('name'),
+        version:     get('version'),
+        description: get('description'),
+        group:       get('group'),
+    };
+}
+
+// ── Состояние включён/выключен ────────────────────────────────────────────────
+
+function isEnabled(addonKey) {
+    // По умолчанию все включены; disabled_addons — список отключённых ключей
+    const disabled = addonStore.get('disabled_addons', []);
+    return !disabled.includes(addonKey);
+}
+
+function toggleAddon(addonKey, enabled) {
+    let disabled = addonStore.get('disabled_addons', []);
+    if (enabled) {
+        disabled = disabled.filter(k => k !== addonKey);
+    } else {
+        if (!disabled.includes(addonKey)) disabled.push(addonKey);
+    }
+    addonStore.set('disabled_addons', disabled);
+}
+
+// ── Список аддонов ────────────────────────────────────────────────────────────
+
+function readAddonsFromDir(dir, embedded) {
+    const result = [];
+    try {
+        for (const entry of fs.readdirSync(dir)) {
+            const ext = path.extname(entry).toLowerCase().slice(1);
+            if (ext !== 'js' && ext !== 'crx') continue;
+            const addonKey = (embedded ? 'embedded:' : 'user:') + entry;
+            let version = null;
+            let displayName = entry;
+            let group = null;
+            try {
+                if (ext === 'js') {
+                    const content = fs.readFileSync(path.join(dir, entry), 'utf8');
+                    const meta = parseMeta(content);
+                    if (meta.version)     version     = meta.version;
+                    if (meta.name)        displayName = meta.name;
+                    if (meta.group)       group       = meta.group;
+                }
+            } catch (e) {}
+            result.push({
+                name:        entry,
+                display_name: displayName,
+                addon_type:  ext,
+                version,
+                group,
+                embedded,
+                key:         addonKey,
+                enabled:     isEnabled(addonKey),
+            });
+        }
+    } catch (e) {}
+    return result;
+}
+
+function getAddons() {
+    const embedded = readAddonsFromDir(embeddedAddonsDir(), true);
+    const user     = readAddonsFromDir(userAddonsDir(),     false);
+    return [...embedded, ...user];
+}
+
+// ── Удаление (только пользовательские) ───────────────────────────────────────
+
+function deleteAddon(name) {
+    try { fs.unlinkSync(path.join(userAddonsDir(), name)); } catch (e) {}
+    // Чистим состояние
+    const key = 'user:' + name;
+    toggleAddon(key, true); // убираем из disabled если было
+}
+
+// ── Открыть папку ─────────────────────────────────────────────────────────────
+
+function openAddonsFolder() {
+    shell.openPath(userAddonsDir());
+}
+
+// ── Извлечение скриптов из CRX ────────────────────────────────────────────────
+
+function extractCrxContentScripts(data) {
+    try {
+        if (data.length < 16) return null;
+        const magic = data.slice(0, 4).toString('ascii');
+        if (magic !== 'Cr24') return null;
+        const headerSize = data.readUInt32LE(8);
+        const zipStart   = 12 + headerSize;
+        if (zipStart >= data.length) return null;
+        const zip = new AdmZip(data.slice(zipStart));
+        const manifestEntry = zip.getEntry('manifest.json');
+        if (!manifestEntry) return null;
+        const manifest = JSON.parse(manifestEntry.getData().toString('utf8'));
+        const scripts = [];
+        if (Array.isArray(manifest.content_scripts)) {
+            for (const cs of manifest.content_scripts) {
+                if (Array.isArray(cs.js)) {
+                    for (const jsFile of cs.js) {
+                        const entry = zip.getEntry(jsFile);
+                        if (entry) scripts.push(entry.getData().toString('utf8'));
+                    }
+                }
+            }
+        }
+        return scripts;
+    } catch (e) { return null; }
+}
+
+// ── Загрузка скриптов (только enabled) ───────────────────────────────────────
+
+function loadScriptsFromDir(dir, embedded) {
+    const scripts = [];
+    try {
+        for (const entry of fs.readdirSync(dir)) {
+            const ext      = path.extname(entry).toLowerCase().slice(1);
+            if (ext !== 'js' && ext !== 'crx') continue;
+            const addonKey = (embedded ? 'embedded:' : 'user:') + entry;
+            if (!isEnabled(addonKey)) continue;
+
+            const fullPath = path.join(dir, entry);
+            if (ext === 'js') {
+                try { scripts.push(fs.readFileSync(fullPath, 'utf8')); } catch (e) {}
+            } else if (ext === 'crx') {
+                try {
+                    const data      = fs.readFileSync(fullPath);
+                    const extracted = extractCrxContentScripts(data);
+                    if (extracted) scripts.push(...extracted);
+                } catch (e) {}
+            }
+        }
+    } catch (e) {}
+    return scripts;
+}
+
+function loadAddonScripts() {
+    return [
+        ...loadScriptsFromDir(embeddedAddonsDir(), true),
+        ...loadScriptsFromDir(userAddonsDir(),     false),
+    ];
+}
+
+module.exports = {
+    addonsDir, userAddonsDir, embeddedAddonsDir,
+    getAddons, deleteAddon, openAddonsFolder,
+    loadAddonScripts, toggleAddon,
+};
