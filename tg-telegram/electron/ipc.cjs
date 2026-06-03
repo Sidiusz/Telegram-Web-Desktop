@@ -2,7 +2,7 @@
 const { ipcMain, shell, dialog, app, Menu, MenuItem } = require('electron');
 const { pathToFileURL } = require('url');
 const { init: initNotifications, queueNotification } = require('./notification.cjs');
-const { loadSettings, saveSettings, getSkipDomains, addSkipDomain } = require('./settings.cjs');
+const { loadSettings, saveSettings } = require('./settings.cjs');
 const { loadDownloads, saveDownloads, deleteDownload } = require('./downloads.cjs');
 const { getAddons, deleteAddon, openAddonsFolder, toggleAddon } = require('./addons.cjs');
 const path = require('path');
@@ -73,10 +73,6 @@ function registerIpc(getWindow) {
         if (open) win.webContents.openDevTools();
         else win.webContents.closeDevTools();
     });
-
-    ipcMain.handle('get_skip_domains', () => getSkipDomains());
-
-    ipcMain.handle('add_skip_domain', (e, { domain }) => addSkipDomain(domain));
 
     ipcMain.handle('open_url', (e, { url }) => {
         shell.openExternal(url);
