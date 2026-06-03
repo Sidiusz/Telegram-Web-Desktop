@@ -41,20 +41,30 @@ function parseMeta(content) {
 
 // ── Состояние включён/выключен ────────────────────────────────────────────────
 
-function isEnabled(addonKey) {
-    // По умолчанию все включены; disabled_addons — список отключённых ключей
+function isEnabled(addonKey, group) {
     const disabled = addonStore.get('disabled_addons', []);
-    return !disabled.includes(addonKey);
+    // Явно выключен — выключен
+    if (disabled.includes(addonKey)) return false;
+    // Явно включён — включён
+    if (!disabled.includes(addonKey) && addonStore.get('enabled_addons', []).includes(addonKey)) return true;
+    // Аддоны с группой (взаимоисключающие) — по умолчанию выключены
+    if (group) return false;
+    // Остальные — по умолчанию включены (например hide_ads)
+    return true;
 }
 
 function toggleAddon(addonKey, enabled) {
     let disabled = addonStore.get('disabled_addons', []);
+    let explicitlyEnabled = addonStore.get('enabled_addons', []);
     if (enabled) {
         disabled = disabled.filter(k => k !== addonKey);
+        if (!explicitlyEnabled.includes(addonKey)) explicitlyEnabled.push(addonKey);
     } else {
         if (!disabled.includes(addonKey)) disabled.push(addonKey);
+        explicitlyEnabled = explicitlyEnabled.filter(k => k !== addonKey);
     }
     addonStore.set('disabled_addons', disabled);
+    addonStore.set('enabled_addons', explicitlyEnabled);
 }
 
 // ── Список аддонов ────────────────────────────────────────────────────────────
@@ -86,7 +96,7 @@ function readAddonsFromDir(dir, embedded) {
                 group,
                 embedded,
                 key:         addonKey,
-                enabled:     isEnabled(addonKey),
+                enabled:     isEnabled(addonKey, group),
             });
         }
     } catch (e) {}

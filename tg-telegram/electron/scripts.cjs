@@ -206,11 +206,11 @@ const EXTERNAL_JS = `(function(){
     function allowed(h){h=h.replace(/^www\\./,"");return ALLOWED.some(a=>h===a||h.endsWith("."+a));}
     document.addEventListener("click",e=>{
         let a=e.target.closest("a");
-        if(a&&a.href){try{let u=new URL(a.href);if(!allowed(u.host)){e.preventDefault();e.stopImmediatePropagation();if(window._tgLink)window._tgLink(a.href);else window.tgBridge.invoke("open_url",{url:a.href});}}catch(e){}}
+        if(a&&a.href){try{let u=new URL(a.href);if(!allowed(u.host)){e.preventDefault();e.stopImmediatePropagation();window.tgBridge.invoke("open_url",{url:a.href});}}catch(e){}}
     },{capture:false});
     const o=window.open;
     window.open=function(u){
-        if(typeof u==="string"){try{let url=new URL(u);if(!allowed(url.host)){if(window._tgLink)window._tgLink(u);else window.tgBridge.invoke("open_url",{url:u});return null;}}catch(e){}}
+        if(typeof u==="string"){try{let url=new URL(u);if(!allowed(url.host)){window.tgBridge.invoke("open_url",{url:u});return null;}}catch(e){}}
         return o.apply(this,arguments);
     };
 })();`;
@@ -540,13 +540,7 @@ function showModal({title,msg,url,checkLabel,okText,okDanger,cancelText,onOk,onC
 }
 
 window._tgLink=async function(url){
-    try{
-        const s=await INV('get_settings');
-        if(!s.link_ask){await INV('open_url',{url});return;}
-        let domain='';try{domain=new URL(url).hostname.replace(/^www\\./,'');}catch(e){}
-        if(domain){const skip=await INV('get_skip_domains');if(skip&&skip.includes(domain)){await INV('open_url',{url});return;}}
-        showModal({title:'Внешняя ссылка',msg:'Вы хотите перейти по внешней ссылке?',url:url,checkLabel:domain?'Не спрашивать для '+domain:null,okText:'ОТКРЫТЬ',cancelText:'ОТМЕНА',onOk:async(checked)=>{if(checked&&domain)await INV('add_skip_domain',{domain}).catch(()=>{});await INV('open_url',{url});}});
-    }catch(e){await INV('open_url',{url});}
+    try{await INV('open_url',{url});}catch(e){}
 };
 
 function makePanel(id,title){
@@ -605,9 +599,9 @@ function scheduleSave(){
     _saveTimer=setTimeout(async()=>{
         const c=document.getElementById('_tgst_c');if(!c)return;
         const G=id=>c.querySelector('#'+id);
-        const sp=G('_sp_');const la=G('_la_');const are=G('_are_');const ari=G('_ari_');const aro=G('_aro_');const it=G('_it_');const tr=G('_tr_');const dv=G('_dv_');
-        if(!la)return;
-        const settings={save_path:sp&&sp.value||null,link_ask:la.checked,auto_reload_enabled:are.checked,auto_reload_interval:parseInt(ari.value)||3600,auto_reload_on_idle:aro.checked,idle_timeout:parseInt(it.value)||300,minimize_to_tray:tr.checked,devtools_enabled:dv&&dv.checked};
+        const sp=G('_sp_');const are=G('_are_');const ari=G('_ari_');const aro=G('_aro_');const it=G('_it_');const tr=G('_tr_');const dv=G('_dv_');
+        if(!are)return;
+        const settings={save_path:sp&&sp.value||null,auto_reload_enabled:are.checked,auto_reload_interval:parseInt(ari.value)||3600,auto_reload_on_idle:aro.checked,idle_timeout:parseInt(it.value)||300,minimize_to_tray:tr.checked,devtools_enabled:dv&&dv.checked};
         try{await INV('save_settings',{settings});toast('Настройки сохранены','icon-check');}catch(e){toast('Ошибка сохранения','icon-close');}
     },600);
 }
@@ -631,7 +625,7 @@ async function renderSt(){
     r1b.innerHTML=inp('_sp_',s.save_path||'','text','',true)+'<button class="_ba_" id="_pp_">Выбрать</button>';
     r1.appendChild(r1b);
 
-    //si('Ссылки');const s2=sect();it(s2,cbx('_la_','Спрашивать перед открытием',s.link_ask));
+
 
     si('Автоперезагрузка');
     const s3=sect();

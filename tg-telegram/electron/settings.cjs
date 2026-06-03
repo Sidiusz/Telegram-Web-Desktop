@@ -5,7 +5,6 @@ const store = new Store({ name: 'settings' });
 
 const DEFAULTS = {
     save_path: null,
-    link_ask: true,
     auto_reload_enabled: false,
     auto_reload_interval: 3600,
     auto_reload_on_idle: false,
@@ -15,14 +14,13 @@ const DEFAULTS = {
     background_notifications_enabled: false,
     webnotif_hint_shown: false,
     devtools_enabled: false,
-    update_check_interval: '1h', // 30m | 1h | 12h | 24h | 3d | 7d | 30d | never
+    update_check_interval: '1h',
     skipped_version: null,
 };
 
 function loadSettings() {
     return {
         save_path: store.get('save_path', DEFAULTS.save_path),
-        link_ask: store.get('link_ask', DEFAULTS.link_ask),
         auto_reload_enabled: store.get('auto_reload_enabled', DEFAULTS.auto_reload_enabled),
         auto_reload_interval: store.get('auto_reload_interval', DEFAULTS.auto_reload_interval),
         auto_reload_on_idle: store.get('auto_reload_on_idle', DEFAULTS.auto_reload_on_idle),
@@ -44,16 +42,4 @@ function saveSettings(settings) {
     }
 }
 
-function getSkipDomains() {
-    return store.get('skip_domains', []);
-}
-
-function addSkipDomain(domain) {
-    const domains = getSkipDomains();
-    if (!domains.includes(domain)) {
-        domains.push(domain);
-        store.set('skip_domains', domains);
-    }
-}
-
-module.exports = { loadSettings, saveSettings, getSkipDomains, addSkipDomain };
+module.exports = { loadSettings, saveSettings };
