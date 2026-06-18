@@ -299,14 +299,12 @@ const CSS=\`
    (обратимо) и кладём свои оверлеи: зелёная галочка (открыть файл) + папка. */
 .File[data-tgdl-done="1"] .action-icon{display:none!important;}
 .File[data-tgdl-done="1"] .file-icon-container{position:relative;}
-._tgdl_ok_,._tgdl_dir_{position:absolute;width:20px;height:20px;padding:0;border:none;
-    border-radius:50%;display:flex;align-items:center;justify-content:center;cursor:pointer;
-    box-shadow:0 1px 4px rgba(0,0,0,.45);z-index:3;transition:transform .12s;}
-._tgdl_ok_{right:-3px;bottom:-3px;background:#4caf50;}
-._tgdl_dir_{left:-3px;bottom:-3px;background:rgba(20,28,38,.92);}
-._tgdl_ok_:hover,._tgdl_dir_:hover{transform:scale(1.12);}
+._tgdl_ok_{position:absolute;right:-3px;bottom:-3px;width:20px;height:20px;padding:0;
+    border:none;border-radius:50%;background:#4caf50;display:flex;align-items:center;
+    justify-content:center;cursor:pointer;box-shadow:0 1px 4px rgba(0,0,0,.45);
+    z-index:3;transition:transform .12s;}
+._tgdl_ok_:hover{transform:scale(1.12);}
 ._tgdl_ok_ svg{width:13px;height:13px;}
-._tgdl_dir_ svg{width:12px;height:12px;color:#fff;}
 /* Менеджер загрузок (модалка вместо выезжающей панели) */
 ._dmdlg_{width:420px;max-width:calc(100vw - 48px);max-height:min(70vh,560px);}
 ._dmhdr_{display:flex;align-items:center;justify-content:space-between;padding:14px 20px 10px;}
@@ -458,25 +456,20 @@ const DL = window.__tgdl = (function(){
         }
     }
 
-    // Зелёная галочка (скачано, клик = открыть файл) + кнопка «открыть папку».
-    // Кладём в .file-icon-container; родную стрелку прячем CSS-правилом по data-tgdl-done.
+    // Зелёная галочка в углу (скачано; клик = открыть файл). «Открыть папку» — в
+    // родном ПКМ-меню (см. injectFolderMenuItem). Кладём в .file-icon-container.
     function ensureBadges(file){
         const cont = file.querySelector('.file-icon-container'); if(!cont)return;
-        if(cont.querySelector('._tgdl_ok_')) return;          // уже стоят — идемпотентно
+        if(cont.querySelector('._tgdl_ok_')) return;          // уже стоит — идемпотентно
         const ok = document.createElement('button');
         ok.className='_tgdl_ok_'; ok.title='Открыть файл';
         ok.innerHTML='<svg viewBox="0 0 24 24" fill="none"><path d="M5 12l4 4 10-10" stroke="#fff" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/></svg>';
         ok.addEventListener('click',function(e){e.preventDefault();e.stopPropagation();const id=parseInt(file.dataset.tgdlId,10);if(id)INV('open_download_file',{id}).then(function(r){if(r&&r.error)toast('Файл не найден — возможно, перемещён или удалён');}).catch(function(){});});
-        const dir = document.createElement('button');
-        dir.className='_tgdl_dir_'; dir.title='Открыть папку с файлом';
-        dir.innerHTML='<svg viewBox="0 0 24 24" fill="currentColor"><path d="M3 6a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V6z"/></svg>';
-        dir.addEventListener('click',function(e){e.preventDefault();e.stopPropagation();const id=parseInt(file.dataset.tgdlId,10);if(id)INV('open_download_folder',{id}).catch(function(){});});
-        cont.appendChild(ok); cont.appendChild(dir);
+        cont.appendChild(ok);
     }
     function clearBadges(file){
         const cont = file.querySelector('.file-icon-container'); if(!cont)return;
         const a=cont.querySelector('._tgdl_ok_'); if(a)a.remove();
-        const b=cont.querySelector('._tgdl_dir_'); if(b)b.remove();
     }
 
     // Перекачка: снимаем оверлей, возвращаем родную стрелку (CSS), не трогаем ПКМ-меню.
@@ -503,7 +496,7 @@ const DL = window.__tgdl = (function(){
     let _moT=null;
     const _mo=new MutationObserver(function(){
         if(_moT)return;
-        _moT=setTimeout(function(){_moT=null;scanMessages();},50);
+        _moT=setTimeout(function(){_moT=null;scanMessages();injectFolderMenuItem();},50);
     });
     (function startMO(){
         if(document.body) _mo.observe(document.body,{childList:true,subtree:true});
@@ -536,10 +529,13 @@ const DL = window.__tgdl = (function(){
         if(filename) expectDownload(mid, filename);
     }, true);
 
-    // ПКМ по .File: запоминаем кандидата для матчинга, если из РОДНОГО меню выберут
-    // «Скачать». Меню НЕ трогаем (остаётся стандартным), статус/оверлей не меняем —
-    // только кладём filename→mid в очередь, чтобы пришедший start привязался к чату.
+    // ПКМ по .File: (1) запоминаем кандидата для матчинга, если из РОДНОГО меню
+    // выберут «Скачать»; (2) если файл уже скачан — запоминаем его id, чтобы добавить
+    // в это меню пункт «Открыть папку». Само меню TG не пересобираем — только
+    // дорисовываем один родного вида пункт (injectFolderMenuItem).
+    let lastCtx = {id:0, ts:0};
     document.addEventListener('contextmenu', function(e){
+        lastCtx = {id:0, ts:0};                    // сброс: вдруг ПКМ не по скачанному
         const file = e.target.closest && e.target.closest('.File');
         if(!file)return;
         const msg = file.closest('[data-message-id]'); if(!msg)return;
@@ -547,10 +543,33 @@ const DL = window.__tgdl = (function(){
         const t = file.querySelector('.file-title');
         const filename = t ? (t.getAttribute('title')||t.textContent||'').trim() : '';
         if(filename) (pending[filename] = pending[filename] || []).push(mid);
+        if(file.dataset.tgdlDone==='1' && file.dataset.tgdlId){
+            lastCtx = {id:parseInt(file.dataset.tgdlId,10), ts:Date.now()};
+        }
     }, true);
 
-    // ПКМ по .File не перехватываем — TG показывает своё родное контекстное меню.
-    // re-download/open-folder доступны в менеджере загрузок (модалка).
+    // Дорисовываем «Открыть папку» в родное меню сообщения — только если ПКМ был
+    // по скачанному файлу (≤2.5с назад). Стиль/иконку берём как у родных пунктов.
+    function injectFolderMenuItem(){
+        if(!lastCtx.id || Date.now()-lastCtx.ts>2500) return;
+        const items = document.querySelector('.MessageContextMenu_items');
+        if(!items || items.querySelector('._tgdl_openfolder_')) return;
+        const id = lastCtx.id;
+        const it = document.createElement('div');
+        it.className='MenuItem compact _tgdl_openfolder_';
+        it.setAttribute('role','menuitem'); it.tabIndex=0;
+        it.innerHTML='<i class="icon" aria-hidden="true" style="display:inline-flex;align-items:center;justify-content:center"><svg viewBox="0 0 24 24" width="1.4rem" height="1.4rem" fill="currentColor" style="display:block"><path d="M3 6a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V6z"/></svg></i>Открыть папку';
+        it.addEventListener('click',function(e){
+            e.preventDefault(); e.stopPropagation();
+            INV('open_download_folder',{id:id}).then(function(r){if(r&&r.error)toast('Файл не найден — возможно, перемещён или удалён');}).catch(function(){});
+            document.dispatchEvent(new KeyboardEvent('keydown',{key:'Escape',keyCode:27,which:27,bubbles:true}));
+        });
+        // после пункта «Скачать» (иконка icon-download), иначе в конец
+        let after=null;
+        [].forEach.call(items.querySelectorAll('.MenuItem'),function(m){ if(m.querySelector('.icon-download')) after=m; });
+        if(after) items.insertBefore(it, after.nextSibling);
+        else items.appendChild(it);
+    }
 
     window.tgBridge.onDownloadEvent(onEvent);
 
