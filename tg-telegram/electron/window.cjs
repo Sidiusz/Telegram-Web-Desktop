@@ -1,6 +1,20 @@
 'use strict';
 const { BrowserWindow, session, app, Menu, MenuItem } = require('electron');
 const path = require('path');
+const fs = require('fs');
+
+// Windows-стиль: если файл существует — добавляем « (1)», « (2)», … как в Проводнике.
+function uniquePath(p) {
+    if (!fs.existsSync(p)) return p;
+    const dir = path.dirname(p);
+    const ext = path.extname(p);
+    const base = path.basename(p, ext);
+    for (let i = 1; i < 10000; i++) {
+        const cand = path.join(dir, `${base} (${i})${ext}`);
+        if (!fs.existsSync(cand)) return cand;
+    }
+    return p;
+}
 const { NOTIF_INTERCEPT_JS, EXTERNAL_JS, AUDIO_JS, UI_JS } = require('./scripts.cjs');
 const { loadAddonScripts } = require('./addons.cjs');
 const { saveDownloads } = require('./downloads.cjs');
@@ -149,7 +163,7 @@ function createWindow(state) {
         const originalFilename = item.getFilename();
 
         const downloadDir = settings.save_path || app.getPath('downloads');
-        item.setSavePath(path.join(downloadDir, originalFilename));
+        item.setSavePath(uniquePath(path.join(downloadDir, originalFilename)));
 
         state.downloadCounter += 1;
         const id = state.downloadCounter;

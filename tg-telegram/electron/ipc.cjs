@@ -82,6 +82,16 @@ function registerIpc(getWindow) {
 
     ipcMain.handle('get_downloads', () => state.downloads);
 
+    // Привязка скачивания к сообщению (для восстановления статуса после перезапуска).
+    ipcMain.handle('bind_download', (e, { id, mid, peerId }) => {
+        const item = state.downloads.find(d => d.id === id);
+        if (item) {
+            if (mid != null) item.mid = String(mid);
+            if (peerId != null) item.peerId = String(peerId);
+            saveDownloads(state.downloads);
+        }
+    });
+
     ipcMain.handle('delete_download', (e, { id }) => {
         state.downloads = deleteDownload(state.downloads, id);
     });

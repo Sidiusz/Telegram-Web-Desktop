@@ -301,12 +301,18 @@ const CSS=\`
    добавляется после вставки бейджа) — иначе на месте иконки была бы пустота. */
 .File._tgdl_done_ok_ .action-icon{display:none!important;}
 .File._tgdl_done_ok_ .file-icon-container{position:relative;}
-._tgdl_ok_{position:absolute;right:-3px;bottom:-3px;width:20px;height:20px;padding:0;
-    border:none;border-radius:50%;background:#4caf50;display:flex;align-items:center;
-    justify-content:center;cursor:pointer;box-shadow:0 1px 4px rgba(0,0,0,.45);
-    z-index:3;transition:transform .12s;}
-._tgdl_ok_:hover{transform:scale(1.12);}
-._tgdl_ok_ svg{width:13px;height:13px;}
+/* Центральная иконка «открыть» (на месте стрелки скачивания). Клики ловит сам
+   .file-icon-container (см. mousedown), поэтому pointer-events:none. */
+._tgdl_open_{position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);
+    width:24px;height:24px;color:#fff;pointer-events:none;z-index:2;
+    display:flex;align-items:center;justify-content:center;}
+._tgdl_open_ svg{width:100%;height:100%;display:block;}
+/* Зелёная галочка в углу — индикатор «скачано» (не кнопка). */
+._tgdl_ok_{position:absolute;right:-3px;bottom:-3px;width:18px;height:18px;border-radius:50%;
+    background:#4caf50;display:flex;align-items:center;justify-content:center;
+    box-shadow:0 1px 4px rgba(0,0,0,.45);pointer-events:none;z-index:3;}
+._tgdl_ok_ svg{width:12px;height:12px;}
+.File._tgdl_done_ok_ .file-icon-container{cursor:pointer;}
 /* Менеджер загрузок (модалка вместо выезжающей панели) */
 ._dmdlg_{width:420px;max-width:calc(100vw - 48px);max-height:min(70vh,560px);}
 ._dmhdr_{display:flex;align-items:center;justify-content:space-between;padding:14px 20px 10px;}
@@ -383,6 +389,35 @@ const DL = window.__tgdl = (function(){
         return fmtBytes(recv)+' / '+fmtBytes(total)+' · '+pct+'%';
     }
 
+    // ── Восстановление статуса «скачано» после перезапуска (#3) ───────────
+    // Сохранённые записи (downloads.json) с привязкой mid+peerId — кэшируем и при
+    // открытии чата сеем в registry как completed, чтобы показать галочку/«открыть».
+    let savedDl = [];
+    function currentPeer(){
+        const a = document.querySelector('#MiddleColumn .Avatar[data-peer-id]');
+        return a ? a.getAttribute('data-peer-id') : null;
+    }
+    function refreshSaved(){
+        return INV('get_downloads').then(function(d){ savedDl = d||[]; restoreForChat(); }).catch(function(){});
+    }
+    function restoreForChat(){
+        const pid = currentPeer(); if(!pid) return;
+        const byMid = {};
+        savedDl.forEach(function(r){
+            if(r.status==='completed' && r.mid && String(r.peerId)===String(pid)){
+                const prev = byMid[r.mid];
+                if(!prev || r.id>prev.id) byMid[r.mid] = r;   // последняя загрузка побеждает
+            }
+        });
+        for(const mid in byMid){
+            const r = byMid[mid];
+            if(!registry[mid] || registry[mid].status!=='completed'){
+                registry[mid] = { mid:mid, id:r.id, filename:r.filename, status:'completed' };
+                applyToMessage(mid);
+            }
+        }
+    }
+
     // Renderer-side: запомнить что кликнули файл с mid/filename.
     // Вызывается на capture-клике по .File. Идемпотентен для повторных кликов.
     function expectDownload(mid, filename){
@@ -415,6 +450,10 @@ const DL = window.__tgdl = (function(){
             delete doneFn[mid];
             registry[mid] = { mid, id:data.id, filename:data.filename, status:'downloading', recv:0, total:0 };
             byId[data.id] = mid;
+            // привязка к сообщению/чату — чтобы статус пережил перезапуск (#3)
+            if(mid.indexOf('__noid__')!==0){
+                INV('bind_download',{id:data.id, mid:mid, peerId:currentPeer()}).catch(function(){});
+            }
             applyToMessage(mid);
         } else if(data.type==='progress'){
             const mid = byId[data.id]; if(!mid)return;
@@ -427,6 +466,7 @@ const DL = window.__tgdl = (function(){
             r.status = data.status==='completed' ? 'completed' : 'failed';
             applyToMessage(mid);
             if(r.filename) doneFn[mid] = r.filename;
+            refreshSaved();   // обновим кэш сохранённых загрузок (для восстановления)
         }
         // модалка, если открыта — обновим
         if(window.__dlModalOpen) refreshDlModal();
@@ -458,22 +498,29 @@ const DL = window.__tgdl = (function(){
         }
     }
 
-    // Зелёная галочка в углу (скачано; клик = открыть файл). «Открыть папку» — в
-    // родном ПКМ-меню (см. injectFolderMenuItem). Кладём в .file-icon-container.
+    // Скачанный файл: в центре иконки — «открыть» (на месте стрелки), в углу —
+    // зелёная галочка-индикатор. Открытие — кликом по иконке (см. mousedown),
+    // оверлеи pointer-events:none. «Открыть папку» — в родном ПКМ-меню.
     function ensureBadges(file){
         const cont = file.querySelector('.file-icon-container'); if(!cont)return;
         file.classList.add('_tgdl_done_ok_');                 // прячем родную стрелку (идемпотентно)
-        if(cont.querySelector('._tgdl_ok_')) return;          // бейдж уже стоит
-        const ok = document.createElement('button');
-        ok.className='_tgdl_ok_'; ok.title='Открыть файл';
-        ok.innerHTML='<svg viewBox="0 0 24 24" fill="none"><path d="M5 12l4 4 10-10" stroke="#fff" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/></svg>';
-        ok.addEventListener('click',function(e){e.preventDefault();e.stopPropagation();const id=parseInt(file.dataset.tgdlId,10);if(id)INV('open_download_file',{id}).then(function(r){if(r&&r.error)toast('Файл не найден — возможно, перемещён или удалён');}).catch(function(){});});
-        cont.appendChild(ok);
+        if(!cont.querySelector('._tgdl_open_')){
+            const op = document.createElement('div');
+            op.className='_tgdl_open_'; op.setAttribute('aria-hidden','true');
+            op.innerHTML='<svg viewBox="0 0 24 24" fill="currentColor"><path d="M3 6a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V6z"/></svg>';
+            cont.appendChild(op);
+        }
+        if(!cont.querySelector('._tgdl_ok_')){
+            const ok = document.createElement('div');
+            ok.className='_tgdl_ok_'; ok.setAttribute('aria-hidden','true');
+            ok.innerHTML='<svg viewBox="0 0 24 24" fill="none"><path d="M5 12l4 4 10-10" stroke="#fff" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/></svg>';
+            cont.appendChild(ok);
+        }
     }
     function clearBadges(file){
         file.classList.remove('_tgdl_done_ok_');
         const cont = file.querySelector('.file-icon-container'); if(!cont)return;
-        const a=cont.querySelector('._tgdl_ok_'); if(a)a.remove();
+        ['._tgdl_open_','._tgdl_ok_'].forEach(function(s){const el=cont.querySelector(s); if(el)el.remove();});
     }
 
     // Перекачка: снимаем оверлей, возвращаем родную стрелку (CSS), не трогаем ПКМ-меню.
@@ -500,7 +547,7 @@ const DL = window.__tgdl = (function(){
     let _moT=null;
     const _mo=new MutationObserver(function(){
         if(_moT)return;
-        _moT=setTimeout(function(){_moT=null;scanMessages();injectFolderMenuItem();},50);
+        _moT=setTimeout(function(){_moT=null;scanMessages();injectFolderMenuItem();restoreForChat();},50);
     });
     (function startMO(){
         if(document.body) _mo.observe(document.body,{childList:true,subtree:true});
@@ -512,14 +559,16 @@ const DL = window.__tgdl = (function(){
     // пусть TG создаст blob: и отправит его в will-download.
     document.addEventListener('mousedown', function(e){
         if(e.button!==0) return;                  // только ЛКМ; ПКМ → contextmenu
-        // клик по самой кнопке-галочке обрабатывает её собственный handler
-        if(e.target.closest && e.target.closest('._tgdl_ok_')) return;
         const file = e.target.closest && e.target.closest('.File');
         if(!file)return;
-        // уже скачано: клик по ТЕЛУ файла ничего не делает (открытие — только кнопкой).
-        // Блокируем и родную перекачку TG, чтобы случайный клик не плодил загрузки.
         if(file.dataset.tgdlDone==='1'){
-            e.preventDefault(); e.stopImmediatePropagation();
+            // скачано: клик по ИКОНКЕ — открыть файл; клик по названию — ничего
+            // (даём выделять/копировать). Родную перекачку по иконке блокируем.
+            if(e.target.closest('.file-icon-container')){
+                e.preventDefault(); e.stopImmediatePropagation();
+                const id = parseInt(file.dataset.tgdlId,10);
+                if(id) INV('open_download_file',{id}).then(function(r){if(r&&r.error)toast('Файл не найден — возможно, перемещён или удалён');}).catch(function(){});
+            }
             return;
         }
         const msg = file.closest('[data-message-id]');
@@ -574,8 +623,9 @@ const DL = window.__tgdl = (function(){
     }
 
     window.tgBridge.onDownloadEvent(onEvent);
+    refreshSaved();   // подтянуть сохранённые загрузки и восстановить статус в чате
 
-    return { registry, byId, fmtBytes, fmtProgress, expectDownload };
+    return { registry, byId, fmtBytes, fmtProgress, expectDownload, refreshSaved };
 })();
 } // end if(window.tgBridge) — блок реестра загрузок
 
