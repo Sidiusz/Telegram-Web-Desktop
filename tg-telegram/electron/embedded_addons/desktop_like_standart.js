@@ -1,225 +1,152 @@
 // @name Desktop-like - Standart
-// @version 1.2.0
-// @description Сообщения по левой стороне + аватарки.
+// @version 2.0.0
+// @description Сообщения по левому краю + аватарки, как в настольном Telegram. Обычная ширина.
 // @group desktop_like_chat
 
 (function () {
-    // Кэш аватаров: своя — простая строка, партнёры — объект { src, age }
-    // Кэш партнёров НЕ сбрасывается при смене чата: ключ — peerId,
-    // поэтому чужая аватарка никогда не попадёт в чужой чат.
-    // TTL позволяет подхватить обновлённый blob через ~90 секунд.
-    var PARTNER_TTL = 90; // тиков до принудительного обновления из DOM
-    var MY_TTL = 30;      // тиков до обновления своей аватарки
-
-    var myAvatar = { src: null, age: 0 };
-    var partnerCache = {}; // { peerId: { src, age } }
-
-    var _lastPeerId = '';
-    var _switchGrace = 0; // тики ожидания после смены чата
-
+    // Применяется ТОЛЬКО в личных чатах (у списка класс .MessageList.no-avatars).
+    // В группах TG сам рисует аватарки слева — там ничего не меняем.
     function ensureStyles() {
-        if (document.getElementById('addon-desktop-left') || !document.head) return;
+        if (document.getElementById('addon-desktop-standart') || !document.head) return;
         var s = document.createElement('style');
-        s.id = 'addon-desktop-left';
+        s.id = 'addon-desktop-standart';
         s.textContent = `
-            /* Прижимаем всё содержимое влево */
-            #MiddleColumn .MessageList { align-items: flex-start !important; }
-            #MiddleColumn .messages-container { 
-                margin-left: 0 !important; 
-                margin-right: auto !important; 
-                width: 100% !important; 
-                max-width: 100% !important; 
-                padding-right: 2vw !important; 
-                box-sizing: border-box !important; 
-            }
-            #MiddleColumn .Message { 
-                justify-content: flex-start !important; 
-                flex-direction: row !important; 
-                padding-left: 45px !important; 
-                position: relative !important; 
-                margin-left: 0 !important; 
-                margin-right: auto !important;
-            }
-            
-            #MiddleColumn .Message.own > .Avatar { display: none !important; }
-            
-            #MiddleColumn .Message.own.last-in-group .message-content { 
-                border-bottom-left-radius: 0 !important; 
-                border-bottom-right-radius: var(--border-radius-messages) !important; 
+            /* Прижимаем контейнер сообщений к левому краю — ТОЛЬКО через margin.
+               Менять width/max-width НЕЛЬЗЯ: это ломает виртуализацию списка
+               (при быстром скролле старые сообщения пропадают). Ширина пузырей
+               остаётся родной (обычный аддон — справа пусто, это норма). */
+            #MiddleColumn .MessageList.no-avatars .messages-container {
+                margin-left: 0 !important; margin-right: auto !important;
             }
 
-            #MiddleColumn .Message.own .svg-appendix { 
-                transform: scaleX(-1) !important; 
-                left: -8px !important; 
-                right: auto !important; 
+            /* Свои сообщения — на левую сторону, как входящие (цвет пузыря остаётся свой). */
+            #MiddleColumn .MessageList.no-avatars .Message { padding-left: 44px !important; position: relative !important; }
+            #MiddleColumn .MessageList.no-avatars .Message.own { justify-content: flex-start !important; }
+            #MiddleColumn .MessageList.no-avatars .Message.own .message-content-wrapper { margin-left: 0 !important; margin-right: auto !important; }
+            #MiddleColumn .MessageList.no-avatars .Message.own > .Avatar { display: none !important; }
+
+            /* Хвостик своих — слева (зеркалим), нижние углы как у входящего. */
+            #MiddleColumn .MessageList.no-avatars .Message.own .svg-appendix { transform: scaleX(-1) !important; left: -8px !important; right: auto !important; }
+            #MiddleColumn .MessageList.no-avatars .Message.own.last-in-group .message-content {
+                border-bottom-left-radius: 0 !important;
+                border-bottom-right-radius: var(--border-radius-messages) !important;
             }
 
-            /* Баг #3: длинные цитаты (reply) уезжают за экран */
-            #MiddleColumn .Message .message-content,
-            #MiddleColumn .Message .message-content-inner,
-            #MiddleColumn .Message .content-inner {
-                max-width: calc(100vw - 7rem) !important;
-                min-width: 0 !important;
-                overflow: hidden !important;
-                box-sizing: border-box !important;
-            }
-            #MiddleColumn .Message .EmbeddedMessage,
-            #MiddleColumn .Message .ReplyInfo,
-            #MiddleColumn .Message [class*="reply-info"],
-            #MiddleColumn .Message [class*="ReplyInfo"] {
-                max-width: 100% !important;
-                min-width: 0 !important;
-                overflow: hidden !important;
-                box-sizing: border-box !important;
-            }
-            #MiddleColumn .Message .EmbeddedMessage .message-title,
-            #MiddleColumn .Message .EmbeddedMessage .message-text {
-                white-space: nowrap !important;
-                overflow: hidden !important;
-                text-overflow: ellipsis !important;
-            }
+            /* Выделение: свои пузыри сдвигаем вправо как входящие, аватарки — тоже вправо,
+               чтобы кружок-галочка встал ровно на их прежнее место (а не поверх). */
+            .MessageList.no-avatars.select-mode-active .Message.own .message-content-wrapper { transform: translateX(40px) !important; }
+            .MessageList.no-avatars.select-mode-active .custom-message-avatar { left: 44px !important; }
+
+            /* Иконка быстрой реакции — справа за пределами пузыря (и у своих, и у входящих),
+               иначе у входящих сердечко наезжает на timestamp. */
+            #MiddleColumn .MessageList.no-avatars .Message .quick-reaction { left: auto !important; right: -2.2rem !important; transform: none !important; }
+            #MiddleColumn .MessageList.no-avatars .Message.own .message-action-buttons-container { left: auto !important; right: -3rem !important; }
+
+            /* Длинные цитаты (reply) не уезжают за экран. */
+            #MiddleColumn .Message .EmbeddedMessage .message-text .embedded-text-wrapper { white-space: pre-wrap !important; }
 
             @keyframes _tgAvIn_ { from { opacity: 0; transform: scale(0.6); } to { opacity: 1; transform: scale(1); } }
-            
-            .custom-message-avatar { 
-                position: absolute; 
-                left: 0; 
-                bottom: 0; 
-                width: 36px; 
-                height: 36px; 
-                border-radius: 50%; 
-                overflow: hidden; 
-                z-index: 10; 
-                animation: _tgAvIn_ 0.2s ease; 
+            .custom-message-avatar {
+                position: absolute; left: 4px; bottom: 0; width: 36px; height: 36px;
+                border-radius: 50%; overflow: hidden; z-index: 5; pointer-events: none; animation: _tgAvIn_ 0.2s ease;
             }
             .custom-message-avatar img { width: 100% !important; height: 100% !important; object-fit: cover !important; display: block; }
         `;
         document.head.appendChild(s);
     }
 
-    function getChatType() {
-        var headerAvatar = document.querySelector('.MiddleHeader .ChatInfo .Avatar[data-peer-id]');
-        if (!headerAvatar) return null;
-        var peerId = parseInt(headerAvatar.getAttribute('data-peer-id') || '0', 10);
-        return peerId < 0 ? 'other' : 'private';
-    }
+    // ── Аватарки: кэш по peerId с TTL ─────────────────────────────────────────
+    var PARTNER_TTL = 90, MY_TTL = 30;
+    var _partnerCache = {};
+    var _myAvatar = { src: '', age: 0 };
+    var _mySrcMenu = '';
+    var _lastPeerId = '';
+    var _myPeerId = '';
+    var _switchGrace = 0;
 
+    function isPrivate() {
+        var list = document.querySelector('#MiddleColumn .MessageList');
+        return !!(list && list.classList.contains('no-avatars'));
+    }
     function getCurrentPeerId() {
         var el = document.querySelector('.MiddleHeader .ChatInfo .Avatar[data-peer-id]');
         return el ? el.getAttribute('data-peer-id') : '';
     }
-
-    // Своя аватарка: периодически обновляем из DOM чтобы подхватить новый blob
-    function getMyAvatarSrc() {
-        myAvatar.age++;
-        if (myAvatar.age >= MY_TTL) {
-            myAvatar.src = null;
-            myAvatar.age = 0;
-        }
-        if (myAvatar.src) return myAvatar.src;
-
-        var pa = document.querySelector('.settings-content .ProfileInfo .Avatar img') ||
-                 document.querySelector('.MenuItem.account-menu-item .Avatar img');
-        if (pa && pa.src) myAvatar.src = pa.src;
-        return myAvatar.src;
+    function findMyPeerId() {
+        if (_myPeerId) return _myPeerId;
+        var pa = document.querySelector('.settings-content .ProfileInfo .Avatar[data-peer-id]');
+        if (pa) { _myPeerId = pa.getAttribute('data-peer-id'); return _myPeerId; }
+        return '';
     }
-
-    // Аватарка партнёра: кэш по peerId с TTL.
-    // НЕ сбрасываем весь кэш при смене чата — ключ peerId исключает путаницу.
-    function getPartnerAvatarSrc(peerId) {
-        if (!peerId) return null;
-
-        var entry = partnerCache[peerId];
-        if (entry) {
-            entry.age++;
-            if (entry.age < PARTNER_TTL) return entry.src;
-            // TTL истёк — перечитаем из DOM
-            delete partnerCache[peerId];
+    function findMySrc() {
+        _myAvatar.age++;
+        if (_myAvatar.age >= MY_TTL) { _myAvatar.src = ''; _myAvatar.age = 0; _mySrcMenu = ''; }
+        if (_myAvatar.src) return _myAvatar.src;
+        var profileImg = document.querySelector('.settings-content .ProfileInfo .Avatar[data-peer-id] img.Avatar__media');
+        if (profileImg && profileImg.src && profileImg.src.startsWith('blob:')) { _myAvatar.src = profileImg.src; return _myAvatar.src; }
+        var pid = findMyPeerId();
+        if (pid) {
+            var any = document.querySelector('.Avatar[data-peer-id="' + pid + '"] img.Avatar__media');
+            if (any && any.src && any.src.startsWith('blob:')) { _myAvatar.src = any.src; return _myAvatar.src; }
         }
-
-        var img = document.querySelector(
-            '.MiddleHeader .ChatInfo .Avatar[data-peer-id="' + peerId + '"] img'
-        );
-        if (img && img.src) {
-            partnerCache[peerId] = { src: img.src, age: 0 };
+        if (!_mySrcMenu) {
+            var menuImg = document.querySelector('.MenuItem.account-menu-item .Avatar img');
+            if (menuImg && menuImg.src && (menuImg.src.startsWith('data:') || menuImg.src.startsWith('blob:'))) _mySrcMenu = menuImg.src;
+        }
+        return _mySrcMenu;
+    }
+    function findPartnerSrc(peerId) {
+        if (!peerId) return '';
+        var entry = _partnerCache[peerId];
+        if (entry) { entry.age++; if (entry.age < PARTNER_TTL) return entry.src; delete _partnerCache[peerId]; }
+        var img = document.querySelector('.MiddleHeader .ChatInfo .Avatar[data-peer-id="' + peerId + '"] img.Avatar__media');
+        if (img && img.src && (img.src.startsWith('blob:') || img.src.startsWith('data:'))) {
+            _partnerCache[peerId] = { src: img.src, age: 0 };
             return img.src;
         }
-        return null;
+        return '';
     }
-
-    function _injectAvatar(msg, src) {
-        var avatarDiv = msg.querySelector('.custom-message-avatar');
-        if (!avatarDiv) {
-            avatarDiv = document.createElement('div');
-            avatarDiv.className = 'custom-message-avatar';
+    function _inject(msg, src) {
+        var div = msg.querySelector('.custom-message-avatar');
+        if (!div) {
+            div = document.createElement('div');
+            div.className = 'custom-message-avatar';
             var img = document.createElement('img');
             img.src = src;
-            avatarDiv.appendChild(img);
-            msg.appendChild(avatarDiv);
+            div.appendChild(img);
+            msg.appendChild(div);
         } else {
-            var img = avatarDiv.querySelector('img');
+            var img = div.querySelector('img');
             if (img && img.src !== src) img.src = src;
         }
     }
-
     function injectAvatars() {
-        var peerId = getCurrentPeerId();
-
-        // При смене чата: НЕ сбрасываем кэш партнёров (он привязан к peerId),
-        // просто ждём grace-период пока DOM обновится.
-        if (peerId !== _lastPeerId) {
-            _lastPeerId = peerId;
-            _switchGrace = 2;
-        }
-
-        var list = document.querySelector('.MessageList');
+        var list = document.querySelector('#MiddleColumn .MessageList');
         if (!list) return;
-
-        var mySrc = getMyAvatarSrc();
-
-        if (_switchGrace > 0) {
-            _switchGrace--;
-            // Убираем аватарки партнёра пока DOM не устоялся
-            list.querySelectorAll('.Message:not(.own) .custom-message-avatar').forEach(function(el) { el.remove(); });
-            // Свою аватарку инжектим сразу — она не зависит от смены чата
-            if (mySrc) {
-                list.querySelectorAll('.Message.own:not(.last-in-group) .custom-message-avatar').forEach(function(el) { el.remove(); });
-                list.querySelectorAll('.Message.own.last-in-group').forEach(function(msg) {
-                    _injectAvatar(msg, mySrc);
-                });
-            }
+        if (!isPrivate()) {
+            list.querySelectorAll('.custom-message-avatar').forEach(function (el) { el.remove(); });
             return;
         }
+        var peerId = getCurrentPeerId();
+        if (peerId !== _lastPeerId) { _lastPeerId = peerId; _switchGrace = 2; }
 
-        // Определяем тип чата — в группах/каналах аватарки партнёров не нужны
-        var chatType = getChatType();
-        var partnerSrc = (chatType === 'private') ? getPartnerAvatarSrc(peerId) : null;
-
-        list.querySelectorAll('.Message.last-in-group').forEach(function(msg) {
-            // Пропускаем сообщения в группе, где TG уже рисует свои аватарки
-            if (msg.parentNode.querySelector('.Avatar') && !msg.classList.contains('own')) return;
-
-            var isOwn = msg.classList.contains('own');
-            var src = isOwn ? mySrc : partnerSrc;
-            if (!src) return;
-
-            _injectAvatar(msg, src);
-        });
-
-        // Убираем аватарки у сообщений не из конца группы
-        list.querySelectorAll('.Message:not(.last-in-group) .custom-message-avatar').forEach(function(el) { el.remove(); });
-
-        // В группах/каналах убираем аватарки партнёров если вдруг остались
-        if (chatType !== 'private') {
-            list.querySelectorAll('.Message:not(.own) .custom-message-avatar').forEach(function(el) { el.remove(); });
+        var mySrc = findMySrc();
+        if (mySrc) {
+            list.querySelectorAll('.Message.own:not(.last-in-group) .custom-message-avatar').forEach(function (el) { el.remove(); });
+            list.querySelectorAll('.Message.own.last-in-group').forEach(function (msg) { _inject(msg, mySrc); });
         }
+        if (_switchGrace > 0) {
+            _switchGrace--;
+            list.querySelectorAll('.Message:not(.own) .custom-message-avatar').forEach(function (el) { el.remove(); });
+            return;
+        }
+        var partnerSrc = findPartnerSrc(peerId);
+        list.querySelectorAll('.Message:not(.own):not(.last-in-group) .custom-message-avatar').forEach(function (el) { el.remove(); });
+        list.querySelectorAll('.Message:not(.own).last-in-group').forEach(function (msg) {
+            if (partnerSrc) _inject(msg, partnerSrc);
+        });
     }
-
-    function tick() {
-        ensureStyles();
-        injectAvatars();
-    }
-
+    function tick() { ensureStyles(); injectAvatars(); }
     setInterval(tick, 1000);
     tick();
 })();
