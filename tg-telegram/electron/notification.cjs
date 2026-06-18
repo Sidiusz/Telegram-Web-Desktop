@@ -1,298 +1,202 @@
 'use strict';
-const { BrowserWindow, screen, ipcMain, shell } = require('electron');
+const { BrowserWindow, screen, ipcMain } = require('electron');
 
 let _getMainWindow = null;
-let _notifWin = null;
-let _hideTimer = null;
+let _win = null;          // постоянное окно-стек, переиспользуется
+let _ready = false;
+let _pending = [];
+let _idSeq = 0;
+
+const WIDTH = 380;
+const MARGIN = 16;
 
 function init(getMainWindow) {
     _getMainWindow = getMainWindow;
 
-    ipcMain.on('notif-close', () => hideNotif());
-    ipcMain.on('notif-open', () => {
-        hideNotif();
+    ipcMain.on('notif-resize', (_e, { h }) => {
+        if (!_win || _win.isDestroyed()) return;
+        const wa = primaryWorkArea();
+        const height = Math.max(1, Math.min(Math.round(h) || 1, wa.height - MARGIN * 2));
+        _win.setBounds({
+            x: wa.x + wa.width - WIDTH - MARGIN,
+            y: wa.y + wa.height - height - MARGIN,   // привязка к нижнему-правому углу
+            width: WIDTH,
+            height,
+        });
+    });
+
+    ipcMain.on('notif-empty', () => {
+        if (_win && !_win.isDestroyed()) _win.hide();
+    });
+
+    ipcMain.on('notif-action', (_e, { action, peerId }) => {
         const win = _getMainWindow && _getMainWindow();
-        if (win) {
+        if (!win || win.isDestroyed() || !peerId) return;
+        if (action === 'open') {
             win.show();
             win.focus();
+            openChat(win, String(peerId));
+        } else if (action === 'read') {
+            // Помечаем прочитанным в фоне — окно не показываем/не фокусируем.
+            markRead(win, String(peerId));
         }
     });
 }
 
-function hideNotif() {
-    if (_hideTimer) {
-        clearTimeout(_hideTimer);
-        _hideTimer = null;
-    }
-
-    if (_notifWin && !_notifWin.isDestroyed()) {
-        try {
-            _notifWin.webContents.executeJavaScript('window.__hideNotif && window.__hideNotif()').catch(() => {});
-        } catch (e) {}
-
-        setTimeout(() => {
-            if (_notifWin && !_notifWin.isDestroyed()) {
-                _notifWin.close();
-            }
-            _notifWin = null;
-        }, 240);
-    }
+function primaryWorkArea() {
+    const d = screen.getPrimaryDisplay();
+    return d.workArea || { x: 0, y: 0, width: d.size.width, height: d.size.height };
 }
 
-function getPopupPosition(width, height) {
-    const point = screen.getCursorScreenPoint ? screen.getCursorScreenPoint() : { x: 0, y: 0 };
-    const display = screen.getDisplayNearestPoint ? screen.getDisplayNearestPoint(point) : screen.getPrimaryDisplay();
-    const workArea = display && display.workArea ? display.workArea : {
-        x: 0,
-        y: 0,
-        width: (display && display.workAreaSize && display.workAreaSize.width) || 0,
-        height: (display && display.workAreaSize && display.workAreaSize.height) || 0,
-    };
+// Открывает чат по peerId (через hash-навигацию) и ставит фокус в поле ввода.
+function openChat(win, peerId) {
+    const js = 'location.hash = ' + JSON.stringify('#' + peerId) + ';'
+        + 'setTimeout(function(){var i=document.getElementById("editable-message-text");if(i)i.focus();},400);';
+    win.webContents.executeJavaScript(js).catch(() => {});
+}
 
-    return {
-        x: Math.max(workArea.x, workArea.x + workArea.width - width - 16),
-        y: Math.max(workArea.y, workArea.y + workArea.height - height - 16),
-    };
+// Помечает чат прочитанным: на миг переходим в него (read регистрируется на открытии),
+// затем возвращаем прежний hash. Окно не показываем.
+function markRead(win, peerId) {
+    const js = '(function(){var p=location.hash;location.hash=' + JSON.stringify('#' + peerId) + ';'
+        + 'setTimeout(function(){try{location.hash=p;}catch(e){}},800);})();';
+    win.webContents.executeJavaScript(js).catch(() => {});
 }
 
 function buildHtml() {
     return String.raw`<!DOCTYPE html>
-<html>
-<head>
-<meta charset="UTF-8">
-<style>
-    * { box-sizing: border-box; }
-    html, body {
-        width: 100%;
-        height: 100%;
-        margin: 0;
-        overflow: hidden;
-        background: transparent;
-        user-select: none;
-        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-    }
-    .wrap {
-        width: 100%;
-        height: 100%;
-        display: flex;
-        align-items: flex-start;
-        justify-content: flex-end;
-        padding: 0;
-    }
-    .card {
-        width: 360px;
-        min-height: 92px;
-        max-width: 360px;
-        background: rgba(30, 39, 51, 0.98);
-        border-radius: 14px;
-        padding: 14px 16px 12px;
-        box-shadow: 0 10px 32px rgba(0,0,0,0.55), 0 0 0 1px rgba(255,255,255,0.06);
-        color: #fff;
-        opacity: 0;
-        transform: translateY(12px);
-        transition: opacity .2s ease, transform .2s ease;
-    }
-    .card.show { opacity: 1; transform: translateY(0); }
-    .card.hide { opacity: 0; transform: translateY(8px); }
-    .top {
-        display: flex;
-        gap: 12px;
-        align-items: center;
-    }
-    .avatar {
-        width: 40px;
-        height: 40px;
-        flex: 0 0 40px;
-        border-radius: 50%;
-        overflow: hidden;
-        background: #2b5278;
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        font-size: 17px;
-        font-weight: 700;
-        color: #fff;
-    }
-    .avatar img {
-        width: 100%;
-        height: 100%;
-        object-fit: cover;
-    }
-    .body {
-        flex: 1;
-        min-width: 0;
-    }
-    .title {
-        font-size: 13px;
-        font-weight: 700;
-        line-height: 1.3;
-        white-space: nowrap;
-        overflow: hidden;
-        text-overflow: ellipsis;
-    }
-    .text {
-        margin-top: 2px;
-        font-size: 12px;
-        line-height: 1.35;
-        color: #c2c9d1;
-        white-space: nowrap;
-        overflow: hidden;
-        text-overflow: ellipsis;
-    }
-    .progress {
-        margin-top: 10px;
-        height: 2px;
-        border-radius: 999px;
-        overflow: hidden;
-        background: rgba(255,255,255,0.08);
-    }
-    .bar {
-        width: 100%;
-        height: 100%;
-        background: #5288c1;
-        transform-origin: left center;
-    }
-</style>
-</head>
+<html><head><meta charset="UTF-8"><style>
+    *{box-sizing:border-box;}
+    html,body{margin:0;width:100%;height:100%;overflow:hidden;background:transparent;
+        font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;user-select:none;}
+    #stack{display:flex;flex-direction:column;gap:8px;padding:0;}
+    .card{background:rgba(30,39,51,.98);border-radius:14px;padding:12px 14px;color:#fff;
+        box-shadow:0 10px 32px rgba(0,0,0,.55),0 0 0 1px rgba(255,255,255,.06);
+        opacity:0;transform:translateY(-10px);transition:opacity .2s ease,transform .2s ease;}
+    .card.show{opacity:1;transform:translateY(0);}
+    .card.hide{opacity:0;transform:translateY(-8px);}
+    .top{display:flex;gap:12px;align-items:center;}
+    .avatar{width:40px;height:40px;flex:0 0 40px;border-radius:50%;overflow:hidden;background:#2b5278;
+        display:flex;align-items:center;justify-content:center;font-size:17px;font-weight:700;color:#fff;}
+    .avatar img{width:100%;height:100%;object-fit:cover;}
+    .body{flex:1;min-width:0;}
+    .title{font-size:13px;font-weight:700;line-height:1.3;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+    .text{margin-top:2px;font-size:12px;line-height:1.35;color:#c2c9d1;
+        display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;}
+    .close-x{background:none;border:none;color:#7e8794;font-size:16px;line-height:1;cursor:pointer;padding:0 0 0 6px;align-self:flex-start;}
+    .close-x:hover{color:#fff;}
+    .actions{display:flex;gap:8px;margin-top:10px;}
+    .btn{flex:1;border:none;border-radius:8px;padding:7px 0;font-size:12px;font-weight:600;cursor:pointer;}
+    .btn.reply{background:#5288c1;color:#fff;}
+    .btn.reply:hover{filter:brightness(1.1);}
+    .btn.read{background:rgba(255,255,255,.08);color:#c2c9d1;}
+    .btn.read:hover{background:rgba(255,255,255,.14);color:#fff;}
+    .progress{margin-top:10px;height:2px;border-radius:999px;overflow:hidden;background:rgba(255,255,255,.08);}
+    .bar{height:100%;background:#5288c1;width:100%;}
+    @keyframes barshrink{from{width:100%;}to{width:0%;}}
+</style></head>
 <body>
-<div class="wrap">
-    <div class="card" id="card">
-        <div class="top">
-            <div class="avatar" id="avatar"></div>
-            <div class="body">
-                <div class="title" id="title">Новое уведомление в Телеграм!</div>
-                <div class="text" id="text">вам новое сообщение в Телеграм!</div>
-                <div class="progress"><div class="bar" id="bar"></div></div>
-            </div>
-        </div>
-    </div>
-</div>
+<div id="stack"></div>
 <script>
     const { ipcRenderer } = require('electron');
-    const card = document.getElementById('card');
-    const avatar = document.getElementById('avatar');
-    const titleEl = document.getElementById('title');
-    const textEl = document.getElementById('text');
-    const barEl = document.getElementById('bar');
+    const stack = document.getElementById('stack');
+    const cards = new Map();
 
-    let hideTimeout = null;
-    let startTime = null;
-    const DURATION = 5000;
+    function reportSize(){
+        requestAnimationFrame(function(){
+            const h = stack.scrollHeight;
+            ipcRenderer.send('notif-resize', { h: h + 4 });
+        });
+    }
+    function firstLetter(s){ s=(s||'T').trim(); return (s[0]||'T').toUpperCase(); }
 
-    function normalize(value, fallback) {
-        const text = String(value == null ? '' : value).trim();
-        return text || fallback;
+    function removeCard(id){
+        const c=cards.get(id); if(!c)return;
+        clearTimeout(c.timer);
+        c.el.classList.remove('show'); c.el.classList.add('hide');
+        cards.delete(id);
+        setTimeout(function(){
+            if(c.el.parentNode)c.el.parentNode.removeChild(c.el);
+            reportSize();
+            if(cards.size===0)ipcRenderer.send('notif-empty');
+        },200);
     }
 
-    function firstLetter(value) {
-        const t = normalize(value, 'T');
-        return t[0].toUpperCase();
+    function arm(id,duration){
+        const c=cards.get(id); if(!c)return;
+        clearTimeout(c.timer);
+        c.timer=setTimeout(function(){removeCard(id);},duration);
     }
 
-    function playPing() {
-        try {
-            const AC = window.AudioContext || window.webkitAudioContext;
-            if (!AC) return;
-            const ctx = new AC();
-            const osc = ctx.createOscillator();
-            const gain = ctx.createGain();
-            osc.type = 'sine';
-            osc.frequency.value = 880;
-            gain.gain.setValueAtTime(0.00001, ctx.currentTime);
-            gain.gain.exponentialRampToValueAtTime(0.12, ctx.currentTime + 0.01);
-            gain.gain.exponentialRampToValueAtTime(0.00001, ctx.currentTime + 0.18);
-            osc.connect(gain);
-            gain.connect(ctx.destination);
-            osc.start();
-            osc.stop(ctx.currentTime + 0.2);
-            osc.onended = () => {
-                try { ctx.close(); } catch (e) {}
-            };
-        } catch (e) {}
+    const MAX_CARDS=3;
+    function dropOldest(){
+        const first=stack.firstChild; if(!first)return;
+        let oid=null; cards.forEach(function(v,k){ if(v.el===first)oid=k; });
+        if(oid!=null){ const c=cards.get(oid); if(c)clearTimeout(c.timer); cards.delete(oid); }
+        if(first.parentNode)first.parentNode.removeChild(first);
     }
 
-    function setAvatar(title, icon) {
-        avatar.innerHTML = '';
-        if (icon) {
-            const img = document.createElement('img');
-            img.src = icon;
-            img.onerror = () => {
-                avatar.textContent = firstLetter(title);
-            };
-            avatar.appendChild(img);
-            return;
-        }
-        avatar.textContent = firstLetter(title);
-    }
+    ipcRenderer.on('notif-add', function(_e, data){
+        const id=data.id;
+        const dur=(data.duration||6)*1000;
+        const el=document.createElement('div'); el.className='card';
+        const title=(data.title||'Telegram').trim()||'Telegram';
+        const text=(data.body||'').trim()||'Новое сообщение';
+        // Группы/каналы (peerId < 0) — отвечать нельзя списком, кнопка «Открыть».
+        const canReply = data.peerId && String(data.peerId).charAt(0)!=='-';
 
-    function setData(data) {
-        const title = normalize(data && (data.sender || data.chatName || data.title), 'Новое уведомление в Телеграм!');
-        const text = normalize(data && data.body, 'вам новое сообщение в Телеграм!');
-        titleEl.textContent = title;
-        textEl.textContent = text;
-        setAvatar(title, data && data.icon ? data.icon : '');
-        if (!data || data.playSound !== false) playPing();
-    }
+        const top=document.createElement('div'); top.className='top';
+        const av=document.createElement('div'); av.className='avatar';
+        if(data.icon){const im=document.createElement('img');im.src=data.icon;im.onerror=function(){av.textContent=firstLetter(title);};av.appendChild(im);}
+        else av.textContent=firstLetter(title);
+        const bd=document.createElement('div'); bd.className='body';
+        const tt=document.createElement('div'); tt.className='title'; tt.textContent=title;
+        const tx=document.createElement('div'); tx.className='text'; tx.textContent=text;
+        bd.appendChild(tt); bd.appendChild(tx);
+        const cx=document.createElement('button'); cx.className='close-x'; cx.textContent='✕';
+        cx.onclick=function(){removeCard(id);};
+        top.appendChild(av); top.appendChild(bd); top.appendChild(cx);
 
-    function startFadeOut() {
-        card.classList.remove('show');
-        card.classList.add('hide');
-    }
+        const acts=document.createElement('div'); acts.className='actions';
+        const reply=document.createElement('button'); reply.className='btn reply'; reply.textContent=canReply?'Ответить':'Открыть';
+        reply.onclick=function(){ipcRenderer.send('notif-action',{action:'open',peerId:data.peerId});removeCard(id);};
+        const read=document.createElement('button'); read.className='btn read'; read.textContent='Прочитано';
+        read.onclick=function(){ipcRenderer.send('notif-action',{action:'read',peerId:data.peerId});removeCard(id);};
+        acts.appendChild(reply); acts.appendChild(read);
 
-    window.__hideNotif = startFadeOut;
+        const prog=document.createElement('div'); prog.className='progress';
+        const bar=document.createElement('div'); bar.className='bar'; prog.appendChild(bar);
 
-    function showProgress() {
-        startTime = null;
-        function tick(ts) {
-            if (!startTime) startTime = ts;
-            const ratio = Math.max(0, 1 - (ts - startTime) / DURATION);
-            barEl.style.width = (ratio * 100) + '%';
-            if (ratio > 0) requestAnimationFrame(tick);
-        }
-        requestAnimationFrame(tick);
-    }
+        el.appendChild(top); el.appendChild(acts); el.appendChild(prog);
+        stack.appendChild(el); // новые снизу, у самого угла
 
-    requestAnimationFrame(() => {
-        card.classList.add('show');
-        showProgress();
-    });
+        cards.set(id,{el:el,timer:null});
+        while(cards.size>MAX_CARDS)dropOldest();   // лимит пула — старое уходит
+        requestAnimationFrame(function(){
+            el.classList.add('show'); reportSize();
+            bar.style.animation='barshrink '+dur+'ms linear forwards';
+        });
+        arm(id,dur);
 
-    ipcRenderer.on('notif-data', (_e, data) => {
-        if (hideTimeout) clearTimeout(hideTimeout);
-        setData(data || {});
-        hideTimeout = setTimeout(() => startFadeOut(), 5000);
-    });
-
-    document.addEventListener('keydown', (e) => {
-        if (e.key === 'Escape') ipcRenderer.send('notif-close');
+        el.onmouseenter=function(){const c=cards.get(id);if(c)clearTimeout(c.timer);bar.style.animationPlayState='paused';};
+        el.onmouseleave=function(){
+            bar.style.animation='none'; void bar.offsetWidth;          // рестарт анимации
+            bar.style.animation='barshrink '+dur+'ms linear forwards';
+            arm(id,dur);
+        };
     });
 </script>
-</body>
-</html>`;
+</body></html>`;
 }
 
-function queueNotification(data) {
-    const title = String((data && data.title) || '').trim() || 'Новое уведомление в Телеграм!';
-    const body = String((data && data.body) || '').trim() || 'вам новое сообщение в Телеграм!';
-    const icon = String((data && data.icon) || '');
-    const playSound = data && data.playSound !== false;
-
-    if (_notifWin && !_notifWin.isDestroyed()) {
-        _notifWin.close();
-        _notifWin = null;
-    }
-    if (_hideTimer) {
-        clearTimeout(_hideTimer);
-        _hideTimer = null;
-    }
-
-    const { x, y } = getPopupPosition(360, 92);
-
-    _notifWin = new BrowserWindow({
-        width: 360,
-        height: 92,
-        x,
-        y,
+function ensureWin() {
+    if (_win && !_win.isDestroyed()) return _win;
+    const wa = primaryWorkArea();
+    _win = new BrowserWindow({
+        width: WIDTH,
+        height: 120,
+        x: wa.x + wa.width - WIDTH - MARGIN,
+        y: wa.y + wa.height - 120 - MARGIN,
         frame: false,
         transparent: true,
         resizable: false,
@@ -302,7 +206,6 @@ function queueNotification(data) {
         fullscreenable: false,
         skipTaskbar: true,
         alwaysOnTop: true,
-        focusable: false,
         show: false,
         hasShadow: false,
         backgroundThrottling: false,
@@ -313,44 +216,41 @@ function queueNotification(data) {
             contextIsolation: false,
             backgroundThrottling: false,
             sandbox: false,
-            webSecurity: true,
-            allowRunningInsecureContent: false,
-            navigateOnDragDrop: false,
         },
     });
+    _win.setAlwaysOnTop(true, 'screen-saver');
+    try { _win.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true }); } catch (e) {}
 
-    _notifWin.setAlwaysOnTop(true, 'screen-saver');
-    try {
-        _notifWin.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
-    } catch (e) {}
-
+    _ready = false;
+    _win.webContents.once('did-finish-load', () => { _ready = true; flush(); });
     const html = buildHtml();
-    const dataUrl = 'data:text/html;charset=utf-8,' + encodeURIComponent(html);
+    _win.loadURL('data:text/html;charset=utf-8,' + encodeURIComponent(html)).catch(() => {});
+    _win.on('closed', () => { _win = null; _ready = false; });
+    return _win;
+}
 
-    _notifWin.webContents.once('did-finish-load', () => {
-        if (!_notifWin || _notifWin.isDestroyed()) return;
-        _notifWin.webContents.send('notif-data', {
-            title,
-            body,
-            icon,
-            playSound,
-        });
-        _notifWin.showInactive();
-        _hideTimer = setTimeout(() => hideNotif(), 5000);
-    });
+function flush() {
+    if (!_win || _win.isDestroyed() || !_ready) return;
+    const items = _pending;
+    _pending = [];
+    if (!items.length) return;
+    items.forEach(it => _win.webContents.send('notif-add', it));
+    _win.showInactive();
+}
 
-    _notifWin.loadURL(dataUrl).catch(() => {
-        try {
-            if (_notifWin && !_notifWin.isDestroyed()) {
-                _notifWin.close();
-            }
-        } catch (e) {}
-        _notifWin = null;
-    });
-
-    _notifWin.on('closed', () => {
-        _notifWin = null;
-    });
+function queueNotification(data) {
+    const payload = {
+        id: ++_idSeq,
+        title: String((data && data.title) || '').trim() || 'Telegram',
+        body: String((data && data.body) || '').trim() || 'Новое сообщение',
+        icon: String((data && data.icon) || ''),
+        peerId: (data && data.peerId) || '',
+        playSound: data && data.playSound !== false,
+        duration: (data && data.duration) || 6,
+    };
+    ensureWin();
+    _pending.push(payload);
+    if (_ready) flush();
 }
 
 module.exports = { init, queueNotification };
