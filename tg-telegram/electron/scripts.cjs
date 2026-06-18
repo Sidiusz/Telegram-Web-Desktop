@@ -295,6 +295,35 @@ const CSS=\`
 ._dlb_status_{color:#aaa;font-size:11px;margin-top:2px;}
 ._dlb_prog_{height:2px;background:rgba(255,255,255,.1);border-radius:2px;margin-top:6px;overflow:hidden;}
 ._dlb_prog_ span{display:block;height:100%;background:#5288c1;border-radius:2px;transition:width .3s;}
+/* #5: после скачивания меняем содержимое нативной .action-icon (иконка скачивания)
+   на галочку «открыть». Своих оверлеев/спиннеров НЕТ — нативный прогресс TG работает. */
+.File .action-icon[data-tgdl-open]{color:#4caf50;}
+.File .action-icon[data-tgdl-open] svg{display:block;}
+/* Менеджер загрузок (модалка вместо выезжающей панели) */
+._dmdlg_{width:420px;max-width:calc(100vw - 48px);max-height:min(70vh,560px);}
+._dmhdr_{display:flex;align-items:center;justify-content:space-between;padding:14px 20px 10px;}
+._dmhdr_ .modal-title{font-size:16px;font-weight:600;color:#fff;}
+._dmhdr_ .dm-actions{display:flex;gap:6px;}
+._dmhdr_ .dm-clr{background:rgba(229,57,53,.15);border:none;color:#e53935;font-size:12px;padding:4px 10px;border-radius:6px;cursor:pointer;display:inline-flex;align-items:center;gap:4px;}
+._dmhdr_ .dm-clr:hover{background:rgba(229,57,53,.28);}
+._dmlist_{overflow-y:auto;padding:0 8px 12px;flex:1;}
+._dmlist_::-webkit-scrollbar{width:6px;}
+._dmlist_::-webkit-scrollbar-thumb{background:#333;border-radius:3px;}
+._dmrow_{display:flex;align-items:center;gap:12px;padding:10px 12px;border-radius:8px;cursor:default;transition:background .15s;}
+._dmrow_.done{cursor:pointer;}
+._dmrow_.done:hover{background:rgba(255,255,255,.04);}
+._dmrow_.downloading,.dmrow_.failed{cursor:default;}
+._dmico_{width:40px;height:40px;border-radius:50%;flex-shrink:0;display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:700;color:#fff;position:relative;overflow:hidden;background:#2b5278;}
+._dmico_ .ext{z-index:2;}
+._dmico_ .prog-ring{position:absolute;inset:0;border-radius:50%;background:conic-gradient(#5288c1 var(--p,0%),rgba(255,255,255,.12) 0);}
+._dmbody_{flex:1;min-width:0;}
+._dmname_{color:#fff;font-size:13px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+._dmstat_{color:var(--color-text-secondary,#aaa);font-size:11px;margin-top:2px;}
+._dmact_{display:flex;gap:4px;flex-shrink:0;}
+._dmact_ button{background:none;border:none;color:var(--color-text-secondary,#aaa);cursor:pointer;padding:6px;border-radius:6px;display:flex;align-items:center;justify-content:center;}
+._dmact_ button:hover{background:rgba(255,255,255,.08);color:#fff;}
+._dmact_ button.danger:hover{color:#e53935;}
+._dmact_ button svg{width:16px;height:16px;}
 // ── Наш блок настроек уведомлений (вшит в нативные Настройки→Уведомления) ────
 ._tgnf_{margin:0 0 8px;padding:0 16px;}
 ._tgnf_ ._hdr_{font-size:13px;font-weight:600;color:#fff;margin:12px 0 4px;display:flex;align-items:center;gap:6px;}
@@ -312,80 +341,178 @@ function ensureCSS(){if(!document.getElementById('_tgcss_')){const s=document.cr
 function ensureToast(){if(!document.getElementById('_tgt_')&&document.body){const t=document.createElement('div');t.className='_toast_';t.id='_tgt_';document.body.appendChild(t);}}
 function toast(msg){ensureToast();const t=document.getElementById('_tgt_');if(!t)return;t.textContent=msg;t.classList.add('on');setTimeout(()=>t.classList.remove('on'),2000);}
 
-// ── Плавающий значок загрузки ──────────────────────────────────────────────
-function ensureDlWrap(){
-    if(document.getElementById('_dlbw_')||!document.body)return;
-    const w=document.createElement('div');w.id='_dlbw_';w.className='_dlbadge_wrap_';
-    document.body.appendChild(w);
-}
-(function setupDlBadges(){
-    if(!window.tgBridge)return;
-    const badges={};
-    function wrap(){return document.getElementById('_dlbw_');}
-    function fmt(recv,total){
-        if(!total)return recv?_fmtBytes(recv):'';
-        return _fmtBytes(recv)+' / '+_fmtBytes(total);
+// ── Плавающий значок загрузки удалён (#5): прогресс теперь in-message + модалка
+// ── Реестр загрузок #5 ─────────────────────────────────────────────────────
+// Связывает download id (main) ↔ message id (renderer) через имя файла:
+// на клике по .File ловим mid+filename ДО старта скачивания и кладём в очередь
+// pending. Когда main шлёт start{id,filename} — матчим filename→mid и фиксируем
+// в registry. Дальше progress/done применяется к in-message оверлею.
+// .Message виртуализированы (вне DOM при скролле), поэтому in-message состояние
+// наносим интервалом по registry — идемпотентно через data-маркер.
+if(!window.tgBridge) {
+    // нет моста — ничего не поделаешь
+} else {
+const DL = window.__tgdl = (function(){
+    // pending[filename] = [mid,...]  — кликнули, ждём start от main
+    const pending = {};
+    // registry[mid] = { id, filename, status, recv, total }
+    // registryById[id] = mid
+    const registry = {};
+    const byId = {};
+    // filename→mids, которые уже скачаны (для re-download: повторный клик)
+    const doneFn = {};  // doneFn[mid] = filename
+
+    function fmtBytes(b){
+        if(b==null)return '';
+        if(b<1024)return b+' B';
+        if(b<1048576)return (b/1024).toFixed(1)+' KB';
+        if(b<1073741824)return (b/1048576).toFixed(1)+' MB';
+        return (b/1073741824).toFixed(2)+' GB';
     }
-    function _fmtBytes(b){
-        if(b<1024)return b+'B';
-        if(b<1048576)return (b/1024).toFixed(1)+'KB';
-        return (b/1048576).toFixed(1)+'MB';
+    function fmtProgress(recv,total){
+        if(!total)return recv?fmtBytes(recv):'…';
+        const pct=Math.round(recv/total*100);
+        return fmtBytes(recv)+' / '+fmtBytes(total)+' · '+pct+'%';
     }
-    window.tgBridge.onDownloadEvent(function(data){
-        ensureDlWrap();
+
+    // Renderer-side: запомнить что кликнули файл с mid/filename.
+    // Вызывается на capture-клике по .File. Идемпотентен для повторных кликов.
+    function expectDownload(mid, filename){
+        if(!mid||!filename)return;
+        (pending[filename] = pending[filename] || []).push(mid);
+        // сразу покажем состояние «ожидание» на сообщении
+        registry[mid] = Object.assign(registry[mid]||{}, {mid, filename, status:'pending'});
+        applyToMessage(mid);
+    }
+
+    // Main шлёт download-event. Связываем filename→mid.
+    function onEvent(data){
+        if(!data)return;
         if(data.type==='start'){
-            const el=document.createElement('div');
-            el.className='_dlb_';
-            el.dataset.dlid=data.id;
-            el.innerHTML=(
-                '<div class="_dlb_ico_">'+
-                    '<svg width="16" height="16" viewBox="0 0 16 16" fill="none">'+
-                        '<path d="M8 2v8M5 7l3 3 3-3" stroke="#fff" stroke-width="1.5" stroke-linecap="round"/>'+
-                        '<path d="M3 13h10" stroke="#fff" stroke-width="1.5" stroke-linecap="round"/>'+
-                    '</svg>'+
-                '</div>'+
-                '<div class="_dlb_info_">'+
-                    '<div class="_dlb_name_">'+data.filename+'</div>'+
-                    '<div class="_dlb_status_">Загрузка...</div>'+
-                    '<div class="_dlb_prog_"><span style="width:0%"></span></div>'+
-                '</div>'
-            );
-            wrap().appendChild(el);
-            badges[data.id]=el;
-        } else if(data.type==='progress'){
-            const el=badges[data.id];if(!el)return;
-            const pct=data.total?Math.round(data.received/data.total*100):0;
-            const bar=el.querySelector('._dlb_prog_ span');
-            if(bar)bar.style.width=pct+'%';
-            const st=el.querySelector('._dlb_status_');
-            if(st)st.textContent=fmt(data.received,data.total)+(data.total?' ('+pct+'%)':'');
-        } else if(data.type==='done'){
-            const el=badges[data.id];if(!el)return;
-            if(data.status==='completed'){
-                el.classList.add('done');
-                el.title='Нажмите чтобы открыть файл';
-                const ico=el.querySelector('._dlb_ico_');
-                if(ico)ico.innerHTML=(
-                    '<svg width="16" height="16" viewBox="0 0 16 16" fill="none">'+
-                        '<path d="M3 8l4 4 6-6" stroke="#4caf50" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>'+
-                    '</svg>'
-                );
-                ico.style.background='#1b3a1f';
-                const bar=el.querySelector('._dlb_prog_');if(bar)bar.remove();
-                const st=el.querySelector('._dlb_status_');if(st)st.textContent='Готово — нажмите чтобы открыть';
-                el.addEventListener('click',()=>{
-                    INV('open_download_file',{id:data.id}).catch(()=>{});
-                    el.remove();delete badges[data.id];
-                });
-                setTimeout(()=>{el.remove();delete badges[data.id];},8000);
-            } else {
-                const st=el.querySelector('._dlb_status_');if(st){st.textContent='Ошибка загрузки';st.style.color='#e53935';}
-                const bar=el.querySelector('._dlb_prog_');if(bar)bar.remove();
-                setTimeout(()=>{el.remove();delete badges[data.id];},4000);
+            // матчится по filename; если несколько одинаковых — берём последний
+            const mids = pending[data.filename];
+            let mid = mids && mids.length ? mids.pop() : null;
+            if(!mid){
+                // нет клика в renderer — возможно ПЕРЕКАЧКА уже скачанного файла
+                // через родное ПКМ-меню TG (его НЕ трогаем). Ищем mid по имени
+                // среди завершённых — туда вернём состояние «качается».
+                for(const m in doneFn){ if(doneFn[m]===data.filename){ mid=m; break; } }
             }
+            if(!mid){
+                // совсем не наше (инициировано не из чата) — покажется только в модалке
+                mid = '__noid__'+data.id;
+            }
+            // перекачка: снимаем оверлей «открыть», пусть снова идёт нативный прогресс TG
+            if(registry[mid] && registry[mid].status==='completed') unpaint(mid);
+            delete doneFn[mid];
+            registry[mid] = { mid, id:data.id, filename:data.filename, status:'downloading', recv:0, total:0 };
+            byId[data.id] = mid;
+            applyToMessage(mid);
+        } else if(data.type==='progress'){
+            const mid = byId[data.id]; if(!mid)return;
+            const r = registry[mid]; if(!r)return;
+            r.recv = data.received||0; r.total = data.total||0;
+            applyToMessage(mid);
+        } else if(data.type==='done'){
+            const mid = byId[data.id]; if(!mid)return;
+            const r = registry[mid]; if(!r)return;
+            r.status = data.status==='completed' ? 'completed' : 'failed';
+            applyToMessage(mid);
+            if(r.filename) doneFn[mid] = r.filename;
         }
-    });
+        // модалка, если открыта — обновим
+        if(window.__dlModalOpen) refreshDlModal();
+    }
+
+    // ── In-message overlay ───────────────────────────────────────────────
+    // .file-icon-container стабилен; кладём туда наш ._tgdl-ov_. Идемпотентно.
+    function applyToMessage(mid){
+        if(!mid || mid.indexOf('__noid__')===0) return;   // не привязано к сообщению
+        const r = registry[mid]; if(!r)return;
+        const msg = document.querySelector('.Message[data-message-id="'+mid+'"]');
+        if(!msg) return;                                   // виртуализировано — пропустим, интервал доберёт
+        paintMessage(msg, r);
+    }
+    function paintMessage(msg, r){
+        const file = msg.querySelector('.File'); if(!file)return;
+        const status = r.status;
+        if(status==='completed'){
+            // ЗАМЕНА иконки скачивания на иконку «открыть». Ничего больше не трогаем:
+            // нативный прогресс TG работает сам, свой индикатор не рисуем.
+            // .action-icon — это <i> с иконкой скачивания; подменяем содержимое.
+            const ai = file.querySelector('.action-icon');
+            if(ai && !ai.dataset.tgdlOpen){
+                ai.dataset.tgdlOpen='1';
+                ai.className='action-icon';                  // сбрасываем .icon-download и пр.
+                // иконка «открыть» — раскрытая папка
+                ai.innerHTML='<svg viewBox="0 0 24 24" fill="currentColor" style="width:62%;height:62%"><path d="M4 6a2 2 0 0 1 2-2h3.2a2 2 0 0 1 1.6.8l.8 1.07A1 1 0 0 0 12.4 6H18a2 2 0 0 1 2 2v1H4V6z"/><path d="M3.3 11h17.4a1 1 0 0 1 .97 1.24l-1.5 6A2 2 0 0 1 18.23 20H5.77a2 2 0 0 1-1.94-1.51l-1.5-6A1 1 0 0 1 3.3 11z"/></svg>';
+            }
+            file.dataset.tgdlDone='1';
+            file.dataset.tgdlId = r.id!=null ? String(r.id) : (file.dataset.tgdlId||'');
+            file.dataset.tgdlMid = r.mid;
+        } else if(status==='failed'){
+            file.removeAttribute('data-tgdl-done');
+        }
+        // pending/downloading: НЕ вмешиваемся — нативный прогресс TG работает сам.
+    }
+
+    // Снять оверлей «открыть» (перекачка): вернуть родную иконку скачивания TG.
+    // ПКМ-меню TG не трогаем — оно стандартное; здесь только сбрасываем наш оверлей.
+    function unpaint(mid){
+        const msg = document.querySelector('.Message[data-message-id="'+mid+'"]');
+        if(!msg) return;
+        const file = msg.querySelector('.File'); if(!file) return;
+        file.removeAttribute('data-tgdl-done');
+        file.removeAttribute('data-tgdl-id');
+        file.removeAttribute('data-tgdl-mid');
+        const ai = file.querySelector('.action-icon');
+        if(ai && ai.dataset.tgdlOpen){
+            delete ai.dataset.tgdlOpen;
+            ai.className='action-icon icon icon-download'; // родная иконка скачивания
+            ai.innerHTML='';
+        }
+    }
+
+    // Интервал: переприменяем состояние к виртуализированным сообщениям.
+    function scanMessages(){
+        for(const mid in registry){ applyToMessage(mid); }
+    }
+    setInterval(scanMessages, 600);
+
+    // ── Клик-перехват на .File (capture) ─────────────────────────────────
+    // Ловим mid+filename до того, как TG начнёт скачивание. Не блокируем клик —
+    // пусть TG создаст blob: и отправит его в will-download.
+    document.addEventListener('mousedown', function(e){
+        if(e.button!==0) return;                  // только ЛКМ; ПКМ → contextmenu
+        const file = e.target.closest && e.target.closest('.File');
+        if(!file)return;
+        const msg = file.closest('[data-message-id]');
+        if(!msg)return;
+        const mid = msg.getAttribute('data-message-id');
+        // filename из .file-title (атрибут title = полное имя)
+        const t = file.querySelector('.file-title');
+        const filename = t ? (t.getAttribute('title')||t.textContent||'').trim() : '';
+        // уже скачано? — откроем файл вместо перекачки (ЛКМ)
+        if(file.dataset.tgdlDone==='1'){
+            e.preventDefault(); e.stopImmediatePropagation();
+            const id = parseInt(file.dataset.tgdlId,10);
+            if(id) INV('open_download_file',{id}).catch(()=>{});
+            return;
+        }
+        if(filename) expectDownload(mid, filename);
+    }, true);
+
+    // ПКМ по .File не перехватываем — TG показывает своё родное контекстное меню.
+    // re-download/open-folder доступны в менеджере загрузок (модалка).
+
+    window.tgBridge.onDownloadEvent(onEvent);
+
+    return { registry, byId, fmtBytes, fmtProgress, expectDownload };
 })();
+} // end if(window.tgBridge) — блок реестра загрузок
+
+// ── Глобальные помощники для модалки/формата ──────────────────────────────
+function _fmtBytes_dl(b){ return window.__tgdl ? window.__tgdl.fmtBytes(b) : ''; }
 // ──────────────────────────────────────────────────────────────────────────
 
 // ── Синхронизация и разблокировка Telegram-уведомлений ────────────────────
@@ -694,38 +821,151 @@ function openPanel(id,renderFn){
     p.classList.add('open');renderFn();
 }
 
-function sLabel(s){return{downloading:'⬇ Загружается',completed:'✓ Завершено',failed:'✕ Ошибка',cancelled:'— Отменено'}[s]||s;}
-function sColor(s){return{downloading:'var(--color-primary,#5288c1)',completed:'#4caf50',failed:'#e53935',cancelled:'#aaa'}[s]||'#aaa';}
+function sLabel(s){return{pending:'Ожидание…',downloading:'⬇ Загружается',completed:'✓ Завершено',failed:'✕ Ошибка',cancelled:'— Отменено'}[s]||s;}
+function sColor(s){return{pending:'#aaa',downloading:'var(--color-primary,#5288c1)',completed:'#4caf50',failed:'#e53935',cancelled:'#aaa'}[s]||'#aaa';}
 
-async function renderDl(){
-    const c=document.getElementById('_tgdl_c');if(!c)return;
-    try{
-        const items=await INV('get_downloads');
-        c.innerHTML='';
-        if(!items||!items.length){c.innerHTML='<div class="_empty_">Нет загрузок</div>';return;}
-        items.slice().reverse().forEach(d=>{
-            const div=document.createElement('div');
-            const done=d.status==='completed';
-            div.className='_dli_'+(done?' done':'');
-            if(done)div.title='Нажмите чтобы открыть файл';
-            const name=document.createElement('div');name.className='_dln_';name.textContent=d.filename;
-            const st=document.createElement('div');st.className='_dls_';st.style.color=sColor(d.status);st.textContent=sLabel(d.status);
-            const actions=document.createElement('div');actions.className='_dla_';
-            if(done){
-                div.addEventListener('click',e=>{if(e.target.closest('button'))return;INV('open_download_file',{id:d.id});});
-                const folder=document.createElement('button');folder.className='_folder_';
-                folder.innerHTML='<i class="icon icon-folder" aria-hidden="true"></i>Папка';
-                folder.addEventListener('click',()=>INV('open_download_folder',{id:d.id}));
-                actions.appendChild(folder);
+// Расширение файла → цвет иконки (упрощённая палитра TG)
+function _fileExt(name){ var m=(name||'').match(/\.([a-z0-9]+)$/i); return m?m[1].toLowerCase():''; }
+function _extColor(ext){
+    return ({
+        zip:'#c77b41',rar:'#7e57c2','7z':'#5288c1',gz:'#66bb6a',tar:'#8d6e63',
+        exe:'#e53935',msi:'#ef6c00',dmg:'#42a5f5',apk:'#8bc34a',deb:'#ef5350',
+        pdf:'#e53935',doc:'#2b5278',docx:'#2b5278',xls:'#4caf50',xlsx:'#4caf50',
+        ppt:'#ff9800',pptx:'#ff9800',
+        mp3:'#ec407a',wav:'#ec407a',flac:'#ec407a',ogg:'#ec407a',
+        mp4:'#5c6bc0',mov:'#5c6bc0',avi:'#5c6bc0',mkv:'#5c6bc0',
+        jpg:'#ffa726',jpeg:'#ffa726',png:'#ffa726',gif:'#ffa726',webp:'#ffa726',svg:'#ffa726',
+        txt:'#90a4ae',js:'#fdd835',ts:'#5288c1',json:'#fdd835',
+    })[ext]||'#5288c1';
+}
+
+// ── Модалка «Загрузки» (#5): Telegram-style, reusing showModal styling ─────
+let _dlModal=null;
+function openDownloadsModal(){
+    if(_dlModal){ _dlModal.remove(); _dlModal=null; }
+    const mo=document.createElement('div');mo.className='_mo_';
+    mo.innerHTML=(
+        '<div class="modal-dialog _dmdlg_">'+
+            '<div class="_dmhdr_">'+
+                '<div class="modal-title">Загрузки</div>'+
+                '<div class="dm-actions"><button class="dm-clr" id="_dmclr_"><svg width="14" height="14" viewBox="0 0 24 24" fill="none"><path d="M3 6h18M8 6V4h8v2M19 6l-1 14H6L5 6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>Очистить</button></div>'+
+            '</div>'+
+            '<div class="_dmlist_" id="_dmlist_"></div>'+
+        '</div>'
+    );
+    document.body.appendChild(mo);
+    _dlModal=mo;
+    window.__dlModalOpen=true;
+    const close=()=>{ window.__dlModalOpen=false; _dlModal=null; mo.remove(); };
+    mo.addEventListener('click',e=>{ if(e.target===mo) close(); });
+    const clr=mo.querySelector('#_dmclr_');
+    if(clr)clr.addEventListener('click',async()=>{
+        showModal({
+            title:'Очистить загрузки',msg:'Удалить все записи загрузок?<br><small style="color:#aaa">Файлы на диске также будут удалены.</small>',
+            okText:'ОЧИСТИТЬ',okDanger:true,
+            onOk:async()=>{
+                const items=await INV('get_downloads');
+                for(const d of (items||[])) await INV('delete_download',{id:d.id});
+                refreshDlModal();
             }
-            const del=document.createElement('button');del.className='_del_';
-            del.innerHTML='<i class="icon icon-delete" aria-hidden="true"></i>Удалить';
-            del.addEventListener('click',()=>{showModal({title:'Удалить загрузку',msg:'Удалить «'+d.filename+'»?<br><small style="color:#aaa">Файл также будет удалён с диска.</small>',okText:'УДАЛИТЬ',okDanger:true,onOk:async()=>{await INV('delete_download',{id:d.id});renderDl();}});});
-            actions.appendChild(del);
-            div.appendChild(name);div.appendChild(st);div.appendChild(actions);
-            c.appendChild(div);
         });
-    }catch(e){console.error('renderDl',e);c.innerHTML='<div class="_empty_">Ошибка: '+e+'</div>';}
+    });
+    refreshDlModal();
+    // live-refresh while open
+    _dlModal._timer=setInterval(()=>{ if(_dlModal) refreshDlModal(); else clearInterval(_dlModal&&_dlModal._timer); }, 700);
+    const origClose=close;
+    // ensure timer cleared on any close path
+    const _t=_dlModal._timer;
+    const _cleanup=()=>{ clearInterval(_t); };
+    mo.addEventListener('remove',_cleanup);
+    // intercept removal
+    const obs=new MutationObserver(()=>{ if(!document.body.contains(mo)){ _cleanup(); obs.disconnect(); } });
+    obs.observe(document.body,{childList:true,subtree:false});
+}
+
+// Объединяет активные (registry) + сохранённые (get_downloads), без дублей по id.
+async function refreshDlModal(){
+    const list=_dlModal?_dlModal.querySelector('#_dmlist_'):null;
+    if(!list)return;
+    // активные in-flight из registry (по mid)
+    const active=[];
+    const reg=window.__tgdl?window.__tgdl.registry:{};
+    const byId=window.__tgdl?window.__tgdl.byId:{};
+    const seenIds={};
+    for(const mid in reg){
+        const r=reg[mid];
+        if(r.status==='completed'||r.status==='failed'){
+            // завершённые из registry тоже покажем, но get_downloads может их уже не иметь сразу
+        }
+        if(r.id!=null){ seenIds[r.id]=true; }
+        active.push({ id:r.id, mid:r.mid, filename:r.filename, status:r.status, recv:r.recv, total:r.total, live:true });
+    }
+    let saved=[];
+    try{ saved=await INV('get_downloads'); }catch(e){}
+    saved=saved||[];
+    // объединяем: сохранённые (кроме активных live-загрузок) + активные
+    const merged=[];
+    saved.slice().reverse().forEach(d=>{ if(!seenIds[d.id]) merged.push(Object.assign({},d,{live:false})); });
+    // активные — сверху
+    active.forEach(d=>{ const s=saved.find(x=>x.id===d.id); if(s) d.path=s.path; merged.unshift(d); });
+    // дедуп по filename+status для отображения
+    list.innerHTML='';
+    if(!merged.length){ list.innerHTML='<div class="_empty_">Нет загрузок</div>'; return; }
+    merged.forEach(d=>{ list.appendChild(_dmRow(d)); });
+}
+
+function _dmRow(d){
+    const div=document.createElement('div');
+    const done=d.status==='completed';
+    const active=d.status==='downloading'||d.status==='pending';
+    const failed=d.status==='failed';
+    div.className='_dmrow_'+(done?' done':'')+(active?' downloading':'')+(failed?' failed':'');
+    div.dataset.id = d.id!=null?String(d.id):'';
+    const ext=_fileExt(d.filename);
+    const ico=document.createElement('div');ico.className='_dmico_';
+    ico.style.background=_extColor(ext);
+    if(active){
+        const pct=(d.total&&d.recv!=null)?Math.min(100,Math.round(d.recv/d.total*100)):0;
+        ico.innerHTML='<div class="prog-ring" style="--p:'+(d.total?pct:25)+'%"></div><span class="ext">'+(ext||'?').slice(0,4)+'</span>';
+    } else if(failed){
+        ico.innerHTML='<svg width="18" height="18" viewBox="0 0 24 24" fill="none"><path d="M6 6l12 12M18 6L6 18" stroke="#fff" stroke-width="2.5" stroke-linecap="round"/></svg>';
+    } else {
+        ico.innerHTML='<span class="ext">'+(ext||'?').slice(0,4)+'</span>';
+    }
+    const body=document.createElement('div');body.className='_dmbody_';
+    const name=document.createElement('div');name.className='_dmname_';name.textContent=d.filename||'(без имени)';
+    const stat=document.createElement('div');stat.className='_dmstat_';stat.style.color=sColor(d.status);
+    if(active){
+        const fmt=window.__tgdl&&window.__tgdl.fmtProgress||function(){return '';};
+        stat.textContent=d.status==='pending'?'Ожидание…':fmt(d.recv,d.total);
+    } else if(done){
+        stat.textContent='Завершено'+(d.path?(' · '+d.filename):'');
+    } else {
+        stat.textContent=sLabel(d.status);
+    }
+    body.appendChild(name);body.appendChild(stat);
+    const act=document.createElement('div');act.className='_dmact_';
+    if(done&&d.id!=null){
+        const open=document.createElement('button');open.title='Открыть';
+        open.innerHTML='<svg viewBox="0 0 24 24" fill="none"><path d="M5 12l4 4 10-10" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>';
+        open.addEventListener('click',()=>INV('open_download_file',{id:d.id}).catch(()=>{}));
+        act.appendChild(open);
+        const fld=document.createElement('button');fld.title='Показать в папке';
+        fld.innerHTML='<svg viewBox="0 0 24 24" fill="none"><path d="M3 7a2 2 0 012-2h4l2 2h8a2 2 0 012 2v7a2 2 0 01-2 2H5a2 2 0 01-2-2V7z" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/></svg>';
+        fld.addEventListener('click',()=>INV('open_download_folder',{id:d.id}).catch(()=>{}));
+        act.appendChild(fld);
+    }
+    if(d.id!=null){
+        const del=document.createElement('button');del.className='danger';del.title='Удалить';
+        del.innerHTML='<svg viewBox="0 0 24 24" fill="none"><path d="M3 6h18M8 6V4h8v2M19 6l-1 14H6L5 6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>';
+        del.addEventListener('click',()=>{showModal({title:'Удалить загрузку',msg:'Удалить «'+(d.filename||'')+'»?<br><small style="color:#aaa">Файл также будет удалён с диска.</small>',okText:'УДАЛИТЬ',okDanger:true,onOk:async()=>{await INV('delete_download',{id:d.id});refreshDlModal();}});});
+        act.appendChild(del);
+    }
+    div.appendChild(ico);div.appendChild(body);div.appendChild(act);
+    if(done&&d.id!=null){
+        div.addEventListener('click',e=>{ if(e.target.closest('button'))return; INV('open_download_file',{id:d.id}).catch(()=>{}); });
+    }
+    return div;
 }
 
 let _saveTimer=null;
@@ -983,7 +1223,7 @@ async function renderCl(){
     }catch(e){c.innerHTML='<div class="_empty_">Ошибка загрузки</div>';}
 }
 
-function ensurePanels(){makePanel('_tgdl_','Загрузки');makePanel('_tgst_','Настройки приложения');makePanel('_tgcl_','Список изменений');}
+function ensurePanels(){makePanel('_tgst_','Настройки приложения');makePanel('_tgcl_','Список изменений');}
 
 // ── ИНЖЕКТ МЕНЮ: Строго по структуре DOM без догадок ────────────────────
 function injectMenu(){
@@ -1019,7 +1259,7 @@ function injectMenu(){
         const sep1 = document.createElement('div'); sep1.className = sepClass;
         const sep2 = document.createElement('div'); sep2.className = sepClass;
 
-        const dl = mi('_tgmi_dl_', 'icon-download', 'Загрузки приложения', () => openPanel('_tgdl_', renderDl));
+        const dl = mi('_tgmi_dl_', 'icon-download', 'Загрузки приложения', () => openDownloadsModal());
         const st = mi('_tgmi_st_', 'icon-settings', 'Настройки приложения', () => openPanel('_tgst_', renderSt));
         const cl = mi('_tgmi_cl_', 'icon-info', 'Список изменений', () => openPanel('_tgcl_', renderCl));
         const upd = mi('_tgmi_upd_', 'icon-reload', 'Проверить обновления', async () => {
@@ -1047,7 +1287,7 @@ function injectMenu(){
 }
 // ────────────────────────────────────────────────────────────────────────
 
-function tryInject(){ensureCSS();ensureToast();ensureDlWrap();ensureCornerWrap();ensurePanels();}
+function tryInject(){ensureCSS();ensureToast();ensureCornerWrap();ensurePanels();}
 function waitBody(cb){if(document.body)cb();else{const t=setInterval(()=>{if(document.body){clearInterval(t);cb();}},50);}}
 
 waitBody(()=>{
@@ -1056,8 +1296,6 @@ waitBody(()=>{
     
     // Запускаем инжект с интервалом, ловим меню в момент его появления
     setInterval(injectMenu, 500);
-
-    setInterval(()=>{if(document.getElementById('_tgdl_')&&document.getElementById('_tgdl_').classList.contains('open'))renderDl();},2000);
 
     setupNotificationSettingsSync();
 
@@ -1088,27 +1326,32 @@ waitBody(()=>{
 // рассинхронивается на границах детей) — держим по таймстампу dragover:
 // dragover сыпется постоянно пока курсор в окне; пропал >200мс → снимаем блок.
 // Текущий чат не страдает: дроп ловит средняя колонка/композер, не список.
+// Блокируем на ЛЮБОЕ перетаскивание (не проверяем types: при внешнем drag над
+// фоновым окном dataTransfer.types может не содержать 'Files'). Держим по
+// таймстампу с запасом 700мс — в фоне dragover приходит редко, и узкий порог
+// давал мерцание блока (чат «прыгал»). attach на dragenter и dragover.
 (function(){
     var _s=null,_last=0,_timer=null;
     function styleEl(){
         if(_s)return _s;
         _s=document.createElement('style');_s.id='_drag_bl_';
-        _s.textContent='.chat-list{pointer-events:none!important}.chat-list *{pointer-events:none!important}';
+        _s.textContent='.chat-list,.chat-list *{pointer-events:none!important}';
         return _s;
     }
-    function attach(){if(!_s||!_s.parentNode)(document.head||document.documentElement).appendChild(styleEl());}
-    function detach(){if(_s&&_s.parentNode)_s.parentNode.removeChild(_s);}
-    function hasFiles(e){var t=e.dataTransfer&&e.dataTransfer.types;if(!t)return false;return t.indexOf?t.indexOf('Files')>=0:Array.prototype.indexOf.call(t,'Files')>=0;}
-    document.addEventListener('dragover',function(e){
-        if(!hasFiles(e))return;
-        _last=Date.now();attach();
-        if(!_timer)_timer=setInterval(function(){
-            if(Date.now()-_last>200){detach();clearInterval(_timer);_timer=null;}
-        },120);
-    },true);
-    function end(){detach();_last=0;if(_timer){clearInterval(_timer);_timer=null;}}
-    document.addEventListener('drop',end,true);
-    document.addEventListener('dragend',end,true);
+    function tick(){if(Date.now()-_last>700)detach();}
+    function attach(){
+        if(!_s||!_s.parentNode)(document.head||document.documentElement).appendChild(styleEl());
+        _last=Date.now();
+        if(!_timer)_timer=setInterval(tick,150);
+    }
+    function detach(){
+        if(_s&&_s.parentNode)_s.parentNode.removeChild(_s);
+        if(_timer){clearInterval(_timer);_timer=null;}
+    }
+    document.addEventListener('dragenter',attach,true);
+    document.addEventListener('dragover',attach,true);
+    document.addEventListener('drop',detach,true);
+    document.addEventListener('dragend',detach,true);
 })();
 // ─────────────────────────────────────────────────────────────────────────────
 
