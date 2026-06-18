@@ -69,14 +69,20 @@ function injectMenu(){
 // поэтому находим список через якорь-строку (icon-unmute = «Уведомления») и клонируем
 // её узел → меня иконку/текст → вставляем. Так вид 1-в-1 как родной и переживёт сборку.
 function injectSettingsRows(){
-    const notif = document.querySelector('.ListItem.narrow .ListItem-button .icon-unmute');
-    const data  = document.querySelector('.ListItem.narrow .ListItem-button .icon-data');
-    const list  = (notif || data) && (notif || data).closest('.ListItem.narrow').parentElement;
+    // ТОЛЬКО экран Настроек (#Settings). В профиле собеседника (#RightColumn) тоже
+    // есть строки «Уведомления»/медиа с теми же иконками — туда вставлять нельзя.
+    const settings = document.getElementById('Settings');
+    if(!settings) return;
+    const notif = settings.querySelector('.ListItem.narrow .ListItem-button .icon-unmute');
+    const data  = settings.querySelector('.ListItem.narrow .ListItem-button .icon-data');
+    const anchor = notif || data;
+    if(!anchor || anchor.closest('#RightColumn, .RightColumn')) return;
+    const list  = anchor.closest('.ListItem.narrow').parentElement;
     if(!list) return;
     if(list.querySelector('#_tgst_app_,#_tgst_dl_')) return;   // уже вставлено
 
     // Клонируем живую нативную строку → собираем свою по тому же шаблону.
-    const tmpl = (notif || data).closest('.ListItem.narrow');
+    const tmpl = anchor.closest('.ListItem.narrow');
     function makeRow(id, iconName, label){
         const row = tmpl.cloneNode(true);
         row.removeAttribute('id'); row.id = id;
