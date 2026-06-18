@@ -11,3 +11,7 @@ vite.config.js.timestamp-*
 vite.config.ts.timestamp-*
 *.blockmap
 *.exe
+
+# отладочные CDP-хелперы (remote debugging)
+.cdp*.mjs
+nul

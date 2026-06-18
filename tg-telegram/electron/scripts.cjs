@@ -295,6 +295,17 @@ const CSS=\`
 ._dlb_status_{color:#aaa;font-size:11px;margin-top:2px;}
 ._dlb_prog_{height:2px;background:rgba(255,255,255,.1);border-radius:2px;margin-top:6px;overflow:hidden;}
 ._dlb_prog_ span{display:block;height:100%;background:#5288c1;border-radius:2px;transition:width .3s;}
+// ── Наш блок настроек уведомлений (вшит в нативные Настройки→Уведомления) ────
+._tgnf_{margin:0 0 8px;padding:0 16px;}
+._tgnf_ ._hdr_{font-size:13px;font-weight:600;color:#fff;margin:12px 0 4px;display:flex;align-items:center;gap:6px;}
+._tgnf_ ._sub_{font-size:12px;color:var(--color-text-secondary,#aaa);margin:0 0 12px;line-height:1.4;}
+._tgnf_ ._volrow_{display:flex;align-items:center;gap:10px;padding:6px 0;}
+._tgnf_ ._volrow_ ._lbl_{flex:0 0 auto;font-size:13px;color:var(--color-text-secondary,#aaa);}
+._tgnf_ ._volrow_ ._pct_{flex:0 0 auto;font-size:12px;color:#fff;min-width:34px;text-align:right;font-variant-numeric:tabular-nums;}
+._tgnf_ input[type=range]{flex:1;-webkit-appearance:none;appearance:none;height:4px;border-radius:2px;background:var(--color-background-toggle-active,var(--color-primary,#5288c1));outline:none;cursor:pointer;}
+._tgnf_ input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;appearance:none;width:14px;height:14px;border-radius:50%;background:#fff;border:none;box-shadow:0 1px 3px rgba(0,0,0,.4);}
+._tgnf_ input[type=range]:disabled{opacity:.4;cursor:default;}
+._tgnf_ ._hint_{font-size:11px;color:var(--color-text-secondary,#888);margin-top:10px;line-height:1.4;}
 \`;
 
 function ensureCSS(){if(!document.getElementById('_tgcss_')){const s=document.createElement('style');s.id='_tgcss_';s.textContent=CSS;(document.head||document.documentElement).appendChild(s);}}
@@ -473,16 +484,88 @@ function setupNotificationSettingsSync() {
         }, true);
     }
 
-    function scan() {
-        var webRow = findSettingRow(/\bВеб-уведомления\b/i);
-        var bgRow = findSettingRow(/\bУведомления в фоне\b/i);
+    // ── Наш блок настроек уведомлений в нативных Настройках→Уведомления ──────
+    // Вставляется самым первым ребёнком .settings-content (над блоком ТГ).
+    // Идемпотентно (id=_tgnotif_block_). Перестраивается только при первом
+    // появлении; состояние тумблеров синхронизируем с настройками на каждом scan.
+    function injectNotifBlock() {
+        var sc = document.querySelector('.settings-content');
+        if (!sc) return;
+        if (!findSettingRow(/\bВеб-уведомления\b/i)) return;   // не в разделе Уведомлений
+        if (document.getElementById('_tgnotif_block_')) return;
 
-        if (webRow) {
-            bindRow(webRow, 'web');
+        var block = document.createElement('div');
+        block.id = '_tgnotif_block_';
+        block.className = '_tgnf_';
+        block.innerHTML =
+              '<div class="_hdr_">Всплывающие уведомления</div>'
+            + '<div class="_sub_">Настройки приложения Telegram Web Desktop — звук, попапы и категории.</div>'
+            + '<label class="_cbx_"><input type="checkbox" id="_tnf_pp_"><span class="box"></span><span class="label">Показывать всплывающие карточки</span></label>'
+            + '<label class="_cbx_"><input type="checkbox" id="_tnf_sd_"><span class="box"></span><span class="label">Звук уведомлений</span></label>'
+            + '<div class="_volrow_"><span class="_lbl_">Громкость</span><input type="range" min="0" max="100" step="1" id="_tnf_vl_"><span class="_pct_" id="_tnf_pct_">80%</span></div>'
+            + '<div class="_hdr_" style="margin-top:14px;">Кому показывать</div>'
+            + '<label class="_cbx_"><input type="checkbox" id="_tnf_cp_"><span class="box"></span><span class="label">Личные сообщения</span></label>'
+            + '<label class="_cbx_"><input type="checkbox" id="_tnf_cg_"><span class="box"></span><span class="label">Группы и каналы</span></label>'
+            + '<div class="_hint_">Каналы различаются от групп только внутри открытого чата; в чат-листе оба отображаются как «группы», поэтому управляются одним переключателем.</div>';
+        sc.insertBefore(block, sc.firstElementChild);
+
+        // ── Биндинг ──────────────────────────────────────────────────────────
+        var pp = block.querySelector('#_tnf_pp_');
+        var sd = block.querySelector('#_tnf_sd_');
+        var vl = block.querySelector('#_tnf_vl_');
+        var pct = block.querySelector('#_tnf_pct_');
+        var cp = block.querySelector('#_tnf_cp_');
+        var cg = block.querySelector('#_tnf_cg_');
+
+        block.dataset.tgNotifBound = '1';
+
+        function syncFromSettings(s) {
+            if (!s) return;
+            pp.checked = s.popup_notifications !== false;
+            sd.checked = s.notif_sound !== false;
+            var v = Math.round((parseFloat(s.notif_volume) >= 0 ? s.notif_volume : 0.8) * 100);
+            vl.value = v; pct.textContent = v + '%';
+            cp.checked = s.notif_cat_private !== false;
+            cg.checked = s.notif_cat_group !== false;
         }
-        if (bgRow) {
-            bindRow(bgRow, 'background');
+        INV('get_settings').then(syncFromSettings).catch(function () {});
+
+        function bindCb(input, patchFn) {
+            input.addEventListener('change', function () {
+                var patch = patchFn(input.checked);
+                savePatch(patch);
+            }, true);
+            // Клик по строке-обёртке тоже переключает чекбокс (как у нативных строк ТГ).
+            input.closest('label').addEventListener('click', function (e) {
+                if (e.target === input) return;
+                e.preventDefault();
+                input.checked = !input.checked;
+                input.dispatchEvent(new Event('change', { bubbles: true }));
+            }, true);
         }
+        bindCb(pp, function (v) { return { popup_notifications: !!v }; });
+        bindCb(sd, function (v) { return { notif_sound: !!v }; });
+        bindCb(cp, function (v) { return { notif_cat_private: !!v }; });
+        bindCb(cg, function (v) { return { notif_cat_group: !!v }; });
+
+        // Громкость: input event → мгновенно сохраняем и обновляем %.
+        vl.addEventListener('input', function () {
+            pct.textContent = vl.value + '%';
+        });
+        var volTimer = null;
+        vl.addEventListener('change', function () {
+            clearTimeout(volTimer);
+            volTimer = setTimeout(function () {
+                savePatch({ notif_volume: Math.round((parseInt(vl.value, 10) || 0) / 100 * 100) / 100 });
+            }, 250);
+        }, true);
+    }
+
+    function scan() {
+        // Только наш блок настроек. TG-галку «Веб-уведомления» НЕ трогаем:
+        // звук/попапы работают независимо от неё (см. setupIncomingSound),
+        // а её включение раньше ломало штатный звук Telegram.
+        injectNotifBlock();
     }
 
     scan();
@@ -918,7 +1001,6 @@ waitBody(()=>{
     setInterval(()=>{if(document.getElementById('_tgdl_')&&document.getElementById('_tgdl_').classList.contains('open'))renderDl();},2000);
 
     setupNotificationSettingsSync();
-    setTimeout(showWebNotifHintIfNeeded, 4000);
 
     let _lastBadgeCount_=-1;
     setInterval(()=>{
@@ -978,6 +1060,100 @@ document.addEventListener('contextmenu', function(e) {
 }, true);
 // ──────────────────────────────────────────────────────────────────────────
 
+// ── Навигация из уведомлений: открыть чат / пометить прочитанным ───────────
+// Hash-навигация (location.hash='#peerId') в уже загруженной SPA Telegram Web A
+// НЕ работает — роутер игнорирует изменение hash после инициализации (проверено
+// на живой странице: и hash=, и location.assign сбрасываются в ''). Единственный
+// надёжный путь без перезагрузки — кликнуть по строке чат-листа.
+window.__tgNotif=(function(){
+    function findRow(pid){
+        var rows=document.querySelectorAll('.chat-list .ListItem.Chat');
+        for(var i=0;i<rows.length;i++){
+            var a=rows[i].querySelector('.Avatar[data-peer-id]');
+            if(a&&a.getAttribute('data-peer-id')===String(pid))return rows[i];
+        }
+        return null;
+    }
+    // Полный путь: при загрузке с нуля hash работает (как в браузере), в живой
+    // странице — нет. Поэтому пробуем клик; если строки нет в DOM (виртуализация),
+    // фолбэк на полную перезагрузку с hash — медленно, но рабочий.
+    function clickRow(row){
+        var btn=row.querySelector('.ListItem-button')||row;
+        try{
+            var r=btn.getBoundingClientRect();
+            var opt={bubbles:true,cancelable:true,view:window,button:0,
+                clientX:r.left+r.width/2,clientY:r.top+r.height/2};
+            btn.dispatchEvent(new MouseEvent('mousedown',opt));
+            btn.dispatchEvent(new MouseEvent('mouseup',opt));
+            btn.dispatchEvent(new MouseEvent('click',opt));
+        }catch(e){ try{btn.click();}catch(e2){} }
+    }
+    function focusComposer(){
+        setTimeout(function(){
+            var i=document.getElementById('editable-message-text');
+            if(i)i.focus();
+        },450);
+    }
+    function openChat(pid){
+        try{
+            pid=String(pid);
+            var row=findRow(pid);
+            if(row){ clickRow(row); focusComposer(); return; }
+        }catch(e){}
+        // Фолбэк: строка вне видимой области (виртуализация) → перезагрузка с hash.
+        try{ location.assign(location.origin+location.pathname+'#'+pid); }catch(e){}
+    }
+    // ПКМ по строке → нативное меню TG → «Отметить как прочитанное».
+    // Чат НЕ открывается, текущий активный чат не меняется.
+    function markRead(pid){
+        try{ pid=String(pid); }catch(e){ return; }
+        var row=findRow(pid);
+        if(!row)return;
+        // Запоминаем открытый чат, чтобы убедиться, что навигации не произошло.
+        var headerPeerEl=document.querySelector('.MiddleHeader .ChatInfo .Avatar[data-peer-id]');
+        var wasOpen=headerPeerEl?headerPeerEl.getAttribute('data-peer-id'):null;
+        var btn=row.querySelector('.ListItem-button')||row;
+        var r=btn.getBoundingClientRect();
+        var opt={bubbles:true,cancelable:true,view:window,button:2,
+            clientX:r.left+r.width/2,clientY:r.top+r.height/2};
+        btn.dispatchEvent(new MouseEvent('contextmenu',opt));
+        // Ждём появления видимого меню TG (только .shown.open — в DOM висят
+        // скрытые устаревшие меню, их не трогаем), ищем пункт, кликаем.
+        var tries=0,maxTries=30;   // ~1.5с при 50мс
+        (function poll(){
+            var menu=document.querySelector('.bubble.menu-container.shown.open, .Menu.context-menu .bubble.shown.open');
+            if(menu){
+                var items=menu.querySelectorAll('.MenuItem, [role="menuitem"], button');
+                for(var i=0;i<items.length;i++){
+                    var t=(items[i].textContent||'').trim();
+                    // Матчим по ИКОНКЕ (icon-readchats) — она не зависит от языка.
+                    // Текст как фолбэк, если разметка иконок изменится.
+                    var byIcon=!!items[i].querySelector('i.icon-readchats, .icon-readchats');
+                    if(byIcon || /пометить прочитанн|отметить как прочитанн|mark as read/i.test(t)){
+                        try{
+                            var er=items[i].getBoundingClientRect();
+                            items[i].dispatchEvent(new MouseEvent('mousedown',{bubbles:true,cancelable:true,view:window,clientX:er.left+1,clientY:er.top+1}));
+                            items[i].dispatchEvent(new MouseEvent('mouseup',{bubbles:true,cancelable:true,view:window,clientX:er.left+1,clientY:er.top+1}));
+                            items[i].dispatchEvent(new MouseEvent('click',{bubbles:true,cancelable:true,view:window,clientX:er.left+1,clientY:er.top+1}));
+                        }catch(e){ try{items[i].click();}catch(e2){} }
+                        return;
+                    }
+                }
+                // Меню всплыло, но пункта нет (возможно уже прочитано) — закрываем.
+                dismissMenu();
+                return;
+            }
+            if(++tries<maxTries)setTimeout(poll,50);
+        })();
+        function dismissMenu(){
+            try{ document.dispatchEvent(new KeyboardEvent('keydown',{key:'Escape',keyCode:27,which:27,bubbles:true})); }catch(e){}
+            try{ document.body.click(); }catch(e){}
+        }
+    }
+    return {openChat:openChat, markRead:markRead};
+})();
+// ──────────────────────────────────────────────────────────────────────────
+
 // ── Перехват входящих → фирменный звук уведомления ─────────────────────────
 // При включённых «Веб-уведомлениях» Telegram уходит в путь системного
 // уведомления и НЕ играет свой in-app звук (системное мы фейкаем) → тишина.
@@ -986,6 +1162,15 @@ document.addEventListener('contextmenu', function(e) {
 // Если TG звук всё же сыграл сам (галка выключена) — не дублируем.
 (function setupIncomingSound(){
     var counts={}, seeded=false, lastTgSound=0;
+    // Кэш настроек (звук/громкость/категории). Обновляем периодически — это
+    // дешёвый INV('get_settings'), и уведомления реагируют на переключатели
+    // без перезагрузки.
+    var cfg={notif_sound:true,notif_volume:0.8,notif_cat_private:true,notif_cat_group:true,notif_cat_channel:true};
+    function refreshCfg(){
+        try{ INV('get_settings').then(function(s){ if(s)cfg=s; }).catch(function(){}); }catch(e){}
+    }
+    refreshCfg();
+    setInterval(refreshCfg,2000);
 
     // Ловим момент, когда сам Telegram играет notification.mp3 — для де-дупа.
     try{
@@ -998,8 +1183,24 @@ document.addEventListener('contextmenu', function(e) {
 
     var SND=location.origin+'/a/notification.mp3';
     function playSound(){
-        if(Date.now()-lastTgSound<1500)return;     // TG уже сыграл свой — не дублируем
-        try{var a=new Audio(SND);a.play().catch(function(){});}catch(e){}
+        if(!cfg.notif_sound)return;                  // звук выключен в настройках
+        if(Date.now()-lastTgSound<1500)return;       // TG уже сыграл свой — не дублируем
+        try{
+            var a=new Audio(SND);
+            var v=parseFloat(cfg.notif_volume);
+            if(!isNaN(v))a.volume=Math.max(0,Math.min(1,v));
+            a.play().catch(function(){});
+        }catch(e){}
+    }
+
+    // Тип чата по данным строки чат-листа.
+    // private — peerId > 0; группа/канал — peerId < 0 (в строке TG рендерит оба
+    // как className "group", поэтому различаем только private vs не-private).
+    // Для целей категорий group+channel управляются одним ключом notif_cat_group.
+    function chatType(item,pid){
+        var n=parseInt(pid,10);
+        if(!isNaN(n)&&n>0)return 'private';
+        return 'group';
     }
 
     function badgeOf(it){
@@ -1048,6 +1249,8 @@ document.addEventListener('contextmenu', function(e) {
             counts[pid]=cnt;
             if(cnt<=0)return;
             if(mutedOf(item))return;                        // приглушённые — без звука и попапа
+            var ctype=chatType(item,pid);
+            if(cfg['notif_cat_'+ctype]===false)return;      // категория выключена в настройках
             if(!seeded)return;                              // первый проход — только seed
             if(prev===undefined)return;                     // впервые видим чат (виртуализация) — не новое
             if(cnt<=prev)return;                            // счётчик не вырос — не новое
