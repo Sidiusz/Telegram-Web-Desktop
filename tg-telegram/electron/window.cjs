@@ -35,6 +35,7 @@ function createWindow(state) {
             nodeIntegration: false,
             spellcheck: false,
             bypassCSP: true,
+            backgroundThrottling: false,
         },
     });
 
@@ -86,24 +87,40 @@ function createWindow(state) {
     });
 
     mainWindow.webContents.on('context-menu', (e, params) => {
-        if (params.mediaType !== 'image' || !params.srcURL) return;
-
         const menu = new Menu();
+        const ef = params.editFlags || {};
 
-        menu.append(new MenuItem({
-            label: 'Сохранить изображение',
-            click: () => {
-                mainWindow.webContents.downloadURL(params.srcURL);
-            },
-        }));
+        // ── Изображение ────────────────────────────────────────────────
+        if (params.mediaType === 'image' && params.srcURL) {
+            menu.append(new MenuItem({
+                label: 'Сохранить изображение',
+                click: () => mainWindow.webContents.downloadURL(params.srcURL),
+            }));
+            menu.append(new MenuItem({
+                label: 'Копировать изображение',
+                click: () => mainWindow.webContents.copyImageAt(params.x, params.y),
+            }));
+        }
 
-        menu.append(new MenuItem({
-            label: 'Копировать изображение',
-            click: () => {
-                mainWindow.webContents.copyImageAt(params.x, params.y);
-            },
-        }));
+        // ── Поле ввода (редактируемое) ─────────────────────────────────
+        if (params.isEditable) {
+            if (menu.items.length) menu.append(new MenuItem({ type: 'separator' }));
+            menu.append(new MenuItem({ role: 'undo',   label: 'Отменить',  enabled: ef.canUndo }));
+            menu.append(new MenuItem({ role: 'redo',   label: 'Повторить', enabled: ef.canRedo }));
+            menu.append(new MenuItem({ type: 'separator' }));
+            menu.append(new MenuItem({ role: 'cut',    label: 'Вырезать',  enabled: ef.canCut }));
+            menu.append(new MenuItem({ role: 'copy',   label: 'Копировать', enabled: ef.canCopy }));
+            menu.append(new MenuItem({ role: 'paste',  label: 'Вставить',  enabled: ef.canPaste }));
+            menu.append(new MenuItem({ role: 'delete', label: 'Удалить',   enabled: ef.canDelete }));
+            menu.append(new MenuItem({ type: 'separator' }));
+            menu.append(new MenuItem({ role: 'selectAll', label: 'Выделить всё', enabled: ef.canSelectAll }));
+        } else if (params.selectionText && params.selectionText.trim()) {
+            // ── Выделенный текст (не редактируемый) ────────────────────
+            if (menu.items.length) menu.append(new MenuItem({ type: 'separator' }));
+            menu.append(new MenuItem({ role: 'copy', label: 'Копировать' }));
+        }
 
+        if (!menu.items.length) return;
         menu.popup({ window: mainWindow });
     });
 

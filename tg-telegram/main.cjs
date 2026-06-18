@@ -3,6 +3,9 @@ const { app, Menu } = require('electron');
 
 app.commandLine.appendSwitch('autoplay-policy', 'no-user-gesture-required');
 app.commandLine.appendSwitch('disable-renderer-backgrounding');
+// Не тормозить таймеры (наш перехватчик входящих) когда окно в фоне / помечено hidden
+app.commandLine.appendSwitch('disable-background-timer-throttling');
+app.commandLine.appendSwitch('disable-backgrounding-occluded-windows');
 
 let reloadInterval = null;
 

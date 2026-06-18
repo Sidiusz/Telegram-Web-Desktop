@@ -10,7 +10,7 @@ const DEFAULTS = {
     auto_reload_on_idle: false,
     idle_timeout: 300,
     minimize_to_tray: false,
-    popup_notifications: false,
+    popup_notifications: true,
     background_notifications_enabled: false,
     webnotif_hint_shown: false,
     devtools_enabled: false,

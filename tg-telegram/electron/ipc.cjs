@@ -40,25 +40,19 @@ function registerIpc(getWindow) {
         version: app.getVersion(),
     }));
 
-    ipcMain.handle('show_notification', (e, { title, body, icon, sender, chatName }) => {
+    ipcMain.handle('show_notification', (e, { title, body, icon, sender, chatName, peerId }) => {
         const settings = state.settings || loadSettings();
         if (!settings.popup_notifications) return;
 
-        const payload = {
-            title,
-            body,
+        const showPreview = settings.notif_show_preview !== false;
+        queueNotification({
+            title: sender || title || chatName || 'Telegram',
+            body: showPreview ? body : 'Новое сообщение',
             icon,
-            sender,
-            chatName,
-            playSound: true,
-        };
-
-        queueNotification(payload);
-
-        const win = getWindow();
-        if (win && !win.isDestroyed()) {
-            win.webContents.send('show-notification', payload);
-        }
+            peerId,
+            playSound: settings.notif_sound !== false,
+            duration: settings.notif_duration || 6,
+        });
     });
 
     ipcMain.handle('save_settings', (e, { settings }) => {
@@ -230,17 +224,8 @@ function registerIpc(getWindow) {
             }
         }
 
-        const settings = state.settings || loadSettings();
-        const shouldPopup = !!settings.popup_notifications;
-
-        if (prev !== null && n > prev && shouldPopup) {
-            queueNotification({
-                title: 'Новое уведомление в Телеграм!',
-                body: 'вам новое сообщение в Телеграм!',
-                playSound: true,
-            });
-        }
-
+        // Попапы входящих делает перехватчик в scripts.cjs (детальные, с текстом).
+        // Здесь только бейдж в трее/оверлей иконки.
         state.lastNotificationCount = n;
         updateTrayBadge(n);
     });

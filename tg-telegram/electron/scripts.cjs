@@ -28,6 +28,8 @@ const NOTIF_PERM_JS = `(function(){
                         active: null,
                         installing: null,
                         waiting: null,
+                        showNotification: function(t, o) { try { notify(t, o); } catch (e) {} return Promise.resolve(); },
+                        getNotifications: function() { return Promise.resolve([]); },
                     }),
                     register: function() {
                         return Promise.resolve({
@@ -39,6 +41,8 @@ const NOTIF_PERM_JS = `(function(){
                                 getSubscription: function() { return Promise.resolve(null); },
                                 subscribe: function() { return Promise.reject(new Error('Push is disabled in this build')); },
                             },
+                            showNotification: function(t, o) { try { notify(t, o); } catch (e) {} return Promise.resolve(); },
+                            getNotifications: function() { return Promise.resolve([]); },
                             addEventListener: function() {},
                             removeEventListener: function() {},
                             unregister: function() { return Promise.resolve(true); },
@@ -80,20 +84,9 @@ const NOTIF_PERM_JS = `(function(){
 
     ensureBackgroundSupport();
 
-    function notify(title, opts) {
-        if (!window.tgBridge || !window.tgBridge.invoke) return;
-        var data = opts || {};
-        var body = normalizeText(data.body, 'вам новое сообщение в Телеграм!');
-        var cleanTitle = normalizeText(title, data.sender || data.chatName || 'Telegram');
-        var icon = String(data.icon || '');
-        window.tgBridge.invoke('show_notification', {
-            title: cleanTitle,
-            body: body,
-            icon: icon,
-            sender: normalizeText(data.sender, ''),
-            chatName: normalizeText(data.chatName, ''),
-        }).catch(function(){});
-    }
+    // Telegram-уведомления (Notification / SW) проглатываем без действий: системное
+    // уведомление не показываем, звук и попапы делает перехватчик в UI_JS.
+    function notify() {}
 
     function makeInstance(title, opts) {
         var instance = Object.create(NotificationShim.prototype || Object.prototype);
@@ -983,6 +976,91 @@ document.addEventListener('contextmenu', function(e) {
         y: e.clientY,
     }).catch(() => {});
 }, true);
+// ──────────────────────────────────────────────────────────────────────────
+
+// ── Перехват входящих → фирменный звук уведомления ─────────────────────────
+// При включённых «Веб-уведомлениях» Telegram уходит в путь системного
+// уведомления и НЕ играет свой in-app звук (системное мы фейкаем) → тишина.
+// Чиним: сами играем фирменный /a/notification.mp3 на каждое входящее.
+// Следим за ростом счётчика непрочитанных в чат-листе (надёжно, по-сообщенно).
+// Если TG звук всё же сыграл сам (галка выключена) — не дублируем.
+(function setupIncomingSound(){
+    var counts={}, seeded=false, lastTgSound=0;
+
+    // Ловим момент, когда сам Telegram играет notification.mp3 — для де-дупа.
+    try{
+        var _play=HTMLMediaElement.prototype.play;
+        HTMLMediaElement.prototype.play=function(){
+            try{ if((((this.src||this.currentSrc)||'')+'').indexOf('notification')>=0) lastTgSound=Date.now(); }catch(e){}
+            return _play.apply(this,arguments);
+        };
+    }catch(e){}
+
+    var SND=location.origin+'/a/notification.mp3';
+    function playSound(){
+        if(Date.now()-lastTgSound<1500)return;     // TG уже сыграл свой — не дублируем
+        try{var a=new Audio(SND);a.play().catch(function(){});}catch(e){}
+    }
+
+    function badgeOf(it){
+        var max=0;
+        it.querySelectorAll('.chat-badge-transition').forEach(function(b){
+            var n=parseInt((b.textContent||'').replace(/[^0-9]/g,''),10);
+            if(!isNaN(n)&&n>max)max=n;
+        });
+        return max;
+    }
+    function peerOf(it){var a=it.querySelector('.Avatar[data-peer-id]');return a?a.getAttribute('data-peer-id'):null;}
+    function mutedOf(it){return !!it.querySelector('.icon-muted');}
+    function titleOf(it){var t=it.querySelector('h3.fullName, .title h3, .fullName');return t?t.textContent.trim().replace(/\\s+/g,' '):'';}
+    function textOf(it){var p=it.querySelector('.last-message');return p?p.textContent.trim().replace(/\\s+/g,' '):'';}
+    function avatarOf(it){var img=it.querySelector('.Avatar img.Avatar__media, .Avatar img');return img&&img.src?img.src:'';}
+    function currentPeer(){var el=document.querySelector('.MiddleHeader .ChatInfo .Avatar[data-peer-id]');return el?el.getAttribute('data-peer-id'):'';}
+    function toDataUrl(src){
+        return new Promise(function(res){
+            if(!src||src.indexOf('blob:')!==0)return res(src||'');
+            fetch(src).then(function(r){return r.blob();}).then(function(b){
+                var fr=new FileReader();fr.onload=function(){res(fr.result);};fr.onerror=function(){res('');};fr.readAsDataURL(b);
+            }).catch(function(){res('');});
+        });
+    }
+    // Текстовое уведомление на экран (звук отдельно — playSound:false).
+    function popup(item,pid){
+        var title=titleOf(item)||'Telegram';
+        var text=textOf(item)||'Новое сообщение';
+        toDataUrl(avatarOf(item)).then(function(icon){
+            INV('show_notification',{title:title,body:text,icon:icon,sender:title,peerId:pid,playSound:false}).catch(function(){});
+        });
+    }
+
+    function scan(){
+        var items=document.querySelectorAll('.chat-list .ListItem.Chat');
+        if(!items.length)return;
+        var openPeer=currentPeer();
+        var focused=document.hasFocus();
+        var fire=false;
+        items.forEach(function(item){
+            if(item.className.indexOf('chat-item-archive')>=0)return;
+            var pid=peerOf(item);
+            if(!pid)return;
+            var cnt=badgeOf(item);
+            var prev=counts[pid];
+            counts[pid]=cnt;
+            if(cnt<=0)return;
+            if(mutedOf(item))return;                        // приглушённые — без звука и попапа
+            if(!seeded)return;                              // первый проход — только seed
+            if(prev===undefined)return;                     // впервые видим чат (виртуализация) — не новое
+            if(cnt<=prev)return;                            // счётчик не вырос — не новое
+            if(pid===openPeer&&focused)return;              // активный чат в фокусе — пропускаем
+            fire=true;
+            popup(item,pid);                                // текстовый попап на экран
+        });
+        seeded=true;
+        if(fire)playSound();                                // один звук за тик, без наложений
+    }
+    scan();
+    setInterval(scan,500);
+})();
 // ──────────────────────────────────────────────────────────────────────────
 })();`;
 
