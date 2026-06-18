@@ -173,7 +173,9 @@ function createWindow(state) {
         state.downloads.push({ id, url: item.getURL(), filename, path: savePath, status: 'downloading' });
         saveDownloads(state.downloads);
 
-        mainWindow.webContents.send('download-event', { type: 'start', id, filename });
+        // origName = имя как в сообщении (до « (1)»); по нему рендерер матчит mid.
+        // filename = реально сохранённое имя (для записи/менеджера).
+        mainWindow.webContents.send('download-event', { type: 'start', id, filename, origName: originalFilename });
 
         item.on('updated', (event, dlState) => {
             if (dlState === 'interrupted') {

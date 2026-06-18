@@ -313,6 +313,9 @@ const CSS=\`
     box-shadow:0 1px 4px rgba(0,0,0,.45);pointer-events:none;z-index:3;}
 ._tgdl_ok_ svg{width:12px;height:12px;}
 .File._tgdl_done_ok_ .file-icon-container{cursor:pointer;}
+/* у скачанного файла формат («zip»/«exe») делаем мельче и сдвигаем под иконку
+   папки, чтобы не перекрывался центральной иконкой «открыть». */
+.File._tgdl_done_ok_ .file-ext{font-size:.8em;transform:translateY(8px);}
 /* Менеджер загрузок (модалка вместо выезжающей панели) */
 ._dmdlg_{width:420px;max-width:calc(100vw - 48px);max-height:min(70vh,560px);}
 ._dmhdr_{display:flex;align-items:center;justify-content:space-between;padding:14px 20px 10px;}
@@ -432,14 +435,16 @@ const DL = window.__tgdl = (function(){
     function onEvent(data){
         if(!data)return;
         if(data.type==='start'){
-            // матчится по filename; если несколько одинаковых — берём последний
-            const mids = pending[data.filename];
+            // Матчим по ОРИГИНАЛЬНОМУ имени (как в сообщении). filename может быть
+            // « (1)» из-за дедупликации на диске — по нему матчить нельзя.
+            const orig = data.origName || data.filename;
+            const mids = pending[orig];
             let mid = mids && mids.length ? mids.pop() : null;
             if(!mid){
                 // нет клика в renderer — возможно ПЕРЕКАЧКА уже скачанного файла
                 // через родное ПКМ-меню TG (его НЕ трогаем). Ищем mid по имени
                 // среди завершённых — туда вернём состояние «качается».
-                for(const m in doneFn){ if(doneFn[m]===data.filename){ mid=m; break; } }
+                for(const m in doneFn){ if(doneFn[m]===orig){ mid=m; break; } }
             }
             if(!mid){
                 // совсем не наше (инициировано не из чата) — покажется только в модалке
@@ -448,7 +453,7 @@ const DL = window.__tgdl = (function(){
             // перекачка: снимаем оверлей «открыть», пусть снова идёт нативный прогресс TG
             if(registry[mid] && registry[mid].status==='completed') unpaint(mid);
             delete doneFn[mid];
-            registry[mid] = { mid, id:data.id, filename:data.filename, status:'downloading', recv:0, total:0 };
+            registry[mid] = { mid, id:data.id, filename:data.filename, origName:orig, status:'downloading', recv:0, total:0 };
             byId[data.id] = mid;
             // привязка к сообщению/чату — чтобы статус пережил перезапуск (#3)
             if(mid.indexOf('__noid__')!==0){
@@ -465,7 +470,7 @@ const DL = window.__tgdl = (function(){
             const r = registry[mid]; if(!r)return;
             r.status = data.status==='completed' ? 'completed' : 'failed';
             applyToMessage(mid);
-            if(r.filename) doneFn[mid] = r.filename;
+            doneFn[mid] = r.origName || r.filename;   // по имени из сообщения (для перекачки)
             refreshSaved();   // обновим кэш сохранённых загрузок (для восстановления)
         }
         // модалка, если открыта — обновим
