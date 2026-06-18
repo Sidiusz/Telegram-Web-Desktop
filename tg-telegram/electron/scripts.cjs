@@ -451,6 +451,19 @@ const DL = window.__tgdl = (function(){
                 for(const m in doneFn){ if(doneFn[m]===orig){ mid=m; break; } }
             }
             if(!mid){
+                // не было нашего клика (напр. сбросили состояние и качаем заново):
+                // привяжем к ВИДИМОМУ сообщению с тем же именем — чтобы скачанное
+                // ВСЕГДА отображалось галочкой, а не уходило в «несвязанное».
+                const titles = document.querySelectorAll('.File .file-title');
+                for(let i=0;i<titles.length;i++){
+                    const nm = (titles[i].getAttribute('title')||titles[i].textContent||'').trim();
+                    if(nm!==orig) continue;
+                    const fm = titles[i].closest('[data-message-id]'); if(!fm) continue;
+                    const cand = fm.getAttribute('data-message-id');
+                    if(!registry[cand] || registry[cand].status!=='completed'){ mid=cand; break; }
+                }
+            }
+            if(!mid){
                 // совсем не наше (инициировано не из чата) — покажется только в модалке
                 mid = '__noid__'+data.id;
             }
@@ -544,19 +557,17 @@ const DL = window.__tgdl = (function(){
         clearBadges(file);
     }
 
-    // Файл пропал с диска: сбрасываем «скачано» → возвращается родная стрелка, и
-    // клик по ней снова качает через TG (свежий blob; программно не дёрнуть).
-    // Забываем привязку (локально + в downloads.json), чтобы галочка не вернулась.
+    // Файл пропал с диска: молча сбрасываем «скачано» → возвращается родная стрелка,
+    // клик по ней снова качает через TG (свежий blob; программно не дёрнуть). Никаких
+    // предупреждений. Забываем привязку (локально + в downloads.json).
     function resetDownloaded(file){
         const mid = file && file.dataset.tgdlMid;
-        if(mid){
-            forgotten[mid] = 1;
-            delete registry[mid];
-            delete doneFn[mid];
-            unpaint(mid);
-            INV('forget_download',{mid:mid}).then(refreshSaved).catch(function(){});
-        }
-        toast('Файл не найден — нажмите иконку, чтобы скачать заново');
+        if(!mid) return;
+        forgotten[mid] = 1;
+        delete registry[mid];
+        delete doneFn[mid];
+        unpaint(mid);
+        INV('forget_download',{mid:mid}).then(refreshSaved).catch(function(){});
     }
 
     // Переприменяем состояние ко всем сообщениям из реестра (идемпотентно).
