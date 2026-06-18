@@ -1082,16 +1082,33 @@ waitBody(()=>{
 ['mousemove','keydown','click','scroll','touchstart'].forEach(ev=>{
     document.addEventListener(ev,()=>INV('report_user_active').catch(()=>{}),{passive:true,capture:true});
 });
-// ── Drag-n-drop: блокируем hover чатов при перетаскивании файлов ────────────
+// ── Drag-n-drop: блокируем переключение чатов при перетаскивании файла ───────
+// TG открывает чат под курсором при dragover по списку. Глушим pointer-events
+// у .chat-list пока тащим файл. Не считаем dragenter/dragleave (счётчик
+// рассинхронивается на границах детей) — держим по таймстампу dragover:
+// dragover сыпется постоянно пока курсор в окне; пропал >200мс → снимаем блок.
+// Текущий чат не страдает: дроп ловит средняя колонка/композер, не список.
 (function(){
-    var _cnt=0,_s=null;
-    function getStyle(){if(!_s){_s=document.createElement('style');_s.id='_drag_bl_';_s.textContent='.ChatList,.chat-list{pointer-events:none!important}.ChatList *,.chat-list *{pointer-events:none!important}';}return _s;}
-    function attach(){if(!_s||!_s.parentNode)(document.head||document.documentElement).appendChild(getStyle());}
-    function detach(){if(_s&&_s.parentNode)_s.parentNode.removeChild(_s);_cnt=0;}
-    document.addEventListener('dragenter',function(e){if(!e.dataTransfer)return;var t=e.dataTransfer.types;if(!t)return;var h=t.indexOf?t.indexOf('Files')>=0:Array.prototype.indexOf.call(t,'Files')>=0;if(!h)return;_cnt++;if(_cnt===1)attach();},true);
-    document.addEventListener('dragleave',function(){_cnt=Math.max(0,_cnt-1);if(_cnt===0)detach();},true);
-    document.addEventListener('drop',detach,true);
-    document.addEventListener('dragend',detach,true);
+    var _s=null,_last=0,_timer=null;
+    function styleEl(){
+        if(_s)return _s;
+        _s=document.createElement('style');_s.id='_drag_bl_';
+        _s.textContent='.chat-list{pointer-events:none!important}.chat-list *{pointer-events:none!important}';
+        return _s;
+    }
+    function attach(){if(!_s||!_s.parentNode)(document.head||document.documentElement).appendChild(styleEl());}
+    function detach(){if(_s&&_s.parentNode)_s.parentNode.removeChild(_s);}
+    function hasFiles(e){var t=e.dataTransfer&&e.dataTransfer.types;if(!t)return false;return t.indexOf?t.indexOf('Files')>=0:Array.prototype.indexOf.call(t,'Files')>=0;}
+    document.addEventListener('dragover',function(e){
+        if(!hasFiles(e))return;
+        _last=Date.now();attach();
+        if(!_timer)_timer=setInterval(function(){
+            if(Date.now()-_last>200){detach();clearInterval(_timer);_timer=null;}
+        },120);
+    },true);
+    function end(){detach();_last=0;if(_timer){clearInterval(_timer);_timer=null;}}
+    document.addEventListener('drop',end,true);
+    document.addEventListener('dragend',end,true);
 })();
 // ─────────────────────────────────────────────────────────────────────────────
 
