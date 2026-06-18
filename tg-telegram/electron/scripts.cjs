@@ -316,31 +316,6 @@ const CSS=\`
 /* у скачанного файла формат («zip»/«exe») делаем мельче и сдвигаем под иконку
    папки, чтобы не перекрывался центральной иконкой «открыть». */
 .File._tgdl_done_ok_ .file-ext{font-size:.8em;transform:translateY(8px);}
-/* Менеджер загрузок (модалка вместо выезжающей панели) */
-._dmdlg_{width:420px;max-width:calc(100vw - 48px);max-height:min(70vh,560px);}
-._dmhdr_{display:flex;align-items:center;justify-content:space-between;padding:14px 20px 10px;}
-._dmhdr_ .modal-title{font-size:16px;font-weight:600;color:#fff;}
-._dmhdr_ .dm-actions{display:flex;gap:6px;}
-._dmhdr_ .dm-clr{background:rgba(229,57,53,.15);border:none;color:#e53935;font-size:12px;padding:4px 10px;border-radius:6px;cursor:pointer;display:inline-flex;align-items:center;gap:4px;}
-._dmhdr_ .dm-clr:hover{background:rgba(229,57,53,.28);}
-._dmlist_{overflow-y:auto;padding:0 8px 12px;flex:1;}
-._dmlist_::-webkit-scrollbar{width:6px;}
-._dmlist_::-webkit-scrollbar-thumb{background:#333;border-radius:3px;}
-._dmrow_{display:flex;align-items:center;gap:12px;padding:10px 12px;border-radius:8px;cursor:default;transition:background .15s;}
-._dmrow_.done{cursor:pointer;}
-._dmrow_.done:hover{background:rgba(255,255,255,.04);}
-._dmrow_.downloading,.dmrow_.failed{cursor:default;}
-._dmico_{width:40px;height:40px;border-radius:50%;flex-shrink:0;display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:700;color:#fff;position:relative;overflow:hidden;background:#2b5278;}
-._dmico_ .ext{z-index:2;}
-._dmico_ .prog-ring{position:absolute;inset:0;border-radius:50%;background:conic-gradient(#5288c1 var(--p,0%),rgba(255,255,255,.12) 0);}
-._dmbody_{flex:1;min-width:0;}
-._dmname_{color:#fff;font-size:13px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
-._dmstat_{color:var(--color-text-secondary,#aaa);font-size:11px;margin-top:2px;}
-._dmact_{display:flex;gap:4px;flex-shrink:0;}
-._dmact_ button{background:none;border:none;color:var(--color-text-secondary,#aaa);cursor:pointer;padding:6px;border-radius:6px;display:flex;align-items:center;justify-content:center;}
-._dmact_ button:hover{background:rgba(255,255,255,.08);color:#fff;}
-._dmact_ button.danger:hover{color:#e53935;}
-._dmact_ button svg{width:16px;height:16px;}
 // ── Наш блок настроек уведомлений (вшит в нативные Настройки→Уведомления) ────
 ._tgnf_{margin:0 0 8px;padding:0 16px;}
 ._tgnf_ ._hdr_{font-size:13px;font-weight:600;color:#fff;margin:12px 0 4px;display:flex;align-items:center;gap:6px;}
@@ -352,6 +327,27 @@ const CSS=\`
 ._tgnf_ input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;appearance:none;width:14px;height:14px;border-radius:50%;background:#fff;border:none;box-shadow:0 1px 3px rgba(0,0,0,.4);}
 ._tgnf_ input[type=range]:disabled{opacity:.4;cursor:default;}
 ._tgnf_ ._hint_{font-size:11px;color:var(--color-text-secondary,#888);margin-top:10px;line-height:1.4;}
+/* ── Фейк-панель «как родной раздел настроек» (#5) ────────────────────────
+   Ложится точно поверх колонки #Settings (та же геометрия, что у Transition).
+   Шапку и контейнер .settings-content клонируем из живого нативного раздела
+   → все хэш-классы и вид 1-в-1 как родной. Своя кнопка «Назад» просто прячет
+   панель (React-state не трогаем → кнопка работает железно). */
+._tgpanel_{position:absolute;inset:0;z-index:50;display:flex;flex-direction:column;background:var(--color-background,#212121);}
+._tgpanel_ .left-header{flex:0 0 auto;}
+._tgpanel_ ._tpc_{flex:1;overflow-y:auto;}
+._tgpanel_._in_ .left-header h3,
+._tgpanel_._in_ ._tpc_{animation:_tpIn_ .22s cubic-bezier(.4,0,.2,1);}
+@keyframes _tpIn_{from{opacity:0;transform:translateX(24px);}to{opacity:1;transform:translateX(0);}}
+/* строка-загрузка: действие справа (Открыть/Папку/Удалить) — подменяем шеврон */
+._tgpanel_ ._tpright_{margin-left:auto;display:flex;gap:2px;flex-shrink:0;}
+._tgpanel_ ._tpright_ button{background:none;border:none;color:var(--color-text-secondary,#aaa);cursor:pointer;padding:6px;border-radius:6px;display:flex;align-items:center;justify-content:center;}
+._tgpanel_ ._tpright_ button:hover{background:rgba(255,255,255,.08);color:#fff;}
+._tgpanel_ ._tpright_ button.danger:hover{color:#e53935;}
+._tgpanel_ ._tpright_ button svg{width:18px;height:18px;}
+._tgpanel_ ._tpempty_{color:var(--color-text-secondary,#aaa);text-align:center;padding:40px 16px;font-size:14px;}
+._tgpanel_ ._tphead_{display:flex;align-items:center;justify-content:space-between;padding:0 16px;}
+._tgpanel_ ._tpclr_{background:rgba(229,57,53,.15);border:none;color:#e53935;font-size:12px;padding:4px 10px;border-radius:6px;cursor:pointer;display:inline-flex;align-items:center;gap:4px;}
+._tgpanel_ ._tpclr_:hover{background:rgba(229,57,53,.28);}
 \`;
 
 function ensureCSS(){if(!document.getElementById('_tgcss_')){const s=document.createElement('style');s.id='_tgcss_';s.textContent=CSS;(document.head||document.documentElement).appendChild(s);}}
@@ -493,8 +489,8 @@ const DL = window.__tgdl = (function(){
             doneFn[mid] = r.origName || r.filename;   // по имени из сообщения (для перекачки)
             refreshSaved();   // обновим кэш сохранённых загрузок (для восстановления)
         }
-        // модалка, если открыта — обновим
-        if(window.__dlModalOpen) refreshDlModal();
+        // нативная панель «Загрузки», если открыта — обновим список
+        if(window.__tgdlNativeRefresh) window.__tgdlNativeRefresh();
     }
 
     // ── In-message overlay ───────────────────────────────────────────────
@@ -997,6 +993,228 @@ function openPanel(id,renderFn){
     p.classList.add('open');renderFn();
 }
 
+// ── Фейк-панель «как родной раздел настроек» (#5) ───────────────────────────
+// Ложится поверх колонки #Settings (position:absolute;inset:0), шапку клонируем
+// из живого нативного раздела (хэш-классы + вид 1-в-1). Своя кнопка «Назад»
+// закрывает панель. React-state НЕ трогаем → работает железно, в отличие от
+// попытки встроить чужой слайд в Transition (React игнорирует чужие классы).
+//   opts: { title, onBack, renderHeader(headerEl), renderContent(contentEl) }
+let _nativePanel=null;
+function closeNativePanel(){ if(_nativePanel){ _nativePanel.remove(); _nativePanel=null; } }
+
+// Открывает нативный экран Настроек TG (клик по пункту «Настройки» в сайд-меню).
+// Используется когда нашу панель зовут из гамбургер-меню при закрытых настройках.
+function tgOpenSettings(){
+    const item=Array.from(document.querySelectorAll('.MenuItem.compact:not([id])')).find(el=>el.querySelector('.icon-settings'));
+    if(item){
+        const r=item.getBoundingClientRect();
+        const opt={bubbles:true,cancelable:true,view:window,button:0,clientX:r.left+r.width/2,clientY:r.top+r.height/2};
+        item.dispatchEvent(new MouseEvent('mousedown',opt));
+        item.dispatchEvent(new MouseEvent('mouseup',opt));
+        item.dispatchEvent(new MouseEvent('click',opt));
+    }
+}
+function openNativePanel(opts){
+    opts=opts||{};
+    closeNativePanel();
+    const settings=document.getElementById('Settings');
+    if(!settings) return;
+    // Снимаем эталон шапки с живого нативного раздела (любой .left-header внутри #Settings).
+    const srcHdr=settings.querySelector('.left-header');
+    const panel=document.createElement('div');
+    panel.className='_tgpanel_';
+    // Шапка — клон нативной: оставляем только кнопку «Назад» + h3.
+    if(srcHdr){
+        const hdr=srcHdr.cloneNode(false);          // только классы, без детей
+        const back=document.createElement('button');
+        back.type='button';
+        back.className='Button smaller translucent round';
+        back.setAttribute('aria-label','Назад'); back.title='Назад';
+        back.innerHTML='<i class="icon icon-arrow-left" aria-hidden="true"></i>';
+        const h3=document.createElement('h3'); h3.textContent=opts.title||'';
+        hdr.appendChild(back); hdr.appendChild(h3);
+        if(opts.renderHeader) opts.renderHeader(hdr);
+        back.addEventListener('click',()=>{ closeNativePanel(); if(opts.onBack)opts.onBack(); });
+        panel.appendChild(hdr);
+    }
+    // Контент: тот же класс, что у нативного раздела (custom-scroll + with-notch),
+    // скроллится, имеет отступы. ID даём, чтобы renderContent нашёл.
+    const content=document.createElement('div');
+    content.className='settings-content custom-scroll with-notch';
+    content.id='_tgpc_';
+    panel.appendChild(content);
+    // Кладём поверх колонки настроек (та же геометрия, что у слайдов).
+    settings.style.position=settings.style.position||'relative';
+    settings.appendChild(panel);
+    _nativePanel=panel;
+    if(opts.renderContent) opts.renderContent(content);
+    // Анимация появления (как нативный slide-in).
+    requestAnimationFrame(()=>panel.classList.add('_in_'));
+    return panel;
+}
+
+// ── «Настройки приложения» как нативный раздел (#5) ────────────────────────
+// Контент — renderSt (настройки приложения), шапка без доп.кнопок.
+function openAppSettingsNative(){
+    // Нативная панель рисуется внутри #Settings (его колонки). Если экран настроек
+    // закрыт (вызвали из гамбургер-меню) — сначала откроем его, затем покажем панель.
+    if(!document.getElementById('Settings')){
+        tgOpenSettings();
+        // ждём появления #Settings (React монтирует асинхронно), потом открываем
+        const tries=setInterval(()=>{
+            if(document.getElementById('Settings')){ clearInterval(tries); openAppSettingsNative(); }
+        },80);
+        setTimeout(()=>clearInterval(tries),4000);  // страховка от вечного поллинга
+        return;
+    }
+    openNativePanel({
+        title:'Настройки приложения',
+        renderHeader(hdr){
+            // ничего лишнего в шапку не кладём (нативный раздел обычно без доп.кнопок)
+        },
+        renderContent(content){
+            renderSt(content);
+        },
+    });
+}
+
+// ── «Загрузки» как нативный раздел (#5) ────────────────────────────────────
+// Строки — клоны нативного .ListItem multiline (title=имя, subtitle=статус/путь),
+// иконка по расширению, справа — действия Открыть/Папа/Удалить. Свой Назад.
+let _dlNativeTimer=null;
+function openDownloadsNative(){
+    // Нативная панель рисуется внутри #Settings (его колонки). Если экран настроек
+    // закрыт (вызвали из гамбургер-меню) — сначала откроем его, затем покажем панель.
+    if(!document.getElementById('Settings')){
+        tgOpenSettings();
+        // ждём появления #Settings (React монтирует асинхронно), потом открываем
+        const tries=setInterval(()=>{
+            if(document.getElementById('Settings')){ clearInterval(tries); openDownloadsNative(); }
+        },80);
+        setTimeout(()=>clearInterval(tries),4000);  // страховка от вечного поллинга
+        return;
+    }
+    const refresh=()=>{ const c=document.getElementById('_tgpc_'); if(c) renderDownloadsNative(c); };
+    const panel=openNativePanel({
+        title:'Загрузки',
+        renderHeader(hdr){
+            const clr=document.createElement('button');
+            clr.className='_tpclr_';
+            clr.innerHTML='<svg width="14" height="14" viewBox="0 0 24 24" fill="none"><path d="M3 6h18M8 6V4h8v2M19 6l-1 14H6L5 6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>Очистить';
+            clr.addEventListener('click',()=>{
+                showModal({
+                    title:'Очистить загрузки',msg:'Удалить все записи загрузок?<br><small style="color:#aaa">Файлы на диске также будут удалены.</small>',
+                    okText:'ОЧИСТИТЬ',okDanger:true,
+                    onOk:async()=>{
+                        const items=await INV('get_downloads');
+                        for(const d of (items||[])) await INV('delete_download',{id:d.id});
+                        refresh();
+                    }
+                });
+            });
+            // кнопка «Назад» уже есть в шапке; «Очистить» кладём рядом с h3.
+            hdr.appendChild(clr);
+        },
+        renderContent(content){
+            renderDownloadsNative(content);
+        },
+        onBack(){ closeNativeDlPanel(); }
+    });
+    // live-refresh + хук для DL-registry (обновит список при событиях загрузки)
+    window.__tgdlNativeRefresh=refresh;
+    if(_dlNativeTimer)clearInterval(_dlNativeTimer);
+    _dlNativeTimer=setInterval(()=>{
+        if(document.getElementById('_tgpc_')) refresh();
+        else closeNativeDlPanel();
+    },700);
+    return panel;
+}
+function closeNativeDlPanel(){
+    if(_dlNativeTimer){clearInterval(_dlNativeTimer);_dlNativeTimer=null;}
+    delete window.__tgdlNativeRefresh;
+    closeNativePanel();
+}
+
+// Рисует список загрузок в переданный контент-контейнер (нативная панель).
+// Эталон строки: <div class="ListItem multiline"><div class="ListItem-button">…</div></div>.
+async function renderDownloadsNative(content){
+    if(!content)return;
+    const merged=await collectDownloads();
+    content.innerHTML='';
+    if(!merged.length){
+        const empty=document.createElement('div');
+        empty.className='_tpempty_';
+        empty.textContent='Нет загрузок';
+        content.appendChild(empty);
+        return;
+    }
+    merged.forEach(d=>content.appendChild(_nativeDlRow(d, ()=>renderDownloadsNative(content))));
+}
+
+// Строка-загрузка в нативном стиле (клон .ListItem multiline). cb — перерисовка.
+function _nativeDlRow(d, cb){
+    const done=d.status==='completed';
+    const active=d.status==='downloading'||d.status==='pending';
+    const failed=d.status==='failed';
+    const row=document.createElement('div');
+    row.className='ListItem multiline'+(done?'':'');
+    const btn=document.createElement('div');
+    btn.className='ListItem-button'; btn.setAttribute('role','button'); btn.tabIndex=0;
+    // иконка по расширению
+    const ext=_fileExt(d.filename);
+    const ico=document.createElement('i');
+    ico.className='icon ListItem-main-icon';
+    ico.setAttribute('aria-hidden','true');
+    ico.style.cssText='display:flex;align-items:center;justify-content:center;font-size:9px;font-weight:700;color:#fff;border-radius:50%;width:30px;height:30px;background:'+_extColor(ext)+';font-style:normal;';
+    ico.textContent=(ext||'?').slice(0,4).toUpperCase();
+    btn.appendChild(ico);
+    const item=document.createElement('div');
+    item.className='multiline-item';
+    const title=document.createElement('span');
+    title.className='title';
+    title.textContent=d.filename||'(без имени)';
+    title.style.overflow='hidden'; title.style.textOverflow='ellipsis'; title.style.whiteSpace='nowrap';
+    const sub=document.createElement('span');
+    sub.className='subtitle';
+    sub.style.color=sColor(d.status);
+    if(active){
+        const fmt=window.__tgdl&&window.__tgdl.fmtProgress||function(){return '';};
+        sub.textContent=d.status==='pending'?'Ожидание…':fmt(d.recv,d.total);
+    } else if(done){
+        const fb=window.__tgdl?window.__tgdl.fmtBytes:function(){return '';};
+        sub.textContent='Завершено'+(d.total?(' · '+fb(d.total)):'');
+    } else {
+        sub.textContent=sLabel(d.status);
+    }
+    item.appendChild(title); item.appendChild(sub);
+    btn.appendChild(item);
+    // действия справа: только «Папка» и «Удалить». «Открыть» убрано — клик по
+    // самой строке (ListItem-button) уже открывает файл (см. ниже btn.click).
+    const right=document.createElement('div');
+    right.className='_tpright_';
+    if(done&&d.id!=null){
+        const fld=document.createElement('button'); fld.title='Показать в папке';
+        fld.innerHTML='<svg viewBox="0 0 24 24" fill="none"><path d="M3 7a2 2 0 012-2h4l2 2h8a2 2 0 012 2v7a2 2 0 01-2 2H5a2 2 0 01-2-2V7z" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/></svg>';
+        fld.addEventListener('click',e=>{e.stopPropagation();INV('open_download_folder',{id:d.id}).then(r=>{if(r&&r.error)toast('Файл не найден');}).catch(()=>{});});
+        right.appendChild(fld);
+    }
+    if(d.id!=null){
+        const del=document.createElement('button'); del.className='danger'; del.title='Удалить';
+        del.innerHTML='<svg viewBox="0 0 24 24" fill="none"><path d="M3 6h18M8 6V4h8v2M19 6l-1 14H6L5 6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>';
+        del.addEventListener('click',e=>{
+            e.stopPropagation();
+            showModal({title:'Удалить загрузку',msg:'Удалить «'+(d.filename||'')+'»?<br><small style="color:#aaa">Файл также будет удалён с диска.</small>',okText:'УДАЛИТЬ',okDanger:true,onOk:async()=>{await INV('delete_download',{id:d.id});cb();}});
+        });
+        right.appendChild(del);
+    }
+    btn.appendChild(right);
+    if(done&&d.id!=null){
+        btn.addEventListener('click',()=>INV('open_download_file',{id:d.id}).then(r=>{if(r&&r.error){toast('Файл не найден');cb();}}).catch(()=>{}));
+    }
+    row.appendChild(btn);
+    return row;
+}
+
 function sLabel(s){return{pending:'Ожидание…',downloading:'⬇ Загружается',completed:'✓ Завершено',failed:'✕ Ошибка',cancelled:'— Отменено'}[s]||s;}
 function sColor(s){return{pending:'#aaa',downloading:'var(--color-primary,#5288c1)',completed:'#4caf50',failed:'#e53935',cancelled:'#aaa'}[s]||'#aaa';}
 
@@ -1015,133 +1233,25 @@ function _extColor(ext){
     })[ext]||'#5288c1';
 }
 
-// ── Модалка «Загрузки» (#5): Telegram-style, reusing showModal styling ─────
-let _dlModal=null;
-function openDownloadsModal(){
-    if(_dlModal){ _dlModal.remove(); _dlModal=null; }
-    const mo=document.createElement('div');mo.className='_mo_';
-    mo.innerHTML=(
-        '<div class="modal-dialog _dmdlg_">'+
-            '<div class="_dmhdr_">'+
-                '<div class="modal-title">Загрузки</div>'+
-                '<div class="dm-actions"><button class="dm-clr" id="_dmclr_"><svg width="14" height="14" viewBox="0 0 24 24" fill="none"><path d="M3 6h18M8 6V4h8v2M19 6l-1 14H6L5 6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>Очистить</button></div>'+
-            '</div>'+
-            '<div class="_dmlist_" id="_dmlist_"></div>'+
-        '</div>'
-    );
-    document.body.appendChild(mo);
-    _dlModal=mo;
-    window.__dlModalOpen=true;
-    const close=()=>{ window.__dlModalOpen=false; _dlModal=null; mo.remove(); };
-    mo.addEventListener('click',e=>{ if(e.target===mo) close(); });
-    const clr=mo.querySelector('#_dmclr_');
-    if(clr)clr.addEventListener('click',async()=>{
-        showModal({
-            title:'Очистить загрузки',msg:'Удалить все записи загрузок?<br><small style="color:#aaa">Файлы на диске также будут удалены.</small>',
-            okText:'ОЧИСТИТЬ',okDanger:true,
-            onOk:async()=>{
-                const items=await INV('get_downloads');
-                for(const d of (items||[])) await INV('delete_download',{id:d.id});
-                refreshDlModal();
-            }
-        });
-    });
-    refreshDlModal();
-    // live-refresh while open
-    _dlModal._timer=setInterval(()=>{ if(_dlModal) refreshDlModal(); else clearInterval(_dlModal&&_dlModal._timer); }, 700);
-    const origClose=close;
-    // ensure timer cleared on any close path
-    const _t=_dlModal._timer;
-    const _cleanup=()=>{ clearInterval(_t); };
-    mo.addEventListener('remove',_cleanup);
-    // intercept removal
-    const obs=new MutationObserver(()=>{ if(!document.body.contains(mo)){ _cleanup(); obs.disconnect(); } });
-    obs.observe(document.body,{childList:true,subtree:false});
-}
-
 // Объединяет активные (registry) + сохранённые (get_downloads), без дублей по id.
-async function refreshDlModal(){
-    const list=_dlModal?_dlModal.querySelector('#_dmlist_'):null;
-    if(!list)return;
-    // активные in-flight из registry (по mid)
+// Общая для модалки загрузок и нативной панели «Загрузки» (#5).
+async function collectDownloads(){
     const active=[];
     const reg=window.__tgdl?window.__tgdl.registry:{};
     const byId=window.__tgdl?window.__tgdl.byId:{};
     const seenIds={};
     for(const mid in reg){
         const r=reg[mid];
-        if(r.status==='completed'||r.status==='failed'){
-            // завершённые из registry тоже покажем, но get_downloads может их уже не иметь сразу
-        }
         if(r.id!=null){ seenIds[r.id]=true; }
         active.push({ id:r.id, mid:r.mid, filename:r.filename, status:r.status, recv:r.recv, total:r.total, live:true });
     }
     let saved=[];
     try{ saved=await INV('get_downloads'); }catch(e){}
     saved=saved||[];
-    // объединяем: сохранённые (кроме активных live-загрузок) + активные
     const merged=[];
     saved.slice().reverse().forEach(d=>{ if(!seenIds[d.id]) merged.push(Object.assign({},d,{live:false})); });
-    // активные — сверху
     active.forEach(d=>{ const s=saved.find(x=>x.id===d.id); if(s) d.path=s.path; merged.unshift(d); });
-    // дедуп по filename+status для отображения
-    list.innerHTML='';
-    if(!merged.length){ list.innerHTML='<div class="_empty_">Нет загрузок</div>'; return; }
-    merged.forEach(d=>{ list.appendChild(_dmRow(d)); });
-}
-
-function _dmRow(d){
-    const div=document.createElement('div');
-    const done=d.status==='completed';
-    const active=d.status==='downloading'||d.status==='pending';
-    const failed=d.status==='failed';
-    div.className='_dmrow_'+(done?' done':'')+(active?' downloading':'')+(failed?' failed':'');
-    div.dataset.id = d.id!=null?String(d.id):'';
-    const ext=_fileExt(d.filename);
-    const ico=document.createElement('div');ico.className='_dmico_';
-    ico.style.background=_extColor(ext);
-    if(active){
-        const pct=(d.total&&d.recv!=null)?Math.min(100,Math.round(d.recv/d.total*100)):0;
-        ico.innerHTML='<div class="prog-ring" style="--p:'+(d.total?pct:25)+'%"></div><span class="ext">'+(ext||'?').slice(0,4)+'</span>';
-    } else if(failed){
-        ico.innerHTML='<svg width="18" height="18" viewBox="0 0 24 24" fill="none"><path d="M6 6l12 12M18 6L6 18" stroke="#fff" stroke-width="2.5" stroke-linecap="round"/></svg>';
-    } else {
-        ico.innerHTML='<span class="ext">'+(ext||'?').slice(0,4)+'</span>';
-    }
-    const body=document.createElement('div');body.className='_dmbody_';
-    const name=document.createElement('div');name.className='_dmname_';name.textContent=d.filename||'(без имени)';
-    const stat=document.createElement('div');stat.className='_dmstat_';stat.style.color=sColor(d.status);
-    if(active){
-        const fmt=window.__tgdl&&window.__tgdl.fmtProgress||function(){return '';};
-        stat.textContent=d.status==='pending'?'Ожидание…':fmt(d.recv,d.total);
-    } else if(done){
-        stat.textContent='Завершено'+(d.path?(' · '+d.filename):'');
-    } else {
-        stat.textContent=sLabel(d.status);
-    }
-    body.appendChild(name);body.appendChild(stat);
-    const act=document.createElement('div');act.className='_dmact_';
-    if(done&&d.id!=null){
-        const open=document.createElement('button');open.title='Открыть';
-        open.innerHTML='<svg viewBox="0 0 24 24" fill="none"><path d="M5 12l4 4 10-10" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>';
-        open.addEventListener('click',()=>INV('open_download_file',{id:d.id}).catch(()=>{}));
-        act.appendChild(open);
-        const fld=document.createElement('button');fld.title='Показать в папке';
-        fld.innerHTML='<svg viewBox="0 0 24 24" fill="none"><path d="M3 7a2 2 0 012-2h4l2 2h8a2 2 0 012 2v7a2 2 0 01-2 2H5a2 2 0 01-2-2V7z" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/></svg>';
-        fld.addEventListener('click',()=>INV('open_download_folder',{id:d.id}).catch(()=>{}));
-        act.appendChild(fld);
-    }
-    if(d.id!=null){
-        const del=document.createElement('button');del.className='danger';del.title='Удалить';
-        del.innerHTML='<svg viewBox="0 0 24 24" fill="none"><path d="M3 6h18M8 6V4h8v2M19 6l-1 14H6L5 6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>';
-        del.addEventListener('click',()=>{showModal({title:'Удалить загрузку',msg:'Удалить «'+(d.filename||'')+'»?<br><small style="color:#aaa">Файл также будет удалён с диска.</small>',okText:'УДАЛИТЬ',okDanger:true,onOk:async()=>{await INV('delete_download',{id:d.id});refreshDlModal();}});});
-        act.appendChild(del);
-    }
-    div.appendChild(ico);div.appendChild(body);div.appendChild(act);
-    if(done&&d.id!=null){
-        div.addEventListener('click',e=>{ if(e.target.closest('button'))return; INV('open_download_file',{id:d.id}).catch(()=>{}); });
-    }
-    return div;
+    return merged;
 }
 
 let _saveTimer=null;
@@ -1157,8 +1267,8 @@ function scheduleSave(){
     },600);
 }
 
-async function renderSt(){
-    const c=document.getElementById('_tgst_c');if(!c)return;
+async function renderSt(target){
+    const c=target||document.getElementById('_tgst_c');if(!c)return;
     c.innerHTML='<div class="_empty_">Загрузка...</div>';
     let s={};
     try{s=await INV('get_settings');}catch(e){c.innerHTML='<div class="_empty_">Ошибка: '+e+'</div>';return;}
@@ -1435,8 +1545,8 @@ function injectMenu(){
         const sep1 = document.createElement('div'); sep1.className = sepClass;
         const sep2 = document.createElement('div'); sep2.className = sepClass;
 
-        const dl = mi('_tgmi_dl_', 'icon-download', 'Загрузки приложения', () => openDownloadsModal());
-        const st = mi('_tgmi_st_', 'icon-settings', 'Настройки приложения', () => openPanel('_tgst_', renderSt));
+        const dl = mi('_tgmi_dl_', 'icon-download', 'Загрузки', () => openDownloadsNative());
+        const st = mi('_tgmi_st_', 'icon-settings', 'Настройки приложения', () => openAppSettingsNative());
         const cl = mi('_tgmi_cl_', 'icon-info', 'Список изменений', () => openPanel('_tgcl_', renderCl));
         const upd = mi('_tgmi_upd_', 'icon-reload', 'Проверить обновления', async () => {
             toast('Проверка обновлений...', 'icon-reload');
@@ -1463,6 +1573,64 @@ function injectMenu(){
 }
 // ────────────────────────────────────────────────────────────────────────
 
+// ── ИНЖЕКТ В НАТИВНЫЙ СПИСОК НАСТРОЕК (#5): клонируем живую нативную строку ──
+// Главное меню Настроек TG (Уведомления / Данные и память / Конфиденциальность…)
+// — встраиваем «Настройки приложения» (сразу под «Общие») и «Загрузки».
+// Классы ListItem* семантические (не хэш), контейнер-список хэширован (RE8jeQLf),
+// поэтому находим список через якорь-строку (icon-unmute = «Уведомления») и клонируем
+// её узел → меня иконку/текст → вставляем. Так вид 1-в-1 как родной и переживёт сборку.
+function injectSettingsRows(){
+    const notif = document.querySelector('.ListItem.narrow .ListItem-button .icon-unmute');
+    const data  = document.querySelector('.ListItem.narrow .ListItem-button .icon-data');
+    const list  = (notif || data) && (notif || data).closest('.ListItem.narrow').parentElement;
+    if(!list) return;
+    if(list.querySelector('#_tgst_app_,#_tgst_dl_')) return;   // уже вставлено
+
+    // Клонируем живую нативную строку → собираем свою по тому же шаблону.
+    const tmpl = (notif || data).closest('.ListItem.narrow');
+    function makeRow(id, iconName, label){
+        const row = tmpl.cloneNode(true);
+        row.removeAttribute('id'); row.id = id;
+        const btn = row.querySelector('.ListItem-button');
+        // выкидываем текст/значение, оставляем только иконку
+        Array.from(btn.childNodes).forEach(n=>{
+            if(n.nodeType===3 || (n.nodeType===1 && /settings-item__current-value/.test(n.className||''))) btn.removeChild(n);
+        });
+        const ico = btn.querySelector('i.icon');
+        if(ico){
+            ico.className = 'icon icon-'+iconName+' ListItem-main-icon';
+            ico.setAttribute('aria-hidden','true');
+        }
+        btn.appendChild(document.createTextNode(label));
+        return row;
+    }
+
+    // 1) «Настройки приложения» — сразу под «Общие настройки» (если она есть вверху)
+    const appRow = makeRow('_tgst_app_', 'settings', 'Настройки приложения');
+    appRow.querySelector('.ListItem-button').addEventListener('click', () => openAppSettingsNative());
+    // «Общие настройки» (icon-chat/General) идёт первой; вставим после неё, иначе — в начало списка.
+    const chatRow = list.querySelector('.ListItem.narrow .icon-chat, .ListItem.narrow .ListItem-main-icon');
+    const generalAnchor = chatRow && chatRow.closest('.ListItem.narrow');
+    if(generalAnchor && generalAnchor !== tmpl){
+        generalAnchor.after(appRow);
+    } else {
+        list.insertBefore(appRow, list.firstChild);
+    }
+
+    // 2) «Загрузки» — после «Данные и память» (если есть), иначе после «Уведомления».
+    const dlRow = makeRow('_tgst_dl_', 'download', 'Загрузки');
+    dlRow.querySelector('.ListItem-button').addEventListener('click', () => openDownloadsNative());
+    const dataRow = data && data.closest('.ListItem.narrow');
+    if(dataRow){
+        dataRow.after(dlRow);
+    } else if(notif){
+        notif.closest('.ListItem.narrow').after(dlRow);
+    } else {
+        appRow.after(dlRow);
+    }
+}
+// ─────────────────────────────────────────────────────────────────────────────
+
 function tryInject(){ensureCSS();ensureToast();ensureCornerWrap();ensurePanels();}
 function waitBody(cb){if(document.body)cb();else{const t=setInterval(()=>{if(document.body){clearInterval(t);cb();}},50);}}
 
@@ -1472,6 +1640,19 @@ waitBody(()=>{
     
     // Запускаем инжект с интервалом, ловим меню в момент его появления
     setInterval(injectMenu, 500);
+    setInterval(injectSettingsRows, 500);
+    // Реактивный инжект: стреляет почти в тот же кадр, как только React смонтировал
+    // список настроек/меню (иначе был виден «провал» — до 500мс нативные строки без
+    // наших). Глубокий observer (subtree:true), но с дебаунсом 40мс — TG мутирует
+    // DOM постоянно (печать/скролл), и inject на каждой мутации сам бы дёргал меню.
+    // inject идемпотентен (guard по id), повторные вызовы ничего не пишут в DOM.
+    let _injT=null;
+    const _stObs=new MutationObserver(()=>{
+        if(_injT)return;
+        _injT=setTimeout(()=>{_injT=null;injectMenu();injectSettingsRows();},40);
+    });
+    const _startObs=()=>{ if(document.body) _stObs.observe(document.body,{childList:true,subtree:true}); else setTimeout(_startObs,80); };
+    _startObs();
 
     setupNotificationSettingsSync();
 
