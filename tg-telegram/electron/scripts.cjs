@@ -295,10 +295,18 @@ const CSS=\`
 ._dlb_status_{color:#aaa;font-size:11px;margin-top:2px;}
 ._dlb_prog_{height:2px;background:rgba(255,255,255,.1);border-radius:2px;margin-top:6px;overflow:hidden;}
 ._dlb_prog_ span{display:block;height:100%;background:#5288c1;border-radius:2px;transition:width .3s;}
-/* #5: после скачивания меняем содержимое нативной .action-icon (иконка скачивания)
-   на галочку «открыть». Своих оверлеев/спиннеров НЕТ — нативный прогресс TG работает. */
-.File .action-icon[data-tgdl-open]{color:#4caf50;}
-.File .action-icon[data-tgdl-open] svg{display:block;}
+/* #5: скачанный файл. Родные ноды НЕ трогаем — прячем стрелку скачивания через CSS
+   (обратимо) и кладём свои оверлеи: зелёная галочка (открыть файл) + папка. */
+.File[data-tgdl-done="1"] .action-icon{display:none!important;}
+.File[data-tgdl-done="1"] .file-icon-container{position:relative;}
+._tgdl_ok_,._tgdl_dir_{position:absolute;width:20px;height:20px;padding:0;border:none;
+    border-radius:50%;display:flex;align-items:center;justify-content:center;cursor:pointer;
+    box-shadow:0 1px 4px rgba(0,0,0,.45);z-index:3;transition:transform .12s;}
+._tgdl_ok_{right:-3px;bottom:-3px;background:#4caf50;}
+._tgdl_dir_{left:-3px;bottom:-3px;background:rgba(20,28,38,.92);}
+._tgdl_ok_:hover,._tgdl_dir_:hover{transform:scale(1.12);}
+._tgdl_ok_ svg{width:13px;height:13px;}
+._tgdl_dir_ svg{width:12px;height:12px;color:#fff;}
 /* Менеджер загрузок (модалка вместо выезжающей панели) */
 ._dmdlg_{width:420px;max-width:calc(100vw - 48px);max-height:min(70vh,560px);}
 ._dmhdr_{display:flex;align-items:center;justify-content:space-between;padding:14px 20px 10px;}
@@ -433,31 +441,45 @@ const DL = window.__tgdl = (function(){
         if(!msg) return;                                   // виртуализировано — пропустим, интервал доберёт
         paintMessage(msg, r);
     }
+    // ВАЖНО: родные ноды TG (.action-icon, .file-icon) НЕ мутируем — иначе ломается
+    // кнопка скачивания и hover-анимация «ушка». Только накладываем свои оверлеи
+    // и прячем родную стрелку через CSS (обратимо: снимаем data-атрибут).
     function paintMessage(msg, r){
         const file = msg.querySelector('.File'); if(!file)return;
-        const status = r.status;
-        if(status==='completed'){
-            // ЗАМЕНА иконки скачивания на иконку «открыть». Ничего больше не трогаем:
-            // нативный прогресс TG работает сам, свой индикатор не рисуем.
-            // .action-icon — это <i> с иконкой скачивания; подменяем содержимое.
-            const ai = file.querySelector('.action-icon');
-            if(ai && !ai.dataset.tgdlOpen){
-                ai.dataset.tgdlOpen='1';
-                ai.className='action-icon';                  // сбрасываем .icon-download и пр.
-                // иконка «открыть» — раскрытая папка
-                ai.innerHTML='<svg viewBox="0 0 24 24" fill="currentColor" style="width:62%;height:62%"><path d="M4 6a2 2 0 0 1 2-2h3.2a2 2 0 0 1 1.6.8l.8 1.07A1 1 0 0 0 12.4 6H18a2 2 0 0 1 2 2v1H4V6z"/><path d="M3.3 11h17.4a1 1 0 0 1 .97 1.24l-1.5 6A2 2 0 0 1 18.23 20H5.77a2 2 0 0 1-1.94-1.51l-1.5-6A1 1 0 0 1 3.3 11z"/></svg>';
-            }
+        if(r.status==='completed'){
             file.dataset.tgdlDone='1';
             file.dataset.tgdlId = r.id!=null ? String(r.id) : (file.dataset.tgdlId||'');
             file.dataset.tgdlMid = r.mid;
-        } else if(status==='failed'){
+            ensureBadges(file);
+        } else {
+            // pending/downloading/failed — никаких оверлеев, нативный прогресс TG сам
             file.removeAttribute('data-tgdl-done');
+            clearBadges(file);
         }
-        // pending/downloading: НЕ вмешиваемся — нативный прогресс TG работает сам.
     }
 
-    // Снять оверлей «открыть» (перекачка): вернуть родную иконку скачивания TG.
-    // ПКМ-меню TG не трогаем — оно стандартное; здесь только сбрасываем наш оверлей.
+    // Зелёная галочка (скачано, клик = открыть файл) + кнопка «открыть папку».
+    // Кладём в .file-icon-container; родную стрелку прячем CSS-правилом по data-tgdl-done.
+    function ensureBadges(file){
+        const cont = file.querySelector('.file-icon-container'); if(!cont)return;
+        if(cont.querySelector('._tgdl_ok_')) return;          // уже стоят — идемпотентно
+        const ok = document.createElement('button');
+        ok.className='_tgdl_ok_'; ok.title='Открыть файл';
+        ok.innerHTML='<svg viewBox="0 0 24 24" fill="none"><path d="M5 12l4 4 10-10" stroke="#fff" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/></svg>';
+        ok.addEventListener('click',function(e){e.preventDefault();e.stopPropagation();const id=parseInt(file.dataset.tgdlId,10);if(id)INV('open_download_file',{id}).catch(function(){});});
+        const dir = document.createElement('button');
+        dir.className='_tgdl_dir_'; dir.title='Открыть папку с файлом';
+        dir.innerHTML='<svg viewBox="0 0 24 24" fill="currentColor"><path d="M3 6a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V6z"/></svg>';
+        dir.addEventListener('click',function(e){e.preventDefault();e.stopPropagation();const id=parseInt(file.dataset.tgdlId,10);if(id)INV('open_download_folder',{id}).catch(function(){});});
+        cont.appendChild(ok); cont.appendChild(dir);
+    }
+    function clearBadges(file){
+        const cont = file.querySelector('.file-icon-container'); if(!cont)return;
+        const a=cont.querySelector('._tgdl_ok_'); if(a)a.remove();
+        const b=cont.querySelector('._tgdl_dir_'); if(b)b.remove();
+    }
+
+    // Перекачка: снимаем оверлей, возвращаем родную стрелку (CSS), не трогаем ПКМ-меню.
     function unpaint(mid){
         const msg = document.querySelector('.Message[data-message-id="'+mid+'"]');
         if(!msg) return;
@@ -465,19 +487,28 @@ const DL = window.__tgdl = (function(){
         file.removeAttribute('data-tgdl-done');
         file.removeAttribute('data-tgdl-id');
         file.removeAttribute('data-tgdl-mid');
-        const ai = file.querySelector('.action-icon');
-        if(ai && ai.dataset.tgdlOpen){
-            delete ai.dataset.tgdlOpen;
-            ai.className='action-icon icon icon-download'; // родная иконка скачивания
-            ai.innerHTML='';
-        }
+        clearBadges(file);
     }
 
-    // Интервал: переприменяем состояние к виртуализированным сообщениям.
+    // Переприменяем состояние ко всем сообщениям из реестра (идемпотентно).
     function scanMessages(){
         for(const mid in registry){ applyToMessage(mid); }
     }
+    // Страховочный таймер (виртуализация/редкие случаи).
     setInterval(scanMessages, 600);
+    // TG перерисовывает .action-icon после своей загрузки и при повторном входе в
+    // диалог — затирая наш оверлей. MutationObserver ловит перерисовку и сразу
+    // переприменяет, без задержки таймера. Дебаунс 50мс; paint идемпотентен
+    // (повторный проход не мутирует DOM → не зациклится).
+    let _moT=null;
+    const _mo=new MutationObserver(function(){
+        if(_moT)return;
+        _moT=setTimeout(function(){_moT=null;scanMessages();},50);
+    });
+    (function startMO(){
+        if(document.body) _mo.observe(document.body,{childList:true,subtree:true});
+        else setTimeout(startMO,200);
+    })();
 
     // ── Клик-перехват на .File (capture) ─────────────────────────────────
     // Ловим mid+filename до того, как TG начнёт скачивание. Не блокируем клик —
@@ -500,6 +531,19 @@ const DL = window.__tgdl = (function(){
             return;
         }
         if(filename) expectDownload(mid, filename);
+    }, true);
+
+    // ПКМ по .File: запоминаем кандидата для матчинга, если из РОДНОГО меню выберут
+    // «Скачать». Меню НЕ трогаем (остаётся стандартным), статус/оверлей не меняем —
+    // только кладём filename→mid в очередь, чтобы пришедший start привязался к чату.
+    document.addEventListener('contextmenu', function(e){
+        const file = e.target.closest && e.target.closest('.File');
+        if(!file)return;
+        const msg = file.closest('[data-message-id]'); if(!msg)return;
+        const mid = msg.getAttribute('data-message-id');
+        const t = file.querySelector('.file-title');
+        const filename = t ? (t.getAttribute('title')||t.textContent||'').trim() : '';
+        if(filename) (pending[filename] = pending[filename] || []).push(mid);
     }, true);
 
     // ПКМ по .File не перехватываем — TG показывает своё родное контекстное меню.
