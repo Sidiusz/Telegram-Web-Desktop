@@ -410,7 +410,9 @@ const DL = window.__tgdl = (function(){
         const pid = currentPeer(); if(!pid) return;
         const byMid = {};
         savedDl.forEach(function(r){
-            if(r.status==='completed' && r.mid && String(r.peerId)===String(pid)){
+            // exists — снимок ФС из get_downloads. false = файл удалили (напр. из
+            // Проводника): галочку «скачано» НЕ восстанавливаем, пусть TG качает заново.
+            if(r.status==='completed' && r.mid && String(r.peerId)===String(pid) && r.exists!==false){
                 const prev = byMid[r.mid];
                 if(!prev || r.id>prev.id) byMid[r.mid] = r;   // последняя загрузка побеждает
             }
@@ -574,16 +576,30 @@ const DL = window.__tgdl = (function(){
     function scanMessages(){
         for(const mid in registry){ applyToMessage(mid); }
     }
+    // Файлы могли удалить/переместить из Проводника — проверяем их существование
+    // (exists из get_downloads) на каждом свежем запросе, а не верим сохранённому
+    // status:'completed'. Кэш savedDl протухает между запросами, поэтому при смене/
+    // открытии чата перезапрашиваем: пользователь «смотрит» на бейджи именно тогда.
+    // exists!==false (а не ===true) — чтобы старые записи без поля не отваливались.
+    let _lastPeer = null;
+    function restoreForChatIfPeerChanged(){
+        const pid = currentPeer();
+        if(pid && pid !== _lastPeer){
+            _lastPeer = pid;
+            refreshSaved();   // обновит savedDl свежим exists → restoreForChat отфильтрует
+        }
+    }
     // Страховочный таймер (виртуализация/редкие случаи).
     setInterval(scanMessages, 600);
     // TG перерисовывает .action-icon после своей загрузки и при повторном входе в
     // диалог — затирая наш оверлей. MutationObserver ловит перерисовку и сразу
     // переприменяет, без задержки таймера. Дебаунс 50мс; paint идемпотентен
-    // (повторный проход не мутирует DOM → не зациклится).
+    // (повторный проход не мутирует DOM → не зациклится). Смена/открытие чата
+    // детектится здесь же (через restoreForChatIfPeerChanged) и перезапрашивает ФС.
     let _moT=null;
     const _mo=new MutationObserver(function(){
         if(_moT)return;
-        _moT=setTimeout(function(){_moT=null;scanMessages();injectFolderMenuItem();restoreForChat();},50);
+        _moT=setTimeout(function(){_moT=null;scanMessages();injectFolderMenuItem();restoreForChatIfPeerChanged();},50);
     });
     (function startMO(){
         if(document.body) _mo.observe(document.body,{childList:true,subtree:true});
@@ -593,28 +609,34 @@ const DL = window.__tgdl = (function(){
     // ── Клик-перехват на .File (capture) ─────────────────────────────────
     // Ловим mid+filename до того, как TG начнёт скачивание. Не блокируем клик —
     // пусть TG создаст blob: и отправит его в will-download.
-    document.addEventListener('mousedown', function(e){
-        if(e.button!==0) return;                  // только ЛКМ; ПКМ → contextmenu
+    // TG запускает свою загрузку по 'click' (не mousedown), поэтому preventDefault
+    // на mousedown её НЕ отменяет — и скачанный файл повторно качался при открытии.
+    // Поэтому блокируем родную загрузку на ВСЕХ pointer-событиях (capture), а файл
+    // открываем один раз — по 'click' на иконке.
+    function onFilePointer(e){
+        if(e.button!==undefined && e.button!==0) return;   // только ЛКМ
         const file = e.target.closest && e.target.closest('.File');
-        if(!file)return;
+        if(!file) return;
         if(file.dataset.tgdlDone==='1'){
-            // скачано: клик по ИКОНКЕ — открыть файл; клик по названию — ничего
-            // (даём выделять/копировать). Родную перекачку по иконке блокируем.
-            if(e.target.closest('.file-icon-container')){
-                e.preventDefault(); e.stopImmediatePropagation();
+            // скачано: TG больше НЕ должен ничего качать по клику на этом файле
+            e.preventDefault(); e.stopImmediatePropagation();
+            // открываем только по клику на иконку (не по названию — даём его выделять)
+            if(e.type==='click' && e.target.closest('.file-icon-container')){
                 const id = parseInt(file.dataset.tgdlId,10);
                 if(id) INV('open_download_file',{id}).then(function(r){ if(r&&r.error) resetDownloaded(file); }).catch(function(){});
             }
             return;
         }
-        const msg = file.closest('[data-message-id]');
-        if(!msg)return;
-        const mid = msg.getAttribute('data-message-id');
-        // filename из .file-title (атрибут title = полное имя)
-        const t = file.querySelector('.file-title');
-        const filename = t ? (t.getAttribute('title')||t.textContent||'').trim() : '';
-        if(filename) expectDownload(mid, filename);
-    }, true);
+        // не скачано: на mousedown запоминаем mid+filename, клик пропускаем к TG
+        if(e.type==='mousedown'){
+            const msg = file.closest('[data-message-id]'); if(!msg) return;
+            const mid = msg.getAttribute('data-message-id');
+            const t = file.querySelector('.file-title');
+            const filename = t ? (t.getAttribute('title')||t.textContent||'').trim() : '';
+            if(filename) expectDownload(mid, filename);
+        }
+    }
+    ['pointerdown','mousedown','click'].forEach(function(t){ document.addEventListener(t, onFilePointer, true); });
 
     // ПКМ по .File: (1) запоминаем кандидата для матчинга, если из РОДНОГО меню
     // выберут «Скачать»; (2) если файл уже скачан — запоминаем его id, чтобы добавить

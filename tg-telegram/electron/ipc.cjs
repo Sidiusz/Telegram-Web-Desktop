@@ -80,7 +80,13 @@ function registerIpc(getWindow) {
         return result.filePaths[0];
     });
 
-    ipcMain.handle('get_downloads', () => state.downloads);
+    // exists проверяем «на лету»: файловая система — источник истины, а сохранённый
+    // status:'completed' может устареть (файл удалили из Проводника). Рендерер по
+    // exists===false не восстанавливает галочку «скачано» (см. restoreForChat).
+    ipcMain.handle('get_downloads', () => state.downloads.map(d => ({
+        ...d,
+        exists: d.path ? fs.existsSync(d.path) : false,
+    })));
 
     // Привязка скачивания к сообщению (для восстановления статуса после перезапуска).
     ipcMain.handle('bind_download', (e, { id, mid, peerId }) => {
