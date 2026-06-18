@@ -488,84 +488,143 @@ function setupNotificationSettingsSync() {
     // Вставляется самым первым ребёнком .settings-content (над блоком ТГ).
     // Идемпотентно (id=_tgnotif_block_). Перестраивается только при первом
     // появлении; состояние тумблеров синхронизируем с настройками на каждом scan.
+    // Находит заголовок секции «Веб-уведомления» — прямой ребёнок .settings-content.
+    // Классы TG хэшированы и меняются между сборками, поэтому цепляемся к ТЕКСТУ
+    // (RU + EN). Возвращает элемент-заголовок или null.
+    function findWebNotifHeader(sc) {
+        var kids = sc.children;
+        for (var i = 0; i < kids.length; i++) {
+            var t = (kids[i].textContent || '').trim();
+            if (/^(Веб-уведомления|Web notifications)$/i.test(t)) return kids[i];
+        }
+        return null;
+    }
+
+    // Строит нашу секцию КЛОНИРУЯ нативные узлы TG (тумблер .Checkbox, ползунок
+    // .RangeSlider, заголовок секции). Это даёт точный нативный вид без своих
+    // стилей и переживает смену хэшированных классов между сборками.
     function injectNotifBlock() {
         var sc = document.querySelector('.settings-content');
         if (!sc) return;
-        if (!findSettingRow(/\bВеб-уведомления\b/i)) return;   // не в разделе Уведомлений
-        if (document.getElementById('_tgnotif_block_')) return;
+        if (sc.querySelector('#_tgnf_hdr_')) return;            // уже вставлено
+        var header = findWebNotifHeader(sc);
+        if (!header) return;                                    // не раздел «Уведомления»
+        var body = header.nextElementSibling;
+        if (!body) return;
+        var nativeToggle = body.querySelector('label.Checkbox');
+        var nativeSlider = body.querySelector('.RangeSlider');
+        if (!nativeToggle) return;                              // нет образца — не рискуем
 
-        var block = document.createElement('div');
-        block.id = '_tgnotif_block_';
-        block.className = '_tgnf_';
-        block.innerHTML =
-              '<div class="_hdr_">Всплывающие уведомления</div>'
-            + '<div class="_sub_">Настройки приложения Telegram Web Desktop — звук, попапы и категории.</div>'
-            + '<label class="_cbx_"><input type="checkbox" id="_tnf_pp_"><span class="box"></span><span class="label">Показывать всплывающие карточки</span></label>'
-            + '<label class="_cbx_"><input type="checkbox" id="_tnf_sd_"><span class="box"></span><span class="label">Звук уведомлений</span></label>'
-            + '<div class="_volrow_"><span class="_lbl_">Громкость</span><input type="range" min="0" max="100" step="1" id="_tnf_vl_"><span class="_pct_" id="_tnf_pct_">80%</span></div>'
-            + '<div class="_hdr_" style="margin-top:14px;">Кому показывать</div>'
-            + '<label class="_cbx_"><input type="checkbox" id="_tnf_cp_"><span class="box"></span><span class="label">Личные сообщения</span></label>'
-            + '<label class="_cbx_"><input type="checkbox" id="_tnf_cg_"><span class="box"></span><span class="label">Группы и каналы</span></label>'
-            + '<div class="_hint_">Каналы различаются от групп только внутри открытого чата; в чат-листе оба отображаются как «группы», поэтому управляются одним переключателем.</div>';
-        sc.insertBefore(block, sc.firstElementChild);
+        var card = document.createElement('div');
+        card.className = body.className;                        // тот же класс-карточка (хэш живьём)
 
-        // ── Биндинг ──────────────────────────────────────────────────────────
-        var pp = block.querySelector('#_tnf_pp_');
-        var sd = block.querySelector('#_tnf_sd_');
-        var vl = block.querySelector('#_tnf_vl_');
-        var pct = block.querySelector('#_tnf_pct_');
-        var cp = block.querySelector('#_tnf_cp_');
-        var cg = block.querySelector('#_tnf_cg_');
+        var inputs = {};
 
-        block.dataset.tgNotifBound = '1';
+        function addToggle(key, labelText) {
+            var n = nativeToggle.cloneNode(true);
+            n.classList.remove('withSubLabel');
+            var sub = n.querySelector('.subLabel'); if (sub) sub.remove();
+            var av = n.querySelector('.user-avatar'); if (av) av.remove();
+            var lab = n.querySelector('.label'); if (lab) lab.textContent = labelText;
+            var inp = n.querySelector('input[type=checkbox]');
+            inp.checked = false; inp.removeAttribute('id');
+            inp.addEventListener('change', function () {
+                var p = {}; p[key] = !!inp.checked; savePatch(p);
+            });
+            card.appendChild(n);
+            inputs[key] = inp;
+        }
 
-        function syncFromSettings(s) {
+        function addSlider(key, labelText, min, max, def, fmt, toSetting) {
+            if (!nativeSlider) return;
+            var n = nativeSlider.cloneNode(true);
+            var lab = n.querySelector('.slider-top-row .label'); if (lab) lab.textContent = labelText;
+            var valEl = n.querySelector('.slider-top-row .value');
+            var fill = n.querySelector('.slider-fill-track');
+            var inp = n.querySelector('input[type=range]');
+            inp.min = min; inp.max = max; inp.step = 1; inp.value = def; inp.removeAttribute('id');
+            function refresh() {
+                var v = parseInt(inp.value, 10);
+                if (fill) fill.style.width = ((v - min) / (max - min) * 100) + '%';
+                if (valEl) valEl.textContent = fmt(v);
+            }
+            refresh();
+            inp.addEventListener('input', refresh);
+            var t = null;
+            inp.addEventListener('change', function () {
+                clearTimeout(t);
+                t = setTimeout(function () { savePatch(toSetting(parseInt(inp.value, 10))); }, 150);
+            });
+            card.appendChild(n);
+            inputs[key] = { input: inp, refresh: refresh };
+        }
+
+        addToggle('popup_notifications', 'Показывать всплывающие карточки');
+        addToggle('notif_sound', 'Звук уведомлений');
+        // Громкость отдельную не делаем — берём из TG «Громкость звука» (см. syncTgVolume).
+        addSlider('notif_duration', 'Время на экране', 3, 20, 6,
+            function (v) { return v + ' с'; },
+            function (v) { return { notif_duration: v }; });
+        addToggle('notif_cat_private', 'Личные чаты');
+        addToggle('notif_cat_group', 'Группы');
+        addToggle('notif_cat_channel', 'Каналы');
+
+        // Заголовок-категория: клон нативного заголовка с нашим текстом.
+        var hdr = header.cloneNode(false);
+        hdr.id = '_tgnf_hdr_';
+        hdr.textContent = 'Всплывающие уведомления';
+
+        // Вставляем сразу ПОСЛЕ секции «Веб-уведомления»: заголовок, затем карточка.
+        var ref = body.nextSibling;
+        sc.insertBefore(hdr, ref);
+        sc.insertBefore(card, ref);
+
+        // Начальные значения из настроек.
+        INV('get_settings').then(function (s) {
             if (!s) return;
-            pp.checked = s.popup_notifications !== false;
-            sd.checked = s.notif_sound !== false;
-            var v = Math.round((parseFloat(s.notif_volume) >= 0 ? s.notif_volume : 0.8) * 100);
-            vl.value = v; pct.textContent = v + '%';
-            cp.checked = s.notif_cat_private !== false;
-            cg.checked = s.notif_cat_group !== false;
-        }
-        INV('get_settings').then(syncFromSettings).catch(function () {});
+            inputs.popup_notifications.checked = s.popup_notifications !== false;
+            inputs.notif_sound.checked = s.notif_sound !== false;
+            inputs.notif_cat_private.checked = s.notif_cat_private !== false;
+            inputs.notif_cat_group.checked = s.notif_cat_group !== false;
+            inputs.notif_cat_channel.checked = s.notif_cat_channel !== false;
+            if (inputs.notif_duration) {
+                var d = parseInt(s.notif_duration, 10); if (isNaN(d)) d = 6;
+                inputs.notif_duration.input.value = d; inputs.notif_duration.refresh();
+            }
+        }).catch(function () {});
+    }
 
-        function bindCb(input, patchFn) {
-            input.addEventListener('change', function () {
-                var patch = patchFn(input.checked);
-                savePatch(patch);
-            }, true);
-            // Клик по строке-обёртке тоже переключает чекбокс (как у нативных строк ТГ).
-            input.closest('label').addEventListener('click', function (e) {
-                if (e.target === input) return;
-                e.preventDefault();
-                input.checked = !input.checked;
-                input.dispatchEvent(new Event('change', { bubbles: true }));
-            }, true);
+    // Подхватываем громкость из нативного слайдера TG «Громкость звука» (0..max)
+    // и кладём в notif_volume (0..1) — чтобы у попапа не было своего дубля.
+    // Доступно только когда открыты Настройки→Уведомления; иначе используем кэш.
+    var _lastTgVol = null;
+    function syncTgVolume() {
+        var sc = document.querySelector('.settings-content');
+        if (!sc) return;
+        var sliders = sc.querySelectorAll('.RangeSlider');
+        var inp = null;
+        for (var i = 0; i < sliders.length; i++) {
+            var lab = sliders[i].querySelector('.slider-top-row .label');
+            if (lab && /Громкость|Volume/i.test(lab.textContent)) {
+                inp = sliders[i].querySelector('input[type=range]');
+                if (inp) break;
+            }
         }
-        bindCb(pp, function (v) { return { popup_notifications: !!v }; });
-        bindCb(sd, function (v) { return { notif_sound: !!v }; });
-        bindCb(cp, function (v) { return { notif_cat_private: !!v }; });
-        bindCb(cg, function (v) { return { notif_cat_group: !!v }; });
-
-        // Громкость: input event → мгновенно сохраняем и обновляем %.
-        vl.addEventListener('input', function () {
-            pct.textContent = vl.value + '%';
-        });
-        var volTimer = null;
-        vl.addEventListener('change', function () {
-            clearTimeout(volTimer);
-            volTimer = setTimeout(function () {
-                savePatch({ notif_volume: Math.round((parseInt(vl.value, 10) || 0) / 100 * 100) / 100 });
-            }, 250);
-        }, true);
+        if (!inp) return;
+        var v = parseInt(inp.value, 10);
+        var max = parseInt(inp.max, 10) || 10;
+        if (isNaN(v) || !max) return;
+        var norm = Math.max(0, Math.min(1, v / max));
+        if (_lastTgVol === norm) return;
+        _lastTgVol = norm;
+        savePatch({ notif_volume: norm });
     }
 
     function scan() {
-        // Только наш блок настроек. TG-галку «Веб-уведомления» НЕ трогаем:
-        // звук/попапы работают независимо от неё (см. setupIncomingSound),
-        // а её включение раньше ломало штатный звук Telegram.
+        // Наш блок настроек + синхронизация громкости из TG. Галку «Веб-уведомления»
+        // не трогаем: звук/попапы работают независимо (см. setupIncomingSound).
         injectNotifBlock();
+        syncTgVolume();
     }
 
     scan();
@@ -1194,13 +1253,25 @@ window.__tgNotif=(function(){
     }
 
     // Тип чата по данным строки чат-листа.
-    // private — peerId > 0; группа/канал — peerId < 0 (в строке TG рендерит оба
-    // как className "group", поэтому различаем только private vs не-private).
-    // Для целей категорий group+channel управляются одним ключом notif_cat_group.
+    // Тип чата для категорий: private | group | channel.
+    // private — peerId > 0 (надёжно). Группа и канал в чат-листе НЕразличимы
+    // (оба className "group", id отрицательный), поэтому канал учим при открытии
+    // чата: у канала (не-админ) нет поля ввода #editable-message-text.
+    // Кэш peerId→тип; неизвестные отрицательные считаем группой (ничего не глушим зря).
+    var typeCache = {};
+    function learnType(){
+        var pid = currentPeer();
+        if(!pid || pid.charAt(0)!=='-') return;          // открыт не отрицательный чат
+        // форум-супергруппа сначала показывает список тем без композера — не канал
+        var headerForum = document.querySelector('.MiddleHeader .Avatar.forum, .MiddleHeader [class*="forum"]');
+        if(headerForum){ typeCache[pid]='group'; return; }
+        var hasComposer = !!document.getElementById('editable-message-text');
+        typeCache[pid] = hasComposer ? 'group' : 'channel';
+    }
     function chatType(item,pid){
-        var n=parseInt(pid,10);
-        if(!isNaN(n)&&n>0)return 'private';
-        return 'group';
+        if(parseInt(pid,10)>0) return 'private';
+        if(item && item.className.indexOf('forum')>=0) return 'group';   // форум = супергруппа
+        return typeCache[pid] || 'group';
     }
 
     function badgeOf(it){
@@ -1235,6 +1306,7 @@ window.__tgNotif=(function(){
     }
 
     function scan(){
+        learnType();                                        // учим тип открытого чата (канал/группа)
         var items=document.querySelectorAll('.chat-list .ListItem.Chat');
         if(!items.length)return;
         var openPeer=currentPeer();
