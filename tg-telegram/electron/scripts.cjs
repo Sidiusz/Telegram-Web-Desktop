@@ -297,8 +297,10 @@ const CSS=\`
 ._dlb_prog_ span{display:block;height:100%;background:#5288c1;border-radius:2px;transition:width .3s;}
 /* #5: скачанный файл. Родные ноды НЕ трогаем — прячем стрелку скачивания через CSS
    (обратимо) и кладём свои оверлеи: зелёная галочка (открыть файл) + папка. */
-.File[data-tgdl-done="1"] .action-icon{display:none!important;}
-.File[data-tgdl-done="1"] .file-icon-container{position:relative;}
+/* стрелку скачивания прячем ТОЛЬКО когда наша галочка реально стоит (класс
+   добавляется после вставки бейджа) — иначе на месте иконки была бы пустота. */
+.File._tgdl_done_ok_ .action-icon{display:none!important;}
+.File._tgdl_done_ok_ .file-icon-container{position:relative;}
 ._tgdl_ok_{position:absolute;right:-3px;bottom:-3px;width:20px;height:20px;padding:0;
     border:none;border-radius:50%;background:#4caf50;display:flex;align-items:center;
     justify-content:center;cursor:pointer;box-shadow:0 1px 4px rgba(0,0,0,.45);
@@ -460,7 +462,8 @@ const DL = window.__tgdl = (function(){
     // родном ПКМ-меню (см. injectFolderMenuItem). Кладём в .file-icon-container.
     function ensureBadges(file){
         const cont = file.querySelector('.file-icon-container'); if(!cont)return;
-        if(cont.querySelector('._tgdl_ok_')) return;          // уже стоит — идемпотентно
+        file.classList.add('_tgdl_done_ok_');                 // прячем родную стрелку (идемпотентно)
+        if(cont.querySelector('._tgdl_ok_')) return;          // бейдж уже стоит
         const ok = document.createElement('button');
         ok.className='_tgdl_ok_'; ok.title='Открыть файл';
         ok.innerHTML='<svg viewBox="0 0 24 24" fill="none"><path d="M5 12l4 4 10-10" stroke="#fff" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/></svg>';
@@ -468,6 +471,7 @@ const DL = window.__tgdl = (function(){
         cont.appendChild(ok);
     }
     function clearBadges(file){
+        file.classList.remove('_tgdl_done_ok_');
         const cont = file.querySelector('.file-icon-container'); if(!cont)return;
         const a=cont.querySelector('._tgdl_ok_'); if(a)a.remove();
     }
@@ -508,24 +512,22 @@ const DL = window.__tgdl = (function(){
     // пусть TG создаст blob: и отправит его в will-download.
     document.addEventListener('mousedown', function(e){
         if(e.button!==0) return;                  // только ЛКМ; ПКМ → contextmenu
-        // клик по нашим оверлей-кнопкам обрабатывает их собственный handler —
-        // иначе откроется дважды (кнопка + этот хэндлер по .File)
-        if(e.target.closest && e.target.closest('._tgdl_ok_,._tgdl_dir_')) return;
+        // клик по самой кнопке-галочке обрабатывает её собственный handler
+        if(e.target.closest && e.target.closest('._tgdl_ok_')) return;
         const file = e.target.closest && e.target.closest('.File');
         if(!file)return;
+        // уже скачано: клик по ТЕЛУ файла ничего не делает (открытие — только кнопкой).
+        // Блокируем и родную перекачку TG, чтобы случайный клик не плодил загрузки.
+        if(file.dataset.tgdlDone==='1'){
+            e.preventDefault(); e.stopImmediatePropagation();
+            return;
+        }
         const msg = file.closest('[data-message-id]');
         if(!msg)return;
         const mid = msg.getAttribute('data-message-id');
         // filename из .file-title (атрибут title = полное имя)
         const t = file.querySelector('.file-title');
         const filename = t ? (t.getAttribute('title')||t.textContent||'').trim() : '';
-        // уже скачано? — откроем файл вместо перекачки (ЛКМ)
-        if(file.dataset.tgdlDone==='1'){
-            e.preventDefault(); e.stopImmediatePropagation();
-            const id = parseInt(file.dataset.tgdlId,10);
-            if(id) INV('open_download_file',{id}).then(function(r){if(r&&r.error)toast('Файл не найден — возможно, перемещён или удалён');}).catch(function(){});
-            return;
-        }
         if(filename) expectDownload(mid, filename);
     }, true);
 
