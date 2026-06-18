@@ -378,6 +378,9 @@ const DL = window.__tgdl = (function(){
     const byId = {};
     // filename→mids, которые уже скачаны (для re-download: повторный клик)
     const doneFn = {};  // doneFn[mid] = filename
+    // mids, у которых файл пропал с диска: не восстанавливаем «скачано», пока не
+    // перекачают (иначе restoreForChat снова покажет галочку на удалённом файле).
+    const forgotten = {};
 
     function fmtBytes(b){
         if(b==null)return '';
@@ -413,6 +416,7 @@ const DL = window.__tgdl = (function(){
             }
         });
         for(const mid in byMid){
+            if(forgotten[mid]) continue;          // файл удалён — не восстанавливаем
             const r = byMid[mid];
             if(!registry[mid] || registry[mid].status!=='completed'){
                 registry[mid] = { mid:mid, id:r.id, filename:r.filename, status:'completed' };
@@ -453,6 +457,7 @@ const DL = window.__tgdl = (function(){
             // перекачка: снимаем оверлей «открыть», пусть снова идёт нативный прогресс TG
             if(registry[mid] && registry[mid].status==='completed') unpaint(mid);
             delete doneFn[mid];
+            delete forgotten[mid];   // снова качают — забытый mid опять валиден
             registry[mid] = { mid, id:data.id, filename:data.filename, origName:orig, status:'downloading', recv:0, total:0 };
             byId[data.id] = mid;
             // привязка к сообщению/чату — чтобы статус пережил перезапуск (#3)
@@ -539,6 +544,21 @@ const DL = window.__tgdl = (function(){
         clearBadges(file);
     }
 
+    // Файл пропал с диска: сбрасываем «скачано» → возвращается родная стрелка, и
+    // клик по ней снова качает через TG (свежий blob; программно не дёрнуть).
+    // Забываем привязку (локально + в downloads.json), чтобы галочка не вернулась.
+    function resetDownloaded(file){
+        const mid = file && file.dataset.tgdlMid;
+        if(mid){
+            forgotten[mid] = 1;
+            delete registry[mid];
+            delete doneFn[mid];
+            unpaint(mid);
+            INV('forget_download',{mid:mid}).then(refreshSaved).catch(function(){});
+        }
+        toast('Файл не найден — нажмите иконку, чтобы скачать заново');
+    }
+
     // Переприменяем состояние ко всем сообщениям из реестра (идемпотентно).
     function scanMessages(){
         for(const mid in registry){ applyToMessage(mid); }
@@ -572,7 +592,7 @@ const DL = window.__tgdl = (function(){
             if(e.target.closest('.file-icon-container')){
                 e.preventDefault(); e.stopImmediatePropagation();
                 const id = parseInt(file.dataset.tgdlId,10);
-                if(id) INV('open_download_file',{id}).then(function(r){if(r&&r.error)toast('Файл не найден — возможно, перемещён или удалён');}).catch(function(){});
+                if(id) INV('open_download_file',{id}).then(function(r){ if(r&&r.error) resetDownloaded(file); }).catch(function(){});
             }
             return;
         }

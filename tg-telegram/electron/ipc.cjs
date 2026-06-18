@@ -92,6 +92,17 @@ function registerIpc(getWindow) {
         }
     });
 
+    // Файл пропал — снимаем привязку со всех записей этого mid, чтобы статус
+    // «скачано» не восстанавливался после перезапуска.
+    ipcMain.handle('forget_download', (e, { mid }) => {
+        if (mid == null) return;
+        let changed = false;
+        for (const d of state.downloads) {
+            if (String(d.mid) === String(mid)) { delete d.mid; delete d.peerId; changed = true; }
+        }
+        if (changed) saveDownloads(state.downloads);
+    });
+
     ipcMain.handle('delete_download', (e, { id }) => {
         state.downloads = deleteDownload(state.downloads, id);
     });
