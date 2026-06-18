@@ -466,7 +466,7 @@ const DL = window.__tgdl = (function(){
         const ok = document.createElement('button');
         ok.className='_tgdl_ok_'; ok.title='Открыть файл';
         ok.innerHTML='<svg viewBox="0 0 24 24" fill="none"><path d="M5 12l4 4 10-10" stroke="#fff" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/></svg>';
-        ok.addEventListener('click',function(e){e.preventDefault();e.stopPropagation();const id=parseInt(file.dataset.tgdlId,10);if(id)INV('open_download_file',{id}).catch(function(){});});
+        ok.addEventListener('click',function(e){e.preventDefault();e.stopPropagation();const id=parseInt(file.dataset.tgdlId,10);if(id)INV('open_download_file',{id}).then(function(r){if(r&&r.error)toast('Файл не найден — возможно, перемещён или удалён');}).catch(function(){});});
         const dir = document.createElement('button');
         dir.className='_tgdl_dir_'; dir.title='Открыть папку с файлом';
         dir.innerHTML='<svg viewBox="0 0 24 24" fill="currentColor"><path d="M3 6a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V6z"/></svg>';
@@ -515,6 +515,9 @@ const DL = window.__tgdl = (function(){
     // пусть TG создаст blob: и отправит его в will-download.
     document.addEventListener('mousedown', function(e){
         if(e.button!==0) return;                  // только ЛКМ; ПКМ → contextmenu
+        // клик по нашим оверлей-кнопкам обрабатывает их собственный handler —
+        // иначе откроется дважды (кнопка + этот хэндлер по .File)
+        if(e.target.closest && e.target.closest('._tgdl_ok_,._tgdl_dir_')) return;
         const file = e.target.closest && e.target.closest('.File');
         if(!file)return;
         const msg = file.closest('[data-message-id]');
@@ -527,7 +530,7 @@ const DL = window.__tgdl = (function(){
         if(file.dataset.tgdlDone==='1'){
             e.preventDefault(); e.stopImmediatePropagation();
             const id = parseInt(file.dataset.tgdlId,10);
-            if(id) INV('open_download_file',{id}).catch(()=>{});
+            if(id) INV('open_download_file',{id}).then(function(r){if(r&&r.error)toast('Файл не найден — возможно, перемещён или удалён');}).catch(function(){});
             return;
         }
         if(filename) expectDownload(mid, filename);

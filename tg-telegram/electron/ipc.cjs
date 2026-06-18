@@ -6,6 +6,7 @@ const { loadSettings, saveSettings } = require('./settings.cjs');
 const { loadDownloads, saveDownloads, deleteDownload } = require('./downloads.cjs');
 const { getAddons, deleteAddon, openAddonsFolder, toggleAddon } = require('./addons.cjs');
 const path = require('path');
+const fs = require('fs');
 const { updateTrayBadge } = require('./tray.cjs');
 const { checkForUpdate, downloadUpdate, scheduleChecks, init: initUpdater, fetchChangelog } = require('./updater.cjs');
 
@@ -87,12 +88,14 @@ function registerIpc(getWindow) {
 
     ipcMain.handle('open_download_folder', (e, { id }) => {
         const item = state.downloads.find(d => d.id === id);
-        if (item && item.path) shell.showItemInFolder(item.path);
+        if (item && item.path && fs.existsSync(item.path)) shell.showItemInFolder(item.path);
+        else return { error: 'missing' };
     });
 
     ipcMain.handle('open_download_file', (e, { id }) => {
         const item = state.downloads.find(d => d.id === id);
-        if (item && item.path) shell.openPath(item.path);
+        if (item && item.path && fs.existsSync(item.path)) shell.openPath(item.path);
+        else return { error: 'missing' };
     });
 
     ipcMain.handle('clear_cache', async () => {
