@@ -48,18 +48,18 @@ function primaryWorkArea() {
     return d.workArea || { x: 0, y: 0, width: d.size.width, height: d.size.height };
 }
 
-// Открывает чат по peerId (через hash-навигацию) и ставит фокус в поле ввода.
+// Открывает чат по peerId. Делегируем в рендерер: location.hash в уже
+// загруженной SPA Telegram Web A НЕ работает (роутер игнорирует изменение hash),
+// поэтому рендерер кликает по строке чат-листа (см. window.__tgNotif в UI_JS).
 function openChat(win, peerId) {
-    const js = 'location.hash = ' + JSON.stringify('#' + peerId) + ';'
-        + 'setTimeout(function(){var i=document.getElementById("editable-message-text");if(i)i.focus();},400);';
+    const js = 'window.__tgNotif && window.__tgNotif.openChat(' + JSON.stringify(String(peerId)) + ');';
     win.webContents.executeJavaScript(js).catch(() => {});
 }
 
-// Помечает чат прочитанным: на миг переходим в него (read регистрируется на открытии),
-// затем возвращаем прежний hash. Окно не показываем.
+// Помечает чат прочитанным через нативное меню TG (ПКМ по строке → «Отметить как
+// прочитанное»). Окно не показываем, чат не открывается, текущий чат не меняется.
 function markRead(win, peerId) {
-    const js = '(function(){var p=location.hash;location.hash=' + JSON.stringify('#' + peerId) + ';'
-        + 'setTimeout(function(){try{location.hash=p;}catch(e){}},800);})();';
+    const js = 'window.__tgNotif && window.__tgNotif.markRead(' + JSON.stringify(String(peerId)) + ');';
     win.webContents.executeJavaScript(js).catch(() => {});
 }
 

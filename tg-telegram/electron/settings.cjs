@@ -12,6 +12,15 @@ const DEFAULTS = {
     minimize_to_tray: false,
     popup_notifications: true,
     background_notifications_enabled: false,
+    // ── Наши уведомления ────────────────────────────────────────────────────
+    notif_sound: true,           // играть фирменный звук
+    notif_show_preview: true,    // показывать текст сообщения в попапе
+    notif_duration: 6,           // сек — сколько живёт карточка
+    notif_volume: 0.8,           // 0..1 — громкость звука
+    // Категории КОМУ показывать/озвучивать (по типу чата)
+    notif_cat_private: true,     // личные сообщения (peerId > 0)
+    notif_cat_group: true,       // группы (peerId < 0)
+    notif_cat_channel: true,     // каналы (peerId < 0)
     webnotif_hint_shown: false,
     devtools_enabled: false,
     update_check_interval: '1h',
@@ -28,6 +37,13 @@ function loadSettings() {
         minimize_to_tray: store.get('minimize_to_tray', DEFAULTS.minimize_to_tray),
         popup_notifications: store.get('popup_notifications', DEFAULTS.popup_notifications),
         background_notifications_enabled: store.get('background_notifications_enabled', DEFAULTS.background_notifications_enabled),
+        notif_sound: store.get('notif_sound', DEFAULTS.notif_sound),
+        notif_show_preview: store.get('notif_show_preview', DEFAULTS.notif_show_preview),
+        notif_duration: store.get('notif_duration', DEFAULTS.notif_duration),
+        notif_volume: store.get('notif_volume', DEFAULTS.notif_volume),
+        notif_cat_private: store.get('notif_cat_private', DEFAULTS.notif_cat_private),
+        notif_cat_group: store.get('notif_cat_group', DEFAULTS.notif_cat_group),
+        notif_cat_channel: store.get('notif_cat_channel', DEFAULTS.notif_cat_channel),
         webnotif_hint_shown: store.get('webnotif_hint_shown', DEFAULTS.webnotif_hint_shown),
         devtools_enabled: store.get('devtools_enabled', DEFAULTS.devtools_enabled),
         update_check_interval: store.get('update_check_interval', DEFAULTS.update_check_interval),
