@@ -3,7 +3,7 @@ const { app, Menu } = require('electron');
 
 app.commandLine.appendSwitch('autoplay-policy', 'no-user-gesture-required');
 app.commandLine.appendSwitch('disable-renderer-backgrounding');
-// Не тормозить таймеры (наш перехватчик входящих) когда окно в фоне / помечено hidden
+// Keep timers alive (our incoming-message interceptor) when window is backgrounded/hidden
 app.commandLine.appendSwitch('disable-background-timer-throttling');
 app.commandLine.appendSwitch('disable-backgrounding-occluded-windows');
 
@@ -13,10 +13,8 @@ const { createWindow, getWindow } = require('./electron/window.cjs');
 const { createTray } = require('./electron/tray.cjs');
 const { initState, getState, registerIpc } = require('./electron/ipc.cjs');
 
-// Регистрируемся как обработчик tg:// — браузер будет открывать нас
 app.setAsDefaultProtocolClient('tg');
 
-// Навигирует окно по tg:// ссылке через web.telegram.org
 function handleTgUrl(tgUrl) {
     const win = getWindow();
     if (!win) return;
@@ -26,7 +24,6 @@ function handleTgUrl(tgUrl) {
     win.webContents.loadURL(internalUrl);
 }
 
-// Извлекает tg:// URL из аргументов командной строки
 function getTgUrlFromArgs(argv) {
     return argv.find(arg => arg.startsWith('tg://')) || null;
 }
@@ -35,7 +32,7 @@ const gotLock = app.requestSingleInstanceLock();
 if (!gotLock) {
     app.quit();
 } else {
-    // Приложение уже запущено — второй экземпляр передаёт аргументы сюда
+    // Already running — second instance forwards its args here
     app.on('second-instance', (event, argv) => {
         const win = getWindow();
         if (win) { win.show(); win.focus(); }
@@ -52,14 +49,9 @@ app.whenReady().then(() => {
     createTray(getWindow);
 
     Menu.setApplicationMenu(null);
-	const win = getWindow();
-    if (win) {
-        //win.webContents.openDevTools();
-    }
 
     const tgUrl = getTgUrlFromArgs(process.argv);
     if (tgUrl) {
-
         const win = getWindow();
         win.webContents.once('did-finish-load', () => handleTgUrl(tgUrl));
     }

@@ -73,6 +73,17 @@ const CSS=`
 ._upd_prog_{flex:1;height:4px;background:rgba(255,255,255,.1);border-radius:2px;overflow:hidden;}
 ._upd_prog_ span{display:block;height:100%;background:#5288c1;border-radius:2px;transition:width .3s;width:0%;}
 ._cl_content_{padding:14px 16px;color:#ccc;font-size:13px;line-height:1.7;white-space:pre-wrap;word-break:break-word;user-select:text;}
+/* ── Блочный «Список изменений» (карточки версий) ───────────────────────── */
+._tgpanel_ ._cl_ver_{background:#1a1a1a;border-radius:10px;margin:10px 12px;padding:10px 14px 12px;}
+._tgpanel_ ._cl_ver_._cur_{box-shadow:inset 0 0 0 1px var(--color-primary,#5288c1);background:rgba(82,136,193,.08);}
+._tgpanel_ ._cl_ver_hdr_{display:flex;align-items:center;gap:8px;margin-bottom:6px;}
+._tgpanel_ ._cl_vnum_{font-size:15px;font-weight:600;color:#fff;}
+._tgpanel_ ._cl_ver_._cur_ ._cl_vnum_{color:var(--color-primary,#5288c1);}
+._tgpanel_ ._cl_cur_badge_{font-size:10px;text-transform:uppercase;letter-spacing:.4px;background:var(--color-primary,#5288c1);color:#fff;padding:2px 7px;border-radius:8px;font-weight:600;}
+._tgpanel_ ._cl_item_{position:relative;padding:4px 0 4px 16px;font-size:13px;color:#ccc;line-height:1.5;user-select:text;}
+._tgpanel_ ._cl_item_::before{content:'';position:absolute;left:3px;top:11px;width:5px;height:5px;border-radius:50%;background:#5e5e5e;}
+._tgpanel_ ._cl_tag_{color:#8bb8e8;font-weight:600;}
+._tgpanel_ ._cl_div_{height:1px;background:rgba(255,255,255,.08);margin:8px 0 6px;}
 ._dlb_{pointer-events:all;display:flex;align-items:center;gap:10px;background:#1e2733;border-radius:12px;padding:10px 14px;box-shadow:0 4px 16px rgba(0,0,0,.5);min-width:220px;max-width:320px;cursor:default;animation:_dlbIn_ .2s ease;}
 @keyframes _dlbIn_{from{opacity:0;transform:translateY(12px);}to{opacity:1;transform:translateY(0);}}
 ._dlb_.done{cursor:pointer;}
@@ -121,12 +132,34 @@ const CSS=`
    Шапку и контейнер .settings-content клонируем из живого нативного раздела
    → все хэш-классы и вид 1-в-1 как родной. Своя кнопка «Назад» просто прячет
    панель (React-state не трогаем → кнопка работает железно). */
-._tgpanel_{position:absolute;inset:0;z-index:50;display:flex;flex-direction:column;background:var(--color-background,#212121);}
+._tgpanel_{position:absolute;inset:0;z-index:50;display:flex;flex-direction:column;background:var(--color-background,#212121);
+    transform:translateX(24px);opacity:0;transition:transform .24s cubic-bezier(.4,0,.2,1),opacity .24s cubic-bezier(.4,0,.2,1);}
+._tgpanel_._in_{transform:translateX(0);opacity:1;}
 ._tgpanel_ .left-header{flex:0 0 auto;}
-._tgpanel_ ._tpc_{flex:1;overflow-y:auto;}
-._tgpanel_._in_ .left-header h3,
-._tgpanel_._in_ ._tpc_{animation:_tpIn_ .22s cubic-bezier(.4,0,.2,1);}
-@keyframes _tpIn_{from{opacity:0;transform:translateX(24px);}to{opacity:1;transform:translateX(0);}}
+._tgpanel_ .settings-content{flex:1;overflow-y:auto;background:var(--color-background-secondary,#0f0f0f);}
+/* ── App settings panel — native-like widgets ──────────────────────────── */
+._tgpanel_ ._ns_lbl_{padding:16px 24px 6px;color:var(--color-text-secondary,#aaa);font-size:13px;}
+._tgpanel_ ._ns_card_{background:var(--color-background,#212121);border-radius:12px;margin:0 12px 6px;overflow:hidden;}
+._tgpanel_ ._ns_row_{display:flex;align-items:center;gap:16px;min-height:48px;padding:8px 16px;box-sizing:border-box;}
+._tgpanel_ ._ns_card_ ._ns_row_+._ns_row_{border-top:1px solid rgba(255,255,255,.06);}
+._tgpanel_ ._ns_ico_{font-size:24px;color:var(--color-text-secondary,#aaa);flex-shrink:0;}
+._tgpanel_ ._ns_main_{flex:1;min-width:0;}
+._tgpanel_ ._ns_title_{font-size:16px;color:#fff;line-height:1.25;}
+._tgpanel_ ._ns_sub_{font-size:14px;color:var(--color-text-secondary,#aaa);margin-top:1px;line-height:1.3;}
+._tgpanel_ ._ns_val_{font-size:15px;color:var(--color-text-secondary,#aaa);}
+._tgpanel_ ._ns_inp_{height:44px;background:var(--color-background,#212121);border:1px solid #5b5b5a;border-radius:12px;color:#fff;font-size:15px;padding:0 14px;box-sizing:border-box;outline:none;}
+._tgpanel_ ._ns_inp_:focus{border-color:var(--color-primary,#8774e1);}
+._tgpanel_ ._ns_inp_._num_{width:96px;flex:0 0 auto;text-align:right;height:38px;}
+._tgpanel_ ._ns_btn_{height:40px;padding:0 16px;border:none;border-radius:10px;background:var(--color-primary,#8774e1);color:#fff;font-size:14px;cursor:pointer;display:inline-flex;align-items:center;justify-content:center;gap:6px;white-space:nowrap;}
+._tgpanel_ ._ns_btn_:hover{filter:brightness(1.1);}
+._tgpanel_ ._ns_btn_.sec{background:rgba(255,255,255,.1);}
+._tgpanel_ ._ns_sel_{background:var(--color-background,#212121);border:1px solid #5b5b5a;border-radius:10px;color:#fff;padding:7px 10px;font-size:14px;cursor:pointer;outline:none;}
+._tgpanel_ ._ns_swt_{position:relative;width:34px;height:20px;flex-shrink:0;cursor:pointer;}
+._tgpanel_ ._ns_swt_ input{display:none;}
+._tgpanel_ ._ns_swt_ i{position:absolute;inset:0;background:#5a5a5a;border-radius:10px;transition:.2s;}
+._tgpanel_ ._ns_swt_ i::after{content:'';position:absolute;top:2px;left:2px;width:16px;height:16px;border-radius:50%;background:#fff;transition:.2s;}
+._tgpanel_ ._ns_swt_ input:checked~i{background:var(--color-primary,#8774e1);}
+._tgpanel_ ._ns_swt_ input:checked~i::after{transform:translateX(14px);}
 /* строка-загрузка: действие справа (Открыть/Папку/Удалить) — подменяем шеврон */
 ._tgpanel_ ._tpright_{margin-left:auto;display:flex;gap:2px;flex-shrink:0;}
 ._tgpanel_ ._tpright_ button{background:none;border:none;color:var(--color-text-secondary,#aaa);cursor:pointer;padding:6px;border-radius:6px;display:flex;align-items:center;justify-content:center;}

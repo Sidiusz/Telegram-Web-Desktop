@@ -36,11 +36,11 @@ function injectMenu(){
         const sep1 = document.createElement('div'); sep1.className = sepClass;
         const sep2 = document.createElement('div'); sep2.className = sepClass;
 
-        const dl = mi('_tgmi_dl_', 'icon-download', 'Загрузки', () => openDownloadsNative());
-        const ad = mi('_tgmi_ad_', 'icon-bots', 'Дополнения', () => openAddonsNative());
-        const st = mi('_tgmi_st_', 'icon-settings', 'Настройки приложения', () => openAppSettingsNative());
-        const cl = mi('_tgmi_cl_', 'icon-info', 'Список изменений', () => openChangelogNative());
-        const upd = mi('_tgmi_upd_', 'icon-reload', 'Проверить обновления', async () => {
+        const dl = mi('_tgmi_dl_', 'icon-download', T('downloads'), () => openDownloadsNative());
+        const ad = mi('_tgmi_ad_', 'icon-bots', T('addons'), () => openAddonsNative());
+        const st = mi('_tgmi_st_', 'icon-settings', T('app_settings'), () => openAppSettingsNative());
+        const cl = mi('_tgmi_cl_', 'icon-info', T('changelog'), () => openChangelogNative());
+        const upd = mi('_tgmi_upd_', 'icon-reload', T('check_updates'), async () => {
             toast('Проверка обновлений...', 'icon-reload');
             try {
                 const r = await INV('check_update_manual');
@@ -105,7 +105,7 @@ function injectSettingsRows(){
     }
 
     // 1) «Настройки приложения» — сразу под «Общие настройки» (если она есть вверху)
-    const appRow = makeRow('_tgst_app_', 'settings', 'Настройки приложения');
+    const appRow = makeRow('_tgst_app_', 'settings', T('app_settings'));
     appRow.querySelector('.ListItem-button').addEventListener('click', () => openAppSettingsNative());
     // «Общие настройки» (icon-chat/General) идёт первой; вставим после неё, иначе — в начало списка.
     const chatRow = list.querySelector('.ListItem.narrow .icon-chat, .ListItem.narrow .ListItem-main-icon');
@@ -117,12 +117,12 @@ function injectSettingsRows(){
     }
 
     // 1b) «Дополнения» — сразу под «Настройки приложения».
-    const adRow = makeRow('_tgst_ad_', 'bots', 'Дополнения');
+    const adRow = makeRow('_tgst_ad_', 'bots', T('addons'));
     adRow.querySelector('.ListItem-button').addEventListener('click', () => openAddonsNative());
     appRow.after(adRow);
 
     // 2) «Загрузки» — после «Данные и память» (если есть), иначе после «Уведомления».
-    const dlRow = makeRow('_tgst_dl_', 'download', 'Загрузки');
+    const dlRow = makeRow('_tgst_dl_', 'download', T('downloads'));
     dlRow.querySelector('.ListItem-button').addEventListener('click', () => openDownloadsNative());
     const dataRow = data && data.closest('.ListItem.narrow');
     if(dataRow){

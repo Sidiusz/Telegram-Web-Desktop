@@ -7,8 +7,8 @@ const { loadDownloads, saveDownloads, deleteDownload } = require('./downloads.cj
 const { getAddons, deleteAddon, openAddonsFolder, toggleAddon } = require('./addons.cjs');
 const path = require('path');
 const fs = require('fs');
-const { updateTrayBadge } = require('./tray.cjs');
-const { checkForUpdate, downloadUpdate, scheduleChecks, init: initUpdater, fetchChangelog } = require('./updater.cjs');
+const { updateTrayBadge, setTrayLang } = require('./tray.cjs');
+const { checkForUpdate, downloadUpdate, scheduleChecks, init: initUpdater, fetchChangelog, fetchReleases } = require('./updater.cjs');
 
 const TG_URL = 'https://web.telegram.org/a/';
 
@@ -61,7 +61,7 @@ function registerIpc(getWindow) {
         state.settings = loadSettings();
     });
 
-    // Мгновенно открывает/закрывает DevTools без перезагрузки
+    // Open/close DevTools instantly without a reload
     ipcMain.handle('toggle_devtools', (e, { open }) => {
         const win = getWindow();
         if (!win) return;
@@ -80,15 +80,16 @@ function registerIpc(getWindow) {
         return result.filePaths[0];
     });
 
-    // exists проверяем «на лету»: файловая система — источник истины, а сохранённый
-    // status:'completed' может устареть (файл удалили из Проводника). Рендерер по
-    // exists===false не восстанавливает галочку «скачано» (см. restoreForChat).
+    // Check existence on the fly: the filesystem is the source of truth, since a
+    // saved status:'completed' may be stale (file deleted from Explorer). When
+    // exists===false the renderer does not restore the "downloaded" checkmark
+    // (see restoreForChat).
     ipcMain.handle('get_downloads', () => state.downloads.map(d => ({
         ...d,
         exists: d.path ? fs.existsSync(d.path) : false,
     })));
 
-    // Привязка скачивания к сообщению (для восстановления статуса после перезапуска).
+    // Bind a download to a message (to restore status after restart)
     ipcMain.handle('bind_download', (e, { id, mid, peerId }) => {
         const item = state.downloads.find(d => d.id === id);
         if (item) {
@@ -98,8 +99,8 @@ function registerIpc(getWindow) {
         }
     });
 
-    // Файл пропал — снимаем привязку со всех записей этого mid, чтобы статус
-    // «скачано» не восстанавливался после перезапуска.
+    // File gone: drop the binding for this mid so "downloaded" is not restored
+    // after restart.
     ipcMain.handle('forget_download', (e, { mid }) => {
         if (mid == null) return;
         let changed = false;
@@ -135,11 +136,22 @@ function registerIpc(getWindow) {
         }
     });
 
-    // ── Обновления ────────────────────────────────────────────────────────────
+    // ── Updates ───────────────────────────────────────────────────────────────
     ipcMain.handle('fetch_changelog', async () => {
         try {
             const text = await fetchChangelog();
             return { text };
+        } catch (e) {
+            return { error: e.message };
+        }
+    });
+
+    // Structured per-version changelog (for the block "Changelog" screen)
+    ipcMain.handle('fetch_changelog_structured', async () => {
+        try {
+            const versions = await fetchReleases();
+            if (versions && versions.length) return { current: app.getVersion(), versions };
+            return { error: 'empty' };
         } catch (e) {
             return { error: e.message };
         }
@@ -220,6 +232,11 @@ function registerIpc(getWindow) {
         state.lastActivity = Date.now();
     });
 
+    // Renderer reports Telegram's UI language → localize tray menu.
+    ipcMain.handle('report_lang', (e, { lang }) => {
+        setTrayLang(lang);
+    });
+
     ipcMain.handle('get_hint_img_url', () => {
         const imgPath = path.join(__dirname, 'assets', 'webnotif-hint.png');
         return pathToFileURL(imgPath).href;
@@ -254,8 +271,8 @@ function registerIpc(getWindow) {
             }
         }
 
-        // Попапы входящих делает перехватчик в scripts.cjs (детальные, с текстом).
-        // Здесь только бейдж в трее/оверлей иконки.
+        // Incoming popups are produced by the interceptor in scripts.cjs
+        // (detailed, with text). Here we only update the tray/overlay badge.
         state.lastNotificationCount = n;
         updateTrayBadge(n);
     });

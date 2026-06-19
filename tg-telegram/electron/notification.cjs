@@ -2,7 +2,7 @@
 const { BrowserWindow, screen, ipcMain } = require('electron');
 
 let _getMainWindow = null;
-let _win = null;          // постоянное окно-стек, переиспользуется
+let _win = null;          // persistent stack window, reused
 let _ready = false;
 let _pending = [];
 let _idSeq = 0;
