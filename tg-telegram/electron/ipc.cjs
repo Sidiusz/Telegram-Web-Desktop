@@ -12,6 +12,18 @@ const { checkForUpdate, downloadUpdate, scheduleChecks, init: initUpdater, fetch
 
 const TG_URL = 'https://web.telegram.org/a/';
 
+// Язык интерфейса (приходит из рендерера, см. report_lang). Для строк уведомлений
+// в main-процессе, где T() из inject недоступен.
+let _uiLang = 'ru';
+const NTR = {
+    open:          { ru: 'Открыть',                   en: 'Open' },
+    read:          { ru: 'Прочитано',                 en: 'Read' },
+    anon:          { ru: 'Анонимный пользователь',    en: 'Anonymous user' },
+    new_msg_hidden:{ ru: 'Вам пришло новое сообщение', en: 'You have a new message' },
+    new_msg:       { ru: 'Новое сообщение',           en: 'New message' },
+};
+const ntr = (k) => { const e = NTR[k]; return (e && (e[_uiLang] || e.en)) || k; };
+
 let state = {
     downloads: [],
     downloadCounter: 0,
@@ -49,11 +61,13 @@ function registerIpc(getWindow) {
         const hideText = settings.notif_hide_text === true;
         const showPreview = settings.notif_show_preview !== false && !hideText;
         queueNotification({
-            title: hideSender ? 'Анонимный пользователь' : (sender || title || chatName || 'Telegram'),
-            body: showPreview ? body : (hideText ? 'Вам пришло новое сообщение' : 'Новое сообщение'),
+            title: hideSender ? ntr('anon') : (sender || title || chatName || 'Telegram'),
+            body: showPreview ? body : (hideText ? ntr('new_msg_hidden') : ntr('new_msg')),
             icon: hideSender ? '' : icon,
             anon: hideSender,
             peerId,
+            btnOpen: ntr('open'),
+            btnRead: ntr('read'),
             playSound: settings.notif_sound !== false,
             duration: settings.notif_duration || 6,
         });
@@ -237,6 +251,7 @@ function registerIpc(getWindow) {
 
     // Renderer reports Telegram's UI language → localize tray menu.
     ipcMain.handle('report_lang', (e, { lang }) => {
+        _uiLang = (String(lang || '').toLowerCase().indexOf('ru') === 0) ? 'ru' : 'en';
         setTrayLang(lang);
     });
 

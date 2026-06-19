@@ -170,22 +170,22 @@ function setupNotificationSettingsSync() {
             inputs[key] = { input: inp, refresh: refresh };
         }
 
-        addToggle('popup_notifications', 'Показывать всплывающие карточки');
-        addToggle('notif_sound', 'Звук уведомлений');
+        addToggle('popup_notifications', T('ns_popup'));
+        addToggle('notif_sound', T('ns_sound'));
         // Громкость отдельную не делаем — берём из TG «Громкость звука» (см. syncTgVolume).
-        addSlider('notif_duration', 'Время на экране', 3, 20, 6,
-            function (v) { return v + ' с'; },
+        addSlider('notif_duration', T('ns_duration'), 3, 20, 6,
+            function (v) { return v + T('unit_sec'); },
             function (v) { return { notif_duration: v }; });
-        addToggle('notif_cat_private', 'Личные чаты');
-        addToggle('notif_cat_group', 'Группы');
-        addToggle('notif_cat_channel', 'Каналы');
-        addToggle('notif_hide_text', 'Скрывать текст входящих сообщений');
-        addToggle('notif_hide_sender', 'Скрывать имя входящих сообщений');
+        addToggle('notif_cat_private', T('ns_sec_private'));
+        addToggle('notif_cat_group', T('ns_sec_group'));
+        addToggle('notif_cat_channel', T('ns_sec_channel'));
+        addToggle('notif_hide_text', T('ns_hide_text'));
+        addToggle('notif_hide_sender', T('ns_hide_sender'));
 
         // Заголовок-категория: клон нативного заголовка с нашим текстом.
         var hdr = header.cloneNode(false);
         hdr.id = '_tgnf_hdr_';
-        hdr.textContent = 'Всплывающие уведомления';
+        hdr.textContent = T('ns_section');
 
         // Вставляем сразу ПОСЛЕ секции «Веб-уведомления»: заголовок, затем карточка.
         var ref = body.nextSibling;

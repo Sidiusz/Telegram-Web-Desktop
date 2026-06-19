@@ -16,15 +16,15 @@ function scheduleSave(){
             minimize_to_tray:chk('_tr_'),
             devtools_enabled:chk('_dv_'),
         };
-        try{await INV('save_settings',{settings});toast('Настройки сохранены','icon-check');}catch(e){toast('Ошибка сохранения','icon-close');}
+        try{await INV('save_settings',{settings});toast(T('st_saved'),'icon-check');}catch(e){toast(T('st_save_err'),'icon-close');}
     },600);
 }
 
 async function renderSt(target){
     const c=target||document.getElementById('_tgpc_');if(!c)return;
-    c.innerHTML='<div class="_empty_">Загрузка...</div>';
+    c.innerHTML='<div class="_empty_">'+T('loading')+'</div>';
     let s={};
-    try{s=await INV('get_settings');}catch(e){c.innerHTML='<div class="_empty_">Ошибка: '+e+'</div>';return;}
+    try{s=await INV('get_settings');}catch(e){c.innerHTML='<div class="_empty_">'+T('error')+': '+e+'</div>';return;}
     c.innerHTML='';
 
     const ce=cls=>{const d=document.createElement('div');if(cls)d.className=cls;return d;};
@@ -38,61 +38,61 @@ async function renderSt(target){
     const toggleRow=(cd,title,sub,id,checked)=>{const r=row(cd);r.appendChild(main(title,sub));r.appendChild(swt(id,checked));return r;};
 
     // ── Загрузки ──
-    lbl('ЗАГРУЗКИ');
+    lbl(T('sec_downloads'));
     const c1=card();
-    const r1=row(c1); r1.appendChild(ico('folder')); r1.appendChild(main('Папка для файлов'));
+    const r1=row(c1); r1.appendChild(ico('folder')); r1.appendChild(main(T('st_folder')));
     const r1b=row(c1);
     const sp=document.createElement('input'); sp.className='_ns_inp_'; sp.id='_sp_'; sp.type='text'; sp.value=s.save_path||''; sp.style.flex='1';
-    const pick=document.createElement('button'); pick.className='_ns_btn_ sec'; pick.id='_pp_'; pick.textContent='Выбрать';
+    const pick=document.createElement('button'); pick.className='_ns_btn_ sec'; pick.id='_pp_'; pick.textContent=T('choose');
     r1b.appendChild(sp); r1b.appendChild(pick);
 
     // ── Автоперезагрузка ──
-    lbl('АВТОПЕРЕЗАГРУЗКА');
+    lbl(T('sec_autoreload'));
     const c2=card();
-    toggleRow(c2,'Включить таймер',null,'_are_',s.auto_reload_enabled);
-    const r2b=row(c2); r2b.appendChild(main('Интервал, сек')); r2b.appendChild(numInp('_ari_',s.auto_reload_interval||3600,60));
-    toggleRow(c2,'При неактивности',null,'_aro_',s.auto_reload_on_idle);
-    const r2d=row(c2); r2d.appendChild(main('Таймаут неактивности, сек')); r2d.appendChild(numInp('_it_',s.idle_timeout||300,30));
+    toggleRow(c2,T('st_timer'),null,'_are_',s.auto_reload_enabled);
+    const r2b=row(c2); r2b.appendChild(main(T('st_interval'))); r2b.appendChild(numInp('_ari_',s.auto_reload_interval||3600,60));
+    toggleRow(c2,T('st_onidle'),null,'_aro_',s.auto_reload_on_idle);
+    const r2d=row(c2); r2d.appendChild(main(T('st_idle_timeout'))); r2d.appendChild(numInp('_it_',s.idle_timeout||300,30));
 
     // ── Окно ──
-    lbl('ОКНО');
+    lbl(T('sec_window'));
     const c3=card();
-    toggleRow(c3,'Сворачивать в трей',null,'_tr_',s.minimize_to_tray);
-    toggleRow(c3,'Консоль разработчика','Ctrl+Shift+I / F12','_dv_',s.devtools_enabled);
+    toggleRow(c3,T('st_tray'),null,'_tr_',s.minimize_to_tray);
+    toggleRow(c3,T('st_devtools'),'Ctrl+Shift+I / F12','_dv_',s.devtools_enabled);
 
     // ── Обновления ──
-    lbl('ОБНОВЛЕНИЯ');
+    lbl(T('sec_updates'));
     const c4=card();
-    const r4=row(c4); r4.appendChild(main('Проверять автоматически'));
+    const r4=row(c4); r4.appendChild(main(T('st_auto_check')));
     const sel=document.createElement('select'); sel.className='_ns_sel_';
-    [['30m','Каждые 30 мин'],['1h','Каждый час'],['12h','Каждые 12 ч'],['24h','Раз в сутки'],['3d','Раз в 3 дня'],['7d','Раз в неделю'],['30d','Раз в месяц'],['never','Никогда']]
-        .forEach(([v,l])=>{const o=document.createElement('option');o.value=v;o.textContent=l;if((s.update_check_interval||'1h')===v)o.selected=true;sel.appendChild(o);});
-    sel.addEventListener('change',async()=>{const ns=await INV('get_settings');await INV('save_settings',{settings:Object.assign({},ns,{update_check_interval:sel.value})});toast('Сохранено','icon-check');});
+    [['30m','iv_30m'],['1h','iv_1h'],['12h','iv_12h'],['24h','iv_24h'],['3d','iv_3d'],['7d','iv_7d'],['30d','iv_30d'],['never','iv_never']]
+        .forEach(([v,k])=>{const o=document.createElement('option');o.value=v;o.textContent=T(k);if((s.update_check_interval||'1h')===v)o.selected=true;sel.appendChild(o);});
+    sel.addEventListener('change',async()=>{const ns=await INV('get_settings');await INV('save_settings',{settings:Object.assign({},ns,{update_check_interval:sel.value})});toast(T('st_saved_short'),'icon-check');});
     r4.appendChild(sel);
     const r4b=row(c4);
-    const chkBtn=document.createElement('button'); chkBtn.className='_ns_btn_'; chkBtn.style.margin='0 auto 0 0'; chkBtn.innerHTML='<i class="icon icon-reload"></i> Проверить сейчас';
+    const chkBtn=document.createElement('button'); chkBtn.className='_ns_btn_'; chkBtn.style.margin='0 auto 0 0'; chkBtn.innerHTML='<i class="icon icon-reload"></i> '+T('st_check_now');
     chkBtn.addEventListener('click',async()=>{
-        chkBtn.disabled=true; const o=chkBtn.innerHTML; chkBtn.textContent='Проверка...';
-        try{const r=await INV('check_update_manual');if(!r||r.upToDate)toast('Установлена последняя версия','icon-check');else if(r.error)toast('Ошибка: '+r.error,'icon-close');}
-        catch(e){toast('Ошибка проверки','icon-close');}
+        chkBtn.disabled=true; const o=chkBtn.innerHTML; chkBtn.textContent=T('st_checking');
+        try{const r=await INV('check_update_manual');if(!r||r.upToDate)toast(T('st_uptodate'),'icon-check');else if(r.error)toast(T('error')+': '+r.error,'icon-close');}
+        catch(e){toast(T('st_check_err'),'icon-close');}
         finally{chkBtn.disabled=false;chkBtn.innerHTML=o;}
     });
     r4b.appendChild(chkBtn);
 
     // ── Данные ──
-    lbl('ДАННЫЕ');
+    lbl(T('sec_data'));
     const c5=card();
     const r5=row(c5); r5.style.cursor='pointer'; r5.appendChild(ico('delete'));
-    r5.appendChild(main('Очистить кэш и перезагрузить','Удаляет локальные данные и перезапускает страницу'));
+    r5.appendChild(main(T('st_clear_cache'),T('st_clear_cache_sub')));
     r5.querySelector('._ns_ico_').style.color='#ff5c5c';
     r5.querySelector('._ns_title_').style.color='#ff5c5c';
     r5.addEventListener('click',()=>INV('clear_cache'));
 
     // ── О приложении ──
-    lbl('О ПРИЛОЖЕНИИ');
+    lbl(T('sec_about'));
     const c6=card();
     const addInfo=(label,val)=>{const r=row(c6);r.appendChild(main(label));const v=ce('_ns_val_');v.textContent=val;v.style.userSelect='text';v.style.cursor='text';r.appendChild(v);return v;};
-    const vVer=addInfo('Версия','—'); const vId=addInfo('Ваш ID','—'); const vUn=addInfo('Username','—');
+    const vVer=addInfo(T('st_version'),'—'); const vId=addInfo(T('st_your_id'),'—'); const vUn=addInfo(T('st_username'),'—');
     (async()=>{
         try{const info=await INV('get_app_info');vVer.textContent=info.version||'—';}catch(e){}
         try{

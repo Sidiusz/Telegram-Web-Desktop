@@ -299,10 +299,10 @@ const DL = window.__tgdl = (function(){
         const it = document.createElement('div');
         it.className='MenuItem compact _tgdl_openfolder_';
         it.setAttribute('role','menuitem'); it.tabIndex=0;
-        it.innerHTML='<i class="icon" aria-hidden="true" style="display:inline-flex;align-items:center;justify-content:center"><svg viewBox="0 0 24 24" width="1.4rem" height="1.4rem" fill="currentColor" style="display:block"><path d="M3 6a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V6z"/></svg></i>Открыть папку';
+        it.innerHTML='<i class="icon" aria-hidden="true" style="display:inline-flex;align-items:center;justify-content:center"><svg viewBox="0 0 24 24" width="1.4rem" height="1.4rem" fill="currentColor" style="display:block"><path d="M3 6a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V6z"/></svg></i>'+T('ctx_open_folder');
         it.addEventListener('click',function(e){
             e.preventDefault(); e.stopPropagation();
-            INV('open_download_folder',{id:id}).then(function(r){if(r&&r.error)toast('Файл не найден — возможно, перемещён или удалён');}).catch(function(){});
+            INV('open_download_folder',{id:id}).then(function(r){if(r&&r.error)toast(T('dl_not_found_long'));}).catch(function(){});
             document.dispatchEvent(new KeyboardEvent('keydown',{key:'Escape',keyCode:27,which:27,bubbles:true}));
         });
         // после пункта «Скачать» (иконка icon-download), иначе в конец

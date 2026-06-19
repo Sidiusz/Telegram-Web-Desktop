@@ -3,9 +3,9 @@ function showModal({title,msg,url,checkLabel,okText,okDanger,cancelText,onOk,onC
     let cbHtml=checkLabel?'<label class="_cbx_" id="_mo_cb_l_"><input type="checkbox" id="_mo_cb_"><span class="box"></span><span class="label" style="color:#ccc;font-size:13px;">'+checkLabel+'</span></label>':'';
     let urlHtml=url?'<div class="_url_">'+url+'</div>':'';
     const hasCancelBtn = cancelText !== null;
-    const cancelHtml = hasCancelBtn ? '<button class="Button" id="_mo_cn_">'+(cancelText||'ОТМЕНА')+'</button>' : '';
+    const cancelHtml = hasCancelBtn ? '<button class="Button" id="_mo_cn_">'+(cancelText||T('cancel'))+'</button>' : '';
     const extraHtml = extraBtn ? '<button class="Button'+(extraBtn.danger?' danger':'')+'" id="_mo_ex_">'+extraBtn.label+'</button>' : '';
-    mo.innerHTML='<div class="modal-dialog"><div class="modal-header"><div class="modal-title">'+title+'</div></div><div class="modal-content"><div class="_msg_">'+msg+'</div>'+urlHtml+cbHtml+'<div class="dialog-buttons">'+cancelHtml+extraHtml+'<button class="Button'+(okDanger?' danger':'')+'" id="_mo_ok_">'+(okText||'OK')+'</button></div></div></div>';
+    mo.innerHTML='<div class="modal-dialog"><div class="modal-header"><div class="modal-title">'+title+'</div></div><div class="modal-content"><div class="_msg_">'+msg+'</div>'+urlHtml+cbHtml+'<div class="dialog-buttons">'+cancelHtml+extraHtml+'<button class="Button'+(okDanger?' danger':'')+'" id="_mo_ok_">'+(okText||T('ok'))+'</button></div></div></div>';
     document.body.appendChild(mo);
     const close=()=>mo.remove();
     const btnOk=mo.querySelector('#_mo_ok_');

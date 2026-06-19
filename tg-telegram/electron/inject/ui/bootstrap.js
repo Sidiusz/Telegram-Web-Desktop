@@ -1,17 +1,23 @@
 function tryInject(){ensureCSS();ensureToast();ensureCornerWrap();ensurePanels();}
 
-// Иконка трея с числом непрочитанных. На размере трея (~16px) угловой бейдж
-// нечитаем, поэтому при непрочитанных рисуем всю иконку красным кружком с крупным
-// числом. SVG→nativeImage тут не растеризуется — рисуем PNG на canvas (2×).
+// Иконка трея с числом непрочитанных: базовый логотип + небольшой красный бейдж
+// в правом-нижнем углу (≈половина размера иконки). SVG→nativeImage в main не
+// растеризуется — рисуем PNG на canvas. Базовый логотип берём из main один раз.
+var _trayBaseImg=null;
+try{ INV('get_tray_base').then(function(d){ if(d){ var im=new Image(); im.onload=function(){_trayBaseImg=im;}; im.src=d; } }).catch(function(){}); }catch(e){}
 function makeTrayPng(count){
     try{
         var label=count>99?'99+':String(count);
         var S=64, c=document.createElement('canvas'); c.width=S; c.height=S;
         var x=c.getContext('2d');
-        x.fillStyle='#F23C34'; x.beginPath(); x.arc(S/2,S/2,S/2-2,0,Math.PI*2); x.fill();
+        if(_trayBaseImg) x.drawImage(_trayBaseImg,0,0,S,S);     // логотип на всю площадь
+        // Бейдж: круг радиусом ~30% иконки, прижат к правому-нижнему углу.
+        var r=Math.round(S*0.30), cx=S-r-1, cy=S-r-1;
+        x.beginPath(); x.arc(cx,cy,r+2,0,Math.PI*2); x.fillStyle='rgba(0,0,0,.55)'; x.fill();  // тонкая тёмная окантовка
+        x.beginPath(); x.arc(cx,cy,r,0,Math.PI*2); x.fillStyle='#F23C34'; x.fill();
         x.fillStyle='#fff'; x.textAlign='center'; x.textBaseline='middle';
-        x.font='900 '+(label.length>=3?30:40)+'px "Arial Black",Arial,sans-serif';
-        x.fillText(label,S/2,S/2+2);
+        x.font='900 '+(label.length>=3?16:24)+'px "Arial Black",Arial,sans-serif';
+        x.fillText(label,cx,cy+1);
         return c.toDataURL('image/png');
     }catch(e){return null;}
 }
@@ -39,17 +45,26 @@ waitBody(()=>{
 
     setupNotificationSettingsSync();
 
+    // «Что нового» — один раз на новую версию (ждём, пока UI прогрузится).
+    setTimeout(()=>{ try{ showWhatsNewIfNeeded(); }catch(e){} },2500);
+
+    // Счётчик для трея/таскбара: число НЕприглушённых чатов с непрочитанными
+    // (в архиве — игнор). Селекторы те же, что у сканера входящих (TG Web A:
+    // .chat-list .ListItem.Chat + .chat-badge-transition; .ChatList/.Badge не
+    // существуют — старые селекторы давали всегда 0, отсюда был регресс).
     let _lastBadgeCount_=-1;
     setInterval(()=>{
         let count=0;
-        const m=document.title.match(/\((\d+)\)/);
-        if(m)count=parseInt(m[1])||0;
-        if(!count){
-            document.querySelectorAll('.ChatList .Badge:not(.muted)').forEach(b=>{
-                const n=parseInt(b.textContent)||0;
-                count+=n;
+        document.querySelectorAll('.chat-list .ListItem.Chat').forEach(it=>{
+            if(it.className.indexOf('chat-item-archive')>=0)return;
+            if(it.querySelector('.icon-muted'))return;          // приглушённые не считаем
+            let unread=false;
+            it.querySelectorAll('.chat-badge-transition').forEach(b=>{
+                const n=parseInt((b.textContent||'').replace(/[^0-9]/g,''),10);
+                if(!isNaN(n)&&n>0)unread=true;
             });
-        }
+            if(unread)count++;
+        });
         if(count!==_lastBadgeCount_){
             _lastBadgeCount_=count;
             INV('set_notifications_count',{count}).catch(()=>{});
@@ -327,7 +342,7 @@ window.__tgMarkAllRead=function(){
     // Текстовое уведомление на экран (звук отдельно — playSound:false).
     function popup(item,pid){
         var title=titleOf(item)||'Telegram';
-        var text=textOf(item)||'Новое сообщение';
+        var text=textOf(item)||T('new_message');
         toDataUrl(avatarOf(item)).then(function(icon){
             INV('show_notification',{title:title,body:text,icon:icon,sender:title,peerId:pid,playSound:false}).catch(function(){});
         });

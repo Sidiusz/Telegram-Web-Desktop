@@ -51,7 +51,17 @@
             /* Каналы/сообщества (no-avatars, не личка): убираем «хвостик» пузыря и
                скругляем все углы — ровный вид без торчащего уголка (по просьбе). */
             #MiddleColumn:not(.tgdl-private) .MessageList.no-avatars .Message .svg-appendix { display: none !important; }
-            #MiddleColumn:not(.tgdl-private) .MessageList.no-avatars .Message .message-content { border-radius: var(--border-radius-messages) !important; }
+            /* Скругляем ВСЕ 4 угла. TG для .last-in-group зануляет нижний угол под
+               «хвостик» (longhand !important) — перебиваем явными longhand'ами с
+               той же спецификой (+ .last-in-group), иначе нижний-левый остаётся острым. */
+            #MiddleColumn:not(.tgdl-private) .MessageList.no-avatars .Message .message-content,
+            #MiddleColumn:not(.tgdl-private) .MessageList.no-avatars .Message.last-in-group .message-content,
+            #MiddleColumn:not(.tgdl-private) .MessageList.no-avatars .Message.first-in-group .message-content {
+                border-radius: var(--border-radius-messages) !important;
+                border-bottom-left-radius: var(--border-radius-messages) !important;
+                border-bottom-right-radius: var(--border-radius-messages) !important;
+                border-top-left-radius: var(--border-radius-messages) !important;
+            }
 
             /* Выделение: свои пузыри сдвигаем вправо как входящие, аватарки — тоже вправо,
                чтобы кружок-галочка встал ровно на их прежнее место (а не поверх). */

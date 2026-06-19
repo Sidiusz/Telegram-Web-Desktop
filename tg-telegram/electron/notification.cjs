@@ -156,9 +156,9 @@ function buildHtml() {
         top.appendChild(av); top.appendChild(bd); top.appendChild(cx);
 
         const acts=document.createElement('div'); acts.className='actions';
-        const reply=document.createElement('button'); reply.className='btn reply'; reply.textContent='Открыть';
+        const reply=document.createElement('button'); reply.className='btn reply'; reply.textContent=data.btnOpen||'Открыть';
         reply.onclick=function(){ipcRenderer.send('notif-action',{action:'open',peerId:data.peerId});removeCard(id);};
-        const read=document.createElement('button'); read.className='btn read'; read.textContent='Прочитано';
+        const read=document.createElement('button'); read.className='btn read'; read.textContent=data.btnRead||'Прочитано';
         read.onclick=function(){ipcRenderer.send('notif-action',{action:'read',peerId:data.peerId});removeCard(id);};
         acts.appendChild(reply); acts.appendChild(read);
 
@@ -243,6 +243,8 @@ function queueNotification(data) {
         body: String((data && data.body) || '').trim() || 'Новое сообщение',
         icon: String((data && data.icon) || ''),
         anon: !!(data && data.anon),
+        btnOpen: (data && data.btnOpen) || '',
+        btnRead: (data && data.btnRead) || '',
         peerId: (data && data.peerId) || '',
         playSound: data && data.playSound !== false,
         duration: (data && data.duration) || 6,
