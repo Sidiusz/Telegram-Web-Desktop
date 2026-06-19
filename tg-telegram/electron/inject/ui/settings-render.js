@@ -44,70 +44,8 @@ async function renderSt(target){
 
     si('Окно');const s4=sect();it(s4,cbx('_tr_','Сворачивать в трей',s.minimize_to_tray));it(s4,cbx('_dv_','Консоль разработчика (DevTools) — Ctrl+Shift+I / F12',s.devtools_enabled));
 
-    si('Дополнения');
-    let _addonsDirty = false;
-    let applyBtn = null;
-    try{
-        const addons=await INV('get_addons');
-        const embedded=addons.filter(a=>a.embedded);
-        const user=addons.filter(a=>!a.embedded);
-
-        function renderAddonRow(sec,a){
-            const label=a.display_name||a.name;
-            const ver=a.version?'<span style="color:#aaa;font-size:11px;margin-left:4px;">v'+a.version+'</span>':'';
-            const typeTag='<span class="_badge_">'+a.addon_type+'</span>';
-            const row=it(sec,'');
-            const toggle=document.createElement('label');toggle.className='_cbx_';toggle.style.flex='1';
-            toggle.innerHTML='<input type="checkbox" '+(a.enabled?'checked':'')+'><span class="box"></span><span class="label" style="display:flex;align-items:center;gap:6px;">'+label+typeTag+ver+'</span>';
-            const chk=toggle.querySelector('input');
-            chk.addEventListener('change',async()=>{
-                if(chk.checked && a.group){
-                    const conflict = addons.find(o => o.key !== a.key && o.group === a.group && o.enabled);
-                    if(conflict){
-                        chk.checked = false;
-                        showModal({
-                            title: 'Конфликт дополнений',
-                            msg: 'Нельзя включить <b>'+(a.display_name||a.name)+'</b>.<br>Сначала выключите <b>'+(conflict.display_name||conflict.name)+'</b>.',
-                            okText: 'ОК',
-                            cancelText: null,
-                        });
-                        return;
-                    }
-                }
-                a.enabled = chk.checked;
-                await INV('toggle_addon',{key:a.key,enabled:chk.checked});
-                _addonsDirty = true;
-                if(applyBtn) applyBtn.style.display = 'inline-flex';
-            });
-            row.appendChild(toggle);
-            if(!a.embedded){
-                const db=document.createElement('button');db.className='_del_';db.innerHTML='<i class="icon icon-delete"></i>';
-                db.addEventListener('click',async()=>{await INV('delete_addon',{name:a.name});renderSt();});
-                row.appendChild(db);
-            }
-        }
-
-        if(embedded.length){
-            const se=sect();
-            const he=it(se,'<span class="_it_span_" style="font-size:11px;color:#aaa;">ВСТРОЕННЫЕ</span>');he.style.minHeight='0';
-            embedded.forEach(a=>renderAddonRow(se,a));
-        }
-
-        const su=sect();
-        const hu=it(su,'<span class="_it_span_" style="font-size:11px;color:#aaa;">ПОЛЬЗОВАТЕЛЬСКИЕ (.js / .crx)</span>');hu.style.minHeight='0';
-        const raf=it(su,'');
-        const ob=document.createElement('button');ob.className='_ba_';ob.style.marginLeft='auto';ob.innerHTML='<i class="icon icon-folder"></i> Открыть папку';ob.addEventListener('click',()=>INV('open_addons_folder'));raf.appendChild(ob);
-        if(user.length)user.forEach(a=>renderAddonRow(su,a));
-        else{const em=document.createElement('div');em.className='_empty_';em.style.padding='10px 16px';em.textContent='Нет пользовательских дополнений';su.appendChild(em);}
-
-        const applyRow=it(su,'');applyRow.style.justifyContent='flex-end';
-        applyBtn=document.createElement('button');
-        applyBtn.className='_ba_';
-        applyBtn.style.cssText='display:none;background:#2e7d32;';
-        applyBtn.innerHTML='<i class="icon icon-reload"></i> Применить (перезагрузить)';
-        applyBtn.addEventListener('click',()=>INV('apply_addons'));
-        applyRow.appendChild(applyBtn);
-    }catch(e){console.error('addons',e);}
+    // «Дополнения» вынесены в отдельную нативную панель (бургер-меню + строка
+    // в основных Настройках TG). Здесь, в «Настройках приложения», их больше нет.
 
     si('Данные');
     const s6=sect();const s6r=it(s6,'');

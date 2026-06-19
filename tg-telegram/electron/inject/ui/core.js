@@ -137,6 +137,24 @@ const CSS=`
 ._tgpanel_ ._tphead_{display:flex;align-items:center;justify-content:space-between;padding:0 16px;}
 ._tgpanel_ ._tpclr_{background:rgba(229,57,53,.15);border:none;color:#e53935;font-size:12px;padding:4px 10px;border-radius:6px;cursor:pointer;display:inline-flex;align-items:center;gap:4px;}
 ._tgpanel_ ._tpclr_:hover{background:rgba(229,57,53,.28);}
+/* ── Панель «Дополнения» ──────────────────────────────────────────────── */
+._tgpanel_ ._addongrp_{padding:14px 16px 6px;color:var(--color-text-secondary,#aaa);font-size:11px;text-transform:uppercase;letter-spacing:.5px;}
+._tgpanel_ ._addonrow_{display:flex;align-items:center;gap:12px;padding:11px 16px;border-bottom:1px solid rgba(255,255,255,.06);}
+._tgpanel_ ._addonrow_ ._ai_{width:34px;height:34px;border-radius:8px;background:#2b5278;display:flex;align-items:center;justify-content:center;color:#fff;flex-shrink:0;}
+._tgpanel_ ._addonrow_ ._am_{flex:1;min-width:0;}
+._tgpanel_ ._addonrow_ ._an_{color:#fff;font-size:14px;display:flex;align-items:center;gap:6px;}
+._tgpanel_ ._addonrow_ ._as_{color:var(--color-text-secondary,#aaa);font-size:12px;margin-top:2px;}
+._tgpanel_ ._addon_del_{background:none;border:none;color:var(--color-text-secondary,#aaa);cursor:pointer;padding:6px;border-radius:6px;display:flex;flex-shrink:0;}
+._tgpanel_ ._addon_del_:hover{background:rgba(229,57,53,.15);color:#e53935;}
+._tgsw_{position:relative;width:38px;height:22px;flex-shrink:0;cursor:pointer;}
+._tgsw_ input{display:none;}
+._tgsw_ ._tr_{position:absolute;inset:0;background:#555;border-radius:11px;transition:.2s;}
+._tgsw_ ._tr_::after{content:'';position:absolute;top:2px;left:2px;width:18px;height:18px;border-radius:50%;background:#fff;transition:.2s;}
+._tgsw_ input:checked~._tr_{background:var(--color-primary,#5288c1);}
+._tgsw_ input:checked~._tr_::after{transform:translateX(16px);}
+._tgpanel_ ._addons_apply_{position:sticky;bottom:0;background:#1a1a1a;padding:10px 16px;display:none;justify-content:flex-end;border-top:1px solid #191919;}
+._tgpanel_ ._addons_apply_ button{background:#2e7d32;border:none;color:#fff;padding:8px 16px;border-radius:6px;cursor:pointer;font-size:13px;display:inline-flex;align-items:center;gap:6px;}
+._tgpanel_ ._addons_apply_ button:hover{filter:brightness(1.12);}
 `;
 
 function ensureCSS(){if(!document.getElementById('_tgcss_')){const s=document.createElement('style');s.id='_tgcss_';s.textContent=CSS;(document.head||document.documentElement).appendChild(s);}}

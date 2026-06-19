@@ -133,6 +133,135 @@ function closeNativeDlPanel(){
     closeNativePanel();
 }
 
+// ── «Дополнения» как нативный раздел ────────────────────────────────────────
+// Отдельная панель (своя кнопка в гамбургер-меню), а не закопанный раздел настроек.
+// Тумблеры мгновенно сохраняют состояние; группа взаимоисключающая → включение
+// одного автоматически гасит остальные той же группы. Кнопка «Применить» —
+// перезагрузка страницы (аддоны инжектятся на загрузке).
+function openAddonsNative(){
+    if(!document.getElementById('Settings')){
+        tgOpenSettings();
+        const tries=setInterval(()=>{
+            if(document.getElementById('Settings')){ clearInterval(tries); openAddonsNative(); }
+        },80);
+        setTimeout(()=>clearInterval(tries),4000);
+        return;
+    }
+    openNativePanel({
+        title:'Дополнения',
+        renderHeader(hdr){
+            const fb=document.createElement('button');
+            fb.className='_tpclr_'; fb.style.background='rgba(255,255,255,.08)'; fb.style.color='#fff';
+            fb.innerHTML='<svg width="14" height="14" viewBox="0 0 24 24" fill="none"><path d="M3 7a2 2 0 012-2h4l2 2h8a2 2 0 012 2v7a2 2 0 01-2 2H5a2 2 0 01-2-2V7z" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/></svg>Папка';
+            fb.addEventListener('click',()=>INV('open_addons_folder'));
+            hdr.appendChild(fb);
+        },
+        renderContent(content){ renderAddonsNative(content); },
+    });
+}
+
+async function renderAddonsNative(content){
+    if(!content)return;
+    content.innerHTML='<div class="_tpempty_">Загрузка…</div>';
+    let addons=[];
+    try{ addons=await INV('get_addons'); }
+    catch(e){ content.innerHTML='<div class="_tpempty_">Ошибка загрузки</div>'; return; }
+    content.innerHTML='';
+
+    let applyBar=null;
+    function markDirty(){ if(applyBar) applyBar.style.display='flex'; }
+
+    function grpHdr(text){ const h=document.createElement('div'); h.className='_addongrp_'; h.textContent=text; content.appendChild(h); }
+
+    function row(a){
+        const r=document.createElement('div'); r.className='_addonrow_';
+        const ico=document.createElement('div'); ico.className='_ai_';
+        ico.innerHTML='<i class="icon icon-bots" aria-hidden="true"></i>';
+        const meta=document.createElement('div'); meta.className='_am_';
+        const nm=document.createElement('div'); nm.className='_an_';
+        nm.textContent=a.display_name||a.name;
+        const badge=document.createElement('span'); badge.className='_badge_'; badge.textContent=a.addon_type;
+        nm.appendChild(badge);
+        const sub=document.createElement('div'); sub.className='_as_';
+        sub.textContent=(a.version?('v'+a.version):'')+(a.embedded?' · встроенное':' · пользовательское');
+        meta.appendChild(nm); meta.appendChild(sub);
+
+        const sw=document.createElement('label'); sw.className='_tgsw_';
+        const chk=document.createElement('input'); chk.type='checkbox'; chk.checked=!!a.enabled;
+        const tr=document.createElement('span'); tr.className='_tr_';
+        sw.appendChild(chk); sw.appendChild(tr);
+        a._chk=chk;
+        chk.addEventListener('change',async()=>{
+            if(chk.checked && a.group){
+                for(const o of addons){
+                    if(o.key!==a.key && o.group===a.group && o.enabled){
+                        o.enabled=false;
+                        if(o._chk) o._chk.checked=false;
+                        await INV('toggle_addon',{key:o.key,enabled:false});
+                    }
+                }
+            }
+            a.enabled=chk.checked;
+            await INV('toggle_addon',{key:a.key,enabled:chk.checked});
+            markDirty();
+        });
+
+        r.appendChild(ico); r.appendChild(meta);
+        if(!a.embedded){
+            const del=document.createElement('button'); del.className='_addon_del_'; del.title='Удалить';
+            del.innerHTML='<svg viewBox="0 0 24 24" width="16" height="16" fill="none"><path d="M3 6h18M8 6V4h8v2M19 6l-1 14H6L5 6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>';
+            del.addEventListener('click',()=>{
+                showModal({title:'Удалить дополнение',msg:'Удалить «'+(a.display_name||a.name)+'»?',okText:'УДАЛИТЬ',okDanger:true,onOk:async()=>{await INV('delete_addon',{name:a.name});renderAddonsNative(content);}});
+            });
+            r.appendChild(del);
+        }
+        r.appendChild(sw);
+        content.appendChild(r);
+    }
+
+    const embedded=addons.filter(a=>a.embedded);
+    const user=addons.filter(a=>!a.embedded);
+    if(embedded.length){ grpHdr('Встроенные'); embedded.forEach(row); }
+    grpHdr('Пользовательские (.js / .crx)');
+    if(user.length) user.forEach(row);
+    else{ const em=document.createElement('div'); em.className='_tpempty_'; em.style.padding='24px 16px'; em.textContent='Нет пользовательских дополнений'; content.appendChild(em); }
+
+    applyBar=document.createElement('div'); applyBar.className='_addons_apply_'; applyBar.style.display='none';
+    const ab=document.createElement('button');
+    ab.innerHTML='<i class="icon icon-reload"></i> Применить (перезагрузить)';
+    ab.addEventListener('click',()=>INV('apply_addons'));
+    applyBar.appendChild(ab);
+    content.appendChild(applyBar);
+}
+
+// ── «Список изменений» как нативный раздел ──────────────────────────────────
+function openChangelogNative(){
+    if(!document.getElementById('Settings')){
+        tgOpenSettings();
+        const tries=setInterval(()=>{
+            if(document.getElementById('Settings')){ clearInterval(tries); openChangelogNative(); }
+        },80);
+        setTimeout(()=>clearInterval(tries),4000);
+        return;
+    }
+    openNativePanel({
+        title:'Список изменений',
+        renderContent(content){ renderChangelogNative(content); },
+    });
+}
+async function renderChangelogNative(content){
+    if(!content)return;
+    content.innerHTML='<div class="_tpempty_">Загрузка…</div>';
+    try{
+        const r=await INV('fetch_changelog');
+        content.innerHTML='';
+        if(r&&r.error){ content.innerHTML='<div class="_tpempty_">Ошибка: '+r.error+'</div>'; return; }
+        const pre=document.createElement('div'); pre.className='_cl_content_';
+        pre.textContent=(r&&r.text)||'Список изменений пуст.';
+        content.appendChild(pre);
+    }catch(e){ content.innerHTML='<div class="_tpempty_">Ошибка загрузки</div>'; }
+}
+
 // Рисует список загрузок в переданный контент-контейнер (нативная панель).
 // Эталон строки: <div class="ListItem multiline"><div class="ListItem-button">…</div></div>.
 async function renderDownloadsNative(content){

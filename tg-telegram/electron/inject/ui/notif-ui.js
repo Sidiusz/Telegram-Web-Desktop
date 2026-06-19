@@ -33,20 +33,26 @@ if(window.tgBridge){
 async function showUpdateModal(data){
     const verLine='Доступна версия <b>v'+data.version+'</b>'+(data.current?' (сейчас: v'+data.current+')':'');
     const clBox='<div id="_upd_cl_" style="margin-top:10px;background:#1a1a1a;border-radius:6px;padding:10px 12px;font-size:13px;color:#ccc;line-height:1.6;white-space:pre-wrap;max-height:200px;overflow-y:auto;">Загрузка...</div>';
+    const fname=data.filename||('Telegram Web Desktop Setup '+data.version+'.exe');
     showModal({
         title:'Доступно обновление',
         msg:verLine+'<br>'+clBox,
         okText:'СКАЧАТЬ',
         cancelText:'ПОЗЖЕ',
         extraBtn:{label:'ПРОПУСТИТЬ',danger:false},
-        onOk:async()=>{showUpdateProgress(data.url,'Telegram Web Desktop Setup '+data.version+'.exe',data.version);},
+        onOk:async()=>{showUpdateProgress(data.url,fname,data.version);},
         onExtra:async()=>{await INV('skip_version',{version:data.version});},
     });
-    try{
-        const r=await INV('fetch_changelog');
-        const el=document.getElementById('_upd_cl_');
-        if(el)el.textContent=r.error?('Ошибка: '+r.error):(r.text||'Список изменений пуст.');
-    }catch(e){const el=document.getElementById('_upd_cl_');if(el)el.textContent='Ошибка загрузки.';}
+    // notes из релиза приходят в событии — показываем сразу; иначе дёргаем fetch_changelog.
+    if(data.notes&&data.notes.trim()){
+        const el=document.getElementById('_upd_cl_');if(el)el.textContent=data.notes.trim();
+    }else{
+        try{
+            const r=await INV('fetch_changelog');
+            const el=document.getElementById('_upd_cl_');
+            if(el)el.textContent=r.error?('Ошибка: '+r.error):(r.text||'Список изменений пуст.');
+        }catch(e){const el=document.getElementById('_upd_cl_');if(el)el.textContent='Ошибка загрузки.';}
+    }
 }
 function showUpdateProgress(url,filename,version){
     ensureCornerWrap();
@@ -75,13 +81,5 @@ function setupUpdateListeners(){
 }
 setupUpdateListeners();
 
-async function renderCl(){
-    const c=document.getElementById('_tgcl_c');if(!c)return;
-    c.innerHTML='<div class="_empty_">Загрузка...</div>';
-    try{
-        const r=await INV('fetch_changelog');
-        if(r.error){c.innerHTML='<div class="_empty_">Ошибка: '+r.error+'</div>';return;}
-        const pre=document.createElement('div');pre.className='_cl_content_';pre.textContent=r.text||'Список изменений пуст.';
-        c.innerHTML='';c.appendChild(pre);
-    }catch(e){c.innerHTML='<div class="_empty_">Ошибка загрузки</div>';}
-}
+// «Список изменений» теперь рисуется нативной панелью (renderChangelogNative
+// в native-panels.js). Старый renderCl удалён.
