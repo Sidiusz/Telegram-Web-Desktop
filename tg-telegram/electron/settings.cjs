@@ -21,6 +21,8 @@ const DEFAULTS = {
     notif_cat_private: true,     // личные сообщения (peerId > 0)
     notif_cat_group: true,       // группы (peerId < 0)
     notif_cat_channel: true,     // каналы (peerId < 0)
+    notif_hide_text: false,      // скрывать текст входящих → «Вам пришло новое сообщение»
+    notif_hide_sender: false,    // скрывать имя/аватар → «Анонимный пользователь»
     webnotif_hint_shown: false,
     devtools_enabled: false,
     update_check_interval: '1h',
@@ -44,6 +46,8 @@ function loadSettings() {
         notif_cat_private: store.get('notif_cat_private', DEFAULTS.notif_cat_private),
         notif_cat_group: store.get('notif_cat_group', DEFAULTS.notif_cat_group),
         notif_cat_channel: store.get('notif_cat_channel', DEFAULTS.notif_cat_channel),
+        notif_hide_text: store.get('notif_hide_text', DEFAULTS.notif_hide_text),
+        notif_hide_sender: store.get('notif_hide_sender', DEFAULTS.notif_hide_sender),
         webnotif_hint_shown: store.get('webnotif_hint_shown', DEFAULTS.webnotif_hint_shown),
         devtools_enabled: store.get('devtools_enabled', DEFAULTS.devtools_enabled),
         update_check_interval: store.get('update_check_interval', DEFAULTS.update_check_interval),

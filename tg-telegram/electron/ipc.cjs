@@ -7,7 +7,7 @@ const { loadDownloads, saveDownloads, deleteDownload } = require('./downloads.cj
 const { getAddons, deleteAddon, openAddonsFolder, toggleAddon } = require('./addons.cjs');
 const path = require('path');
 const fs = require('fs');
-const { updateTrayBadge, setTrayLang } = require('./tray.cjs');
+const { updateTrayBadge, setTrayLang, setTrayImageFromDataURL, getTrayBaseDataURL } = require('./tray.cjs');
 const { checkForUpdate, downloadUpdate, scheduleChecks, init: initUpdater, fetchChangelog, fetchReleases } = require('./updater.cjs');
 
 const TG_URL = 'https://web.telegram.org/a/';
@@ -45,11 +45,14 @@ function registerIpc(getWindow) {
         const settings = state.settings || loadSettings();
         if (!settings.popup_notifications) return;
 
-        const showPreview = settings.notif_show_preview !== false;
+        const hideSender = settings.notif_hide_sender === true;
+        const hideText = settings.notif_hide_text === true;
+        const showPreview = settings.notif_show_preview !== false && !hideText;
         queueNotification({
-            title: sender || title || chatName || 'Telegram',
-            body: showPreview ? body : 'Новое сообщение',
-            icon,
+            title: hideSender ? 'Анонимный пользователь' : (sender || title || chatName || 'Telegram'),
+            body: showPreview ? body : (hideText ? 'Вам пришло новое сообщение' : 'Новое сообщение'),
+            icon: hideSender ? '' : icon,
+            anon: hideSender,
             peerId,
             playSound: settings.notif_sound !== false,
             duration: settings.notif_duration || 6,
@@ -236,6 +239,14 @@ function registerIpc(getWindow) {
     ipcMain.handle('report_lang', (e, { lang }) => {
         setTrayLang(lang);
     });
+
+    // Tray icon PNG drawn on a canvas in the renderer (SVG→nativeImage fails here).
+    ipcMain.handle('set_tray_image', (e, { dataURL }) => {
+        setTrayImageFromDataURL(dataURL);
+    });
+
+    // Base tray logo (PNG data URL) so the renderer can composite logo + badge.
+    ipcMain.handle('get_tray_base', () => getTrayBaseDataURL());
 
     ipcMain.handle('get_hint_img_url', () => {
         const imgPath = path.join(__dirname, 'assets', 'webnotif-hint.png');

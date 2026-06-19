@@ -11,8 +11,13 @@ function injectMenu(){
         const bubble = icon.closest('.bubble.menu-container');
         if(!bubble) return;
         
-        // Если наши пункты уже добавлены в этот bubble — пропускаем
-        if(bubble.querySelector('#_tgmi_dl_')) return;
+        // Уже вставлены — только обновляем подписи на текущий язык (TG ставит
+        // <html lang> не сразу, меню могло вставиться ещё на en) и выходим.
+        if(bubble.querySelector('#_tgmi_dl_')){
+            const map={_tgmi_dl_:'downloads',_tgmi_ad_:'addons',_tgmi_st_:'app_settings',_tgmi_cl_:'changelog',_tgmi_upd_:'check_updates'};
+            Object.keys(map).forEach(id=>{const sp=bubble.querySelector('#'+id+' span');if(sp)sp.textContent=T(map[id]);});
+            return;
+        }
 
         function mi(id, ico, label, cb){
             const el = document.createElement('div');
@@ -51,6 +56,11 @@ function injectMenu(){
 
         // Находим оригинальную кнопку "Настройки", чтобы вставить пункты строго перед ней
         const tgSettings = Array.from(bubble.querySelectorAll('.MenuItem.compact:not([id])')).find(el => el.querySelector('.icon-settings'));
+        // Открытие нативных Настроек должно закрывать наши кастомные панели.
+        if(tgSettings && !tgSettings.dataset.tgHooked){
+            tgSettings.dataset.tgHooked='1';
+            tgSettings.addEventListener('click',()=>{ try{ closeNativePanel(); }catch(e){} });
+        }
         const anchor = tgSettings || bubble.lastElementChild;
         
         if(anchor){

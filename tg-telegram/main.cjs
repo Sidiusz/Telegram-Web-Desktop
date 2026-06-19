@@ -6,6 +6,8 @@ app.commandLine.appendSwitch('disable-renderer-backgrounding');
 // Keep timers alive (our incoming-message interceptor) when window is backgrounded/hidden
 app.commandLine.appendSwitch('disable-background-timer-throttling');
 app.commandLine.appendSwitch('disable-backgrounding-occluded-windows');
+// Dev only (unpackaged): expose CDP for local UI testing. Never in shipped builds.
+if (!app.isPackaged) app.commandLine.appendSwitch('remote-debugging-port', '9222');
 
 let reloadInterval = null;
 

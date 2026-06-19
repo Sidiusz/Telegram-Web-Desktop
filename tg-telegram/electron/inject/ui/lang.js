@@ -33,6 +33,7 @@ var L={
     ad_user:        {ru:'Пользовательские (.js / .crx)', en:'Custom (.js / .crx)'},
     ad_none:        {ru:'Нет пользовательских дополнений', en:'No custom add-ons'},
     ad_apply:       {ru:'Применить (перезагрузить)', en:'Apply (reload)'},
+    addon_off:      {ru:'Выключено',                 en:'Off'},
     ad_del_t:       {ru:'Удалить дополнение',        en:'Delete add-on'},
     // changelog
     cl_current:     {ru:'текущая',                   en:'current'},

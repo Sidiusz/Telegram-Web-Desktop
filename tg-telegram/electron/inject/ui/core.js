@@ -28,20 +28,26 @@ const CSS=`
 ._empty_{color:#aaa;text-align:center;padding:32px 16px;font-size:13px;}
 ._badge_{display:inline-block;background:rgba(82,136,193,.2);color:#8bb8e8;font-size:10px;padding:1px 5px;border-radius:3px;margin-left:4px;}
 .Badge{display:inline-flex !important;align-items:center !important;justify-content:center !important;min-width:12px !important;height:12px !important;padding:0 3px !important;border-radius:6px !important;background:#F23C34 !important;color:#fff !important;font-size:9px !important;font-weight:700 !important;line-height:1 !important;box-sizing:border-box !important;letter-spacing:-.3px !important;}
-._toast_{position:fixed;bottom:20px;left:50%;transform:translateX(-50%);background:#212121;color:#fff;padding:10px 16px;border-radius:10px;font-size:14px;opacity:0;transition:opacity .2s;pointer-events:none;z-index:2147483648;white-space:nowrap;display:flex;align-items:center;gap:10px;box-shadow:0 4px 16px rgba(0,0,0,.5);max-width:calc(100vw - 40px);}
-._toast_.on{opacity:1;}
+/* Копия нативной TG карточки (.modal-dialog): сплошной #212121, тень, без blur. */
+._toast_{position:fixed;top:52px;left:50%;transform:translateX(-50%) translateY(-12px);background:var(--color-background,#212121);color:#fff;padding:12px 18px;border-radius:16px;font-size:15px;opacity:0;transition:opacity .2s,transform .2s;pointer-events:none;z-index:2147483648;white-space:nowrap;display:flex;align-items:center;gap:10px;box-shadow:rgba(16,16,16,.61) 0 4px 8px 2px;max-width:calc(100vw - 32px);}
+._toast_.on{opacity:1;transform:translateX(-50%) translateY(0);}
 ._toast_ .notif-icon{color:var(--color-primary,#5288c1);font-size:18px;flex-shrink:0;}
-._mo_{position:fixed;inset:0;z-index:2147483647;display:flex;align-items:center;justify-content:center;background:rgba(0,0,0,.6);}
-._mo_ .modal-dialog{background:#212121;border-radius:12px;min-width:320px;max-width:420px;overflow:hidden;box-shadow:0 8px 32px rgba(0,0,0,.7);display:flex;flex-direction:column;}
-._mo_ .modal-header{padding:16px 20px 12px;}
-._mo_ .modal-title{font-size:16px;font-weight:600;color:#fff;}
-._mo_ .modal-content{padding:0 20px 20px;display:flex;flex-direction:column;gap:16px;}
-._mo_ ._msg_{color:#ccc;font-size:14px;line-height:1.5;}
-._mo_ ._url_{color:var(--color-links,#7b72c6);font-size:12px;word-break:break-all;padding:8px 10px;background:#1a1a1a;border-radius:6px;}
-._mo_ .dialog-buttons{display:flex;gap:12px;justify-content:flex-end;padding-top:8px;}
-._mo_ .Button{background:none;border:none;color:var(--color-links,#7b72c6);font-size:14px;font-weight:500;padding:8px 16px;border-radius:6px;cursor:pointer;text-transform:uppercase;letter-spacing:0.5px;width:auto !important;flex:none !important;}
-._mo_ .Button:hover{background:rgba(255,255,255,.06);}
+/* Копия нативного TG .modal-dialog (confirm): #212121, r32, тень, заголовок 20/500,
+   кнопки-текст 16/500 uppercase primary, без фона. */
+._mo_{position:fixed;inset:0;z-index:2147483647;display:flex;align-items:center;justify-content:center;background:rgba(0,0,0,.5);animation:_moBg_ .15s ease;}
+@keyframes _moBg_{from{opacity:0}to{opacity:1}}
+@keyframes _moIn_{from{opacity:0;transform:scale(.94)}to{opacity:1;transform:none}}
+._mo_ .modal-dialog{background:var(--color-background,#212121);border-radius:16px;min-width:300px;max-width:420px;overflow:hidden;box-shadow:rgba(16,16,16,.61) 0 4px 8px 2px;display:flex;flex-direction:column;animation:_moIn_ .18s cubic-bezier(.32,.72,0,1);}
+._mo_ .modal-header{padding:18px 22px 6px;}
+._mo_ .modal-title{font-size:20px;font-weight:500;color:#fff;line-height:1.2;}
+._mo_ .modal-content{padding:6px 22px 12px;display:flex;flex-direction:column;gap:14px;}
+._mo_ ._msg_{color:rgba(255,255,255,.85);font-size:16px;line-height:1.4;}
+._mo_ ._url_{color:var(--color-primary,#8774e1);font-size:13px;word-break:break-all;padding:8px 10px;background:#1a1a1a;border-radius:8px;}
+._mo_ .dialog-buttons{display:flex;gap:6px;justify-content:flex-end;padding-top:4px;}
+._mo_ .Button{background:none;border:none;color:var(--color-primary,#8774e1);font-size:16px;font-weight:500;padding:10px 16px;border-radius:12px;cursor:pointer;text-transform:uppercase;letter-spacing:.2px;width:auto !important;flex:none !important;transition:background .12s;}
+._mo_ .Button:hover{background:var(--color-primary-opacity,rgba(135,116,225,.12));}
 ._mo_ .Button.danger{color:#e53935;}
+._mo_ .Button.danger:hover{background:rgba(229,57,53,.12);}
 ._si_{padding:8px 0 16px 8px;color:#aaa;font-size:11px;text-transform:uppercase;letter-spacing:.5px;}
 ._si_:first-child{padding-top:16px;}
 ._it_{display:flex;align-items:center;justify-content:space-between;padding:10px 16px;border-bottom:1px solid #191919;min-height:24px;}
@@ -55,20 +61,19 @@ const CSS=`
 ._folder_{background:none;border:none;color:var(--color-text-secondary,#aaa);cursor:pointer;font-size:12px;display:inline-flex;align-items:center;gap:3px;padding:0;}
 ._folder_:hover{color:#fff;}
 ._dlbadge_wrap_{position:fixed;bottom:16px;right:16px;z-index:2147483646;display:flex;flex-direction:column;gap:8px;align-items:flex-end;pointer-events:none;}
-._cnotif_wrap_{position:fixed;bottom:16px;right:16px;z-index:2147483645;display:flex;flex-direction:column-reverse;gap:8px;align-items:flex-end;pointer-events:none;max-width:340px;}
-._cnotif_{pointer-events:all;background:#1e2733;border-radius:12px;padding:12px 14px;box-shadow:0 4px 20px rgba(0,0,0,.6);display:flex;gap:12px;align-items:flex-start;animation:_cnIn_ .25s cubic-bezier(.4,0,.2,1);min-width:260px;max-width:340px;cursor:default;}
-@keyframes _cnIn_{from{opacity:0;transform:translateY(16px);}to{opacity:1;transform:translateY(0);}}
-._cnotif_.out{opacity:0;transform:translateY(8px);transition:opacity .2s,transform .2s;}
+/* Копия нативного TG .Notification: сверху по центру, тёмный с blur, скруглённый. */
+._cnotif_wrap_{position:fixed;top:0;left:50%;transform:translateX(-50%);margin-top:52px;z-index:2147483645;display:flex;flex-direction:column;gap:4px;align-items:center;pointer-events:none;width:22rem;max-width:calc(100vw - 16px);}
+._cnotif_{pointer-events:all;width:100%;box-sizing:border-box;background:var(--color-background,#212121);border-radius:16px;padding:12px 15px;box-shadow:rgba(16,16,16,.61) 0 4px 8px 2px;display:flex;gap:12px;align-items:center;color:#fff;animation:_cnIn_ .25s cubic-bezier(.4,0,.2,1);cursor:default;}
+@keyframes _cnIn_{from{opacity:0;transform:translateY(-12px);}to{opacity:1;transform:translateY(0);}}
+._cnotif_.out{opacity:0;transform:translateY(-8px);transition:opacity .2s,transform .2s;}
 ._cnotif_av_{width:40px;height:40px;border-radius:50%;background:#2b5278;flex-shrink:0;display:flex;align-items:center;justify-content:center;font-size:17px;font-weight:600;color:#fff;overflow:hidden;}
 ._cnotif_av_ img{width:100%;height:100%;object-fit:cover;border-radius:50%;}
 ._cnotif_body_{flex:1;min-width:0;}
-._cnotif_title_{color:#fff;font-size:13px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
-._cnotif_text_{color:#aaa;font-size:12px;margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
-._cnotif_close_{background:none;border:none;color:#666;font-size:16px;cursor:pointer;padding:0 0 0 6px;line-height:1;flex-shrink:0;align-self:flex-start;}
+._cnotif_title_{color:#fff;font-size:15px;font-weight:500;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;line-height:1.25;}
+._cnotif_text_{color:rgba(255,255,255,.8);font-size:14px;margin-top:1px;line-height:1.25;overflow:hidden;text-overflow:ellipsis;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;}
+._cnotif_close_{background:none;border:none;color:rgba(255,255,255,.5);font-size:16px;cursor:pointer;padding:0 0 0 6px;line-height:1;flex-shrink:0;align-self:flex-start;}
 ._cnotif_close_:hover{color:#fff;}
-._cnotif_prog_{height:2px;background:rgba(255,255,255,.08);border-radius:2px;margin-top:8px;overflow:hidden;}
-._cnotif_prog_ span{display:block;height:100%;background:#5288c1;border-radius:2px;animation:_cnProg_ 5s linear forwards;}
-@keyframes _cnProg_{from{width:100%;}to{width:0%;}}
+._cnotif_prog_{display:none;}
 ._upd_bar_{display:flex;gap:6px;align-items:center;margin-top:8px;}
 ._upd_prog_{flex:1;height:4px;background:rgba(255,255,255,.1);border-radius:2px;overflow:hidden;}
 ._upd_prog_ span{display:block;height:100%;background:#5288c1;border-radius:2px;transition:width .3s;width:0%;}
@@ -133,8 +138,12 @@ const CSS=`
    → все хэш-классы и вид 1-в-1 как родной. Своя кнопка «Назад» просто прячет
    панель (React-state не трогаем → кнопка работает железно). */
 ._tgpanel_{position:absolute;inset:0;z-index:50;display:flex;flex-direction:column;background:var(--color-background,#212121);
-    transform:translateX(24px);opacity:0;transition:transform .24s cubic-bezier(.4,0,.2,1),opacity .24s cubic-bezier(.4,0,.2,1);}
-._tgpanel_._in_{transform:translateX(0);opacity:1;}
+    box-shadow:-8px 0 28px rgba(0,0,0,.4);transform:translateX(100%);transition:transform .28s cubic-bezier(.32,.72,0,1);}
+._tgpanel_._in_{transform:translateX(0);}
+/* Push: текущий нативный экран уезжает назад (уменьшается+влево+тускнеет),
+   наша панель наезжает поверх — как родная Transition в Настройках. */
+#Settings._tgpush_ .Transition__slide--active{transform:scale(.94) translateX(-22%);opacity:.5;
+    transition:transform .28s cubic-bezier(.32,.72,0,1),opacity .28s;}
 ._tgpanel_ .left-header{flex:0 0 auto;}
 ._tgpanel_ .settings-content{flex:1;overflow-y:auto;background:var(--color-background-secondary,#0f0f0f);}
 /* ── App settings panel — native-like widgets ──────────────────────────── */
@@ -160,6 +169,11 @@ const CSS=`
 ._tgpanel_ ._ns_swt_ i::after{content:'';position:absolute;top:2px;left:2px;width:16px;height:16px;border-radius:50%;background:#fff;transition:.2s;}
 ._tgpanel_ ._ns_swt_ input:checked~i{background:var(--color-primary,#8774e1);}
 ._tgpanel_ ._ns_swt_ input:checked~i::after{transform:translateX(14px);}
+._tgpanel_ ._ns_radio_{position:relative;width:20px;height:20px;border-radius:50%;border:2px solid #5a5a5a;flex-shrink:0;transition:.15s;}
+._tgpanel_ ._ns_radio_._on_{border-color:var(--color-primary,#8774e1);}
+._tgpanel_ ._ns_radio_._on_::after{content:'';position:absolute;inset:3px;border-radius:50%;background:var(--color-primary,#8774e1);}
+._tgpanel_ ._addon_del_{background:none;border:none;color:var(--color-text-secondary,#aaa);cursor:pointer;padding:6px;border-radius:6px;display:flex;flex-shrink:0;}
+._tgpanel_ ._addon_del_:hover{background:rgba(229,57,53,.15);color:#e53935;}
 /* строка-загрузка: действие справа (Открыть/Папку/Удалить) — подменяем шеврон */
 ._tgpanel_ ._tpright_{margin-left:auto;display:flex;gap:2px;flex-shrink:0;}
 ._tgpanel_ ._tpright_ button{background:none;border:none;color:var(--color-text-secondary,#aaa);cursor:pointer;padding:6px;border-radius:6px;display:flex;align-items:center;justify-content:center;}
