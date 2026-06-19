@@ -12,40 +12,67 @@
         var s = document.createElement('style');
         s.id = 'addon-desktop-wide';
         s.textContent = `
-            /* Прижимаем сообщения к левому краю (только margin — width не трогаем). */
-            #MiddleColumn .MessageList.no-avatars .messages-container {
+            /* Широкая область сообщений + прижим к левому краю — во ВСЕХ чатах
+               (и личные, и группы/каналы), иначе в группах остаётся центрованный
+               контейнер 728px с большим отступом слева. Ширину МЕНЯЕМ на загрузке
+               (в аддоне), а не вживую — тогда виртуализация считает её с самого начала. */
+            #MiddleColumn .MessageList .messages-container {
+                /* Оставляем правый «жёлоб» ~3.5rem: широкие пузыри не доходят до
+                   скроллбара, чтобы сердечко/«переслать» справа не залезали на него. */
+                max-width: calc(100% - 3.5rem) !important; width: calc(100% - 3.5rem) !important;
                 margin-left: 0 !important; margin-right: auto !important;
+                box-sizing: border-box !important;
             }
 
-            /* Широкая нижняя панель ввода (не виртуализирована — менять ширину безопасно). */
-            #MiddleColumn .middle-column-footer { max-width: 100% !important; }
-            #MiddleColumn .middle-column-footer .composer-wrapper { max-width: 100% !important; margin-left: 0 !important; }
+            /* Широкая нижняя панель ввода на ВСЮ ширину (width, не только max-width —
+               иначе панель сжимается по содержимому). Не виртуализирована, менять безопасно. */
+            #MiddleColumn .middle-column-footer { width: 100% !important; max-width: 100% !important; }
+            #MiddleColumn .middle-column-footer .composer-wrapper { width: 100% !important; max-width: 100% !important; margin-left: 0 !important; }
 
-            /* Широкие пузыри. */
-            #MiddleColumn .Message { --max-width: 48rem !important; }
+            /* Широкие пузыри — под ширину поля ввода. */
+            #MiddleColumn .Message { --max-width: 70rem !important; }
 
-            /* Свои сообщения — на левую сторону, как входящие (цвет пузыря остаётся свой). */
-            #MiddleColumn .MessageList.no-avatars .Message { padding-left: 44px !important; position: relative !important; }
-            #MiddleColumn .MessageList.no-avatars .Message.own { justify-content: flex-start !important; }
-            #MiddleColumn .MessageList.no-avatars .Message.own .message-content-wrapper { margin-left: 0 !important; margin-right: auto !important; }
-            #MiddleColumn .MessageList.no-avatars .Message.own > .Avatar { display: none !important; }
+            /* Свои сообщения — на левую сторону. ТОЛЬКО в личных 1-на-1: класс
+               .tgdl-private вешает JS по hash (#положительный). В каналах/группах
+               (no-avatars, но #-100...) НЕ трогаем — иначе остаётся пустой отступ
+               слева под несуществующую аватарку и кривой хвостик пузыря. */
+            #MiddleColumn.tgdl-private .MessageList.no-avatars .Message { padding-left: 44px !important; position: relative !important; }
+            #MiddleColumn.tgdl-private .MessageList.no-avatars .Message.own { justify-content: flex-start !important; }
+            #MiddleColumn.tgdl-private .MessageList.no-avatars .Message.own .message-content-wrapper { margin-left: 0 !important; margin-right: auto !important; }
+            #MiddleColumn.tgdl-private .MessageList.no-avatars .Message.own > .Avatar { display: none !important; }
 
             /* Хвостик своих — слева (зеркалим), нижние углы как у входящего. */
-            #MiddleColumn .MessageList.no-avatars .Message.own .svg-appendix { transform: scaleX(-1) !important; left: -8px !important; right: auto !important; }
-            #MiddleColumn .MessageList.no-avatars .Message.own.last-in-group .message-content {
+            #MiddleColumn.tgdl-private .MessageList.no-avatars .Message.own .svg-appendix { transform: scaleX(-1) !important; left: -8px !important; right: auto !important; }
+            #MiddleColumn.tgdl-private .MessageList.no-avatars .Message.own.last-in-group .message-content {
                 border-bottom-left-radius: 0 !important;
                 border-bottom-right-radius: var(--border-radius-messages) !important;
             }
 
+            /* Каналы/сообщества (no-avatars, не личка): убираем «хвостик» пузыря и
+               скругляем все углы — ровный вид без торчащего уголка (по просьбе). */
+            #MiddleColumn:not(.tgdl-private) .MessageList.no-avatars .Message .svg-appendix { display: none !important; }
+            #MiddleColumn:not(.tgdl-private) .MessageList.no-avatars .Message .message-content { border-radius: var(--border-radius-messages) !important; }
+
             /* Выделение: свои пузыри сдвигаем вправо как входящие, аватарки — тоже вправо,
                чтобы кружок-галочка встал ровно на их прежнее место (а не поверх). */
-            .MessageList.no-avatars.select-mode-active .Message.own .message-content-wrapper { transform: translateX(40px) !important; }
-            .MessageList.no-avatars.select-mode-active .custom-message-avatar { left: 44px !important; }
+            #MiddleColumn.tgdl-private .MessageList.no-avatars.select-mode-active .Message.own .message-content-wrapper { transform: translateX(40px) !important; }
+            #MiddleColumn.tgdl-private .MessageList.no-avatars.select-mode-active .custom-message-avatar { left: 44px !important; }
 
-            /* Иконка быстрой реакции — справа за пределами пузыря (и у своих, и у входящих),
-               иначе у входящих сердечко наезжает на timestamp. */
-            #MiddleColumn .MessageList.no-avatars .Message .quick-reaction { left: auto !important; right: -2.2rem !important; transform: none !important; }
-            #MiddleColumn .MessageList.no-avatars .Message.own .message-action-buttons-container { left: auto !important; right: -3rem !important; }
+            /* Быстрая реакция (сердечко):
+               • на постах с кнопкой «переслать» (.has-action-button) — убираем совсем:
+                 там она конфликтует с меню действий (переслать/к оригиналу), реакции
+                 ставятся через ПКМ/меню реакций;
+               • на обычных сообщениях — просто за правым краем пузыря (не на timestamp). */
+            #MiddleColumn .MessageList.no-avatars .Message .message-content.has-action-button .quick-reaction,
+            #MiddleColumn .MessageList:not(.no-avatars) .Message:not(.own) .message-content.has-action-button .quick-reaction {
+                display: none !important;
+            }
+            #MiddleColumn .MessageList.no-avatars .Message .message-content:not(.has-action-button) .quick-reaction,
+            #MiddleColumn .MessageList:not(.no-avatars) .Message:not(.own) .message-content:not(.has-action-button) .quick-reaction {
+                left: auto !important; right: -1.9rem !important; bottom: -1px !important; top: auto !important; transform: none !important;
+            }
+            /* У своих (личка, перевёрнуты влево) кнопки «переслать» — справа. */
+            #MiddleColumn.tgdl-private .MessageList.no-avatars .Message.own .message-action-buttons-container { left: auto !important; right: -3rem !important; }
 
             /* Длинные цитаты (reply) не уезжают за экран. */
             #MiddleColumn .Message .EmbeddedMessage .message-text .embedded-text-wrapper { white-space: pre-wrap !important; }
@@ -76,7 +103,12 @@
 
     function isPrivate() {
         var list = document.querySelector('#MiddleColumn .MessageList');
-        return !!(list && list.classList.contains('no-avatars'));
+        if (!list || !list.classList.contains('no-avatars')) return false;
+        // Каналы/группы/новостные ленты тоже no-avatars. data-peer-id у них «обрезан»
+        // до положительного, а в URL-hash сохраняется минус (#-100...). Кастомные
+        // аватарки рисуем ТОЛЬКО в личных 1-на-1 (положительный peer в hash).
+        var m = (location.hash || '').match(/#(-?\d+)/);
+        return !!m && m[1].charAt(0) !== '-';
     }
     function getCurrentPeerId() {
         var el = document.querySelector('.MiddleHeader .ChatInfo .Avatar[data-peer-id]');
@@ -156,7 +188,11 @@
             if (partnerSrc) _inject(msg, partnerSrc);
         });
     }
-    function tick() { ensureStyles(); injectAvatars(); }
+    function applyPrivateClass() {
+        var mc = document.getElementById('MiddleColumn');
+        if (mc) mc.classList.toggle('tgdl-private', isPrivate());
+    }
+    function tick() { ensureStyles(); applyPrivateClass(); injectAvatars(); }
     setInterval(tick, 1000);
     tick();
 })();

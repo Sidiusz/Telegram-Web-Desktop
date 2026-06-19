@@ -1,4 +1,6 @@
-function ensurePanels(){makePanel('_tgst_','Настройки приложения');makePanel('_tgcl_','Список изменений');}
+// Старые слайд-панели (_tgst_/_tgcl_) больше не нужны: настройки/загрузки/
+// дополнения/чейнджлог рисуются нативными панелями поверх #Settings.
+function ensurePanels(){}
 
 // ── ИНЖЕКТ МЕНЮ: Строго по структуре DOM без догадок ────────────────────
 function injectMenu(){
@@ -35,8 +37,9 @@ function injectMenu(){
         const sep2 = document.createElement('div'); sep2.className = sepClass;
 
         const dl = mi('_tgmi_dl_', 'icon-download', 'Загрузки', () => openDownloadsNative());
+        const ad = mi('_tgmi_ad_', 'icon-bots', 'Дополнения', () => openAddonsNative());
         const st = mi('_tgmi_st_', 'icon-settings', 'Настройки приложения', () => openAppSettingsNative());
-        const cl = mi('_tgmi_cl_', 'icon-info', 'Список изменений', () => openPanel('_tgcl_', renderCl));
+        const cl = mi('_tgmi_cl_', 'icon-info', 'Список изменений', () => openChangelogNative());
         const upd = mi('_tgmi_upd_', 'icon-reload', 'Проверить обновления', async () => {
             toast('Проверка обновлений...', 'icon-reload');
             try {
@@ -53,6 +56,7 @@ function injectMenu(){
         if(anchor){
             bubble.insertBefore(sep1, anchor);
             bubble.insertBefore(dl, anchor);
+            bubble.insertBefore(ad, anchor);
             bubble.insertBefore(st, anchor);
             bubble.insertBefore(cl, anchor);
             bubble.insertBefore(upd, anchor);
@@ -79,7 +83,7 @@ function injectSettingsRows(){
     if(!anchor || anchor.closest('#RightColumn, .RightColumn')) return;
     const list  = anchor.closest('.ListItem.narrow').parentElement;
     if(!list) return;
-    if(list.querySelector('#_tgst_app_,#_tgst_dl_')) return;   // уже вставлено
+    if(list.querySelector('#_tgst_app_,#_tgst_dl_,#_tgst_ad_')) return;   // уже вставлено
 
     // Клонируем живую нативную строку → собираем свою по тому же шаблону.
     const tmpl = anchor.closest('.ListItem.narrow');
@@ -111,6 +115,11 @@ function injectSettingsRows(){
     } else {
         list.insertBefore(appRow, list.firstChild);
     }
+
+    // 1b) «Дополнения» — сразу под «Настройки приложения».
+    const adRow = makeRow('_tgst_ad_', 'bots', 'Дополнения');
+    adRow.querySelector('.ListItem-button').addEventListener('click', () => openAddonsNative());
+    appRow.after(adRow);
 
     // 2) «Загрузки» — после «Данные и память» (если есть), иначе после «Уведомления».
     const dlRow = makeRow('_tgst_dl_', 'download', 'Загрузки');
