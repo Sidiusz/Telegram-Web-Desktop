@@ -46,12 +46,12 @@ function injectMenu(){
         const st = mi('_tgmi_st_', 'icon-settings', T('app_settings'), () => openAppSettingsNative());
         const cl = mi('_tgmi_cl_', 'icon-info', T('changelog'), () => openChangelogNative());
         const upd = mi('_tgmi_upd_', 'icon-reload', T('check_updates'), async () => {
-            toast('Проверка обновлений...', 'icon-reload');
+            toast(T('upd_checking'), 'icon-reload');
             try {
                 const r = await INV('check_update_manual');
-                if (!r || r.upToDate) toast('Установлена последняя версия', 'icon-check');
-                else if (r.error) toast('Ошибка: ' + r.error, 'icon-close');
-            } catch(e) { toast('Ошибка проверки', 'icon-close'); }
+                if (!r || r.upToDate) toast(T('st_uptodate'), 'icon-check');
+                else if (r.error) toast(T('error') + ': ' + r.error, 'icon-close');
+            } catch(e) { toast(T('st_check_err'), 'icon-close'); }
         });
 
         // Находим оригинальную кнопку "Настройки", чтобы вставить пункты строго перед ней

@@ -41,7 +41,7 @@ function openNativePanel(opts){
         const back=document.createElement('button');
         back.type='button';
         back.className='Button smaller translucent round';
-        back.setAttribute('aria-label','Назад'); back.title='Назад';
+        back.setAttribute('aria-label',T('back')); back.title=T('back');
         back.innerHTML='<i class="icon icon-arrow-left" aria-hidden="true"></i>';
         const h3=document.createElement('h3'); h3.textContent=opts.title||'';
         hdr.appendChild(back); hdr.appendChild(h3);
@@ -112,11 +112,11 @@ function openDownloadsNative(){
         renderHeader(hdr){
             const clr=document.createElement('button');
             clr.className='_tpclr_';
-            clr.innerHTML='<svg width="14" height="14" viewBox="0 0 24 24" fill="none"><path d="M3 6h18M8 6V4h8v2M19 6l-1 14H6L5 6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>Очистить';
+            clr.innerHTML='<svg width="14" height="14" viewBox="0 0 24 24" fill="none"><path d="M3 6h18M8 6V4h8v2M19 6l-1 14H6L5 6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>'+T('dl_clear');
             clr.addEventListener('click',()=>{
                 showModal({
-                    title:'Очистить загрузки',msg:'Удалить все записи загрузок?<br><small style="color:#aaa">Файлы на диске также будут удалены.</small>',
-                    okText:'ОЧИСТИТЬ',okDanger:true,
+                    title:T('dl_clear_t'),msg:T('dl_clear_m'),
+                    okText:T('dl_clear_upper'),okDanger:true,
                     onOk:async()=>{
                         const items=await INV('get_downloads');
                         for(const d of (items||[])) await INV('delete_download',{id:d.id});
@@ -166,7 +166,7 @@ function openAddonsNative(){
         renderHeader(hdr){
             const fb=document.createElement('button');
             fb.className='_tpclr_'; fb.style.background='rgba(255,255,255,.08)'; fb.style.color='#fff';
-            fb.innerHTML='<svg width="14" height="14" viewBox="0 0 24 24" fill="none"><path d="M3 7a2 2 0 012-2h4l2 2h8a2 2 0 012 2v7a2 2 0 01-2 2H5a2 2 0 01-2-2V7z" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/></svg>Папка';
+            fb.innerHTML='<svg width="14" height="14" viewBox="0 0 24 24" fill="none"><path d="M3 7a2 2 0 012-2h4l2 2h8a2 2 0 012 2v7a2 2 0 01-2 2H5a2 2 0 01-2-2V7z" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/></svg>'+T('ad_folder');
             fb.addEventListener('click',()=>INV('open_addons_folder'));
             hdr.appendChild(fb);
         },
@@ -273,10 +273,10 @@ function _clVerBlock(v, isCur){
     var hdr=document.createElement('div'); hdr.className='_cl_ver_hdr_';
     var num=document.createElement('span'); num.className='_cl_vnum_'; num.textContent=(/^\d/.test(v.version)?'v':'')+v.version;
     hdr.appendChild(num);
-    if(isCur){ var b=document.createElement('span'); b.className='_cl_cur_badge_'; b.textContent='текущая'; hdr.appendChild(b); }
+    if(isCur){ var b=document.createElement('span'); b.className='_cl_cur_badge_'; b.textContent=T('cl_current'); hdr.appendChild(b); }
     card.appendChild(hdr);
     var lines=String(v.notes||'').split(/\r?\n/).map(function(l){return l.trim();}).filter(Boolean);
-    if(!lines.length){ var em=document.createElement('div'); em.className='_cl_item_'; em.textContent='Без описания'; card.appendChild(em); return card; }
+    if(!lines.length){ var em=document.createElement('div'); em.className='_cl_item_'; em.textContent=T('cl_nodesc'); card.appendChild(em); return card; }
     lines.forEach(function(line){
         if(/^[_\-—]{3,}$/.test(line)){ var d=document.createElement('div'); d.className='_cl_div_'; card.appendChild(d); return; }
         var item=document.createElement('div'); item.className='_cl_item_';
@@ -290,7 +290,7 @@ function _clVerBlock(v, isCur){
 }
 async function renderChangelogNative(content){
     if(!content)return;
-    content.innerHTML='<div class="_tpempty_">Загрузка…</div>';
+    content.innerHTML='<div class="_tpempty_">'+T('loading')+'</div>';
     var data=null;
     try{ data=await INV('fetch_changelog_structured'); }catch(e){ data={error:String(e)}; }
     // Есть структура по версиям — рисуем блоками.
@@ -307,11 +307,11 @@ async function renderChangelogNative(content){
     try{
         var r=await INV('fetch_changelog');
         content.innerHTML='';
-        if(r&&r.error){ content.innerHTML='<div class="_tpempty_">Ошибка: '+r.error+'</div>'; return; }
+        if(r&&r.error){ content.innerHTML='<div class="_tpempty_">'+T('error')+': '+r.error+'</div>'; return; }
         var pre=document.createElement('div'); pre.className='_cl_content_';
-        pre.textContent=(r&&r.text)||'Список изменений пуст.';
+        pre.textContent=(r&&r.text)||T('cl_empty');
         content.appendChild(pre);
-    }catch(e){ content.innerHTML='<div class="_tpempty_">Ошибка загрузки</div>'; }
+    }catch(e){ content.innerHTML='<div class="_tpempty_">'+T('load_error')+'</div>'; }
 }
 
 // Рисует список загрузок в переданный контент-контейнер (нативная панель).
@@ -381,7 +381,7 @@ function _nativeDlRow(d, cb){
     return row;
 }
 
-function sLabel(s){return{pending:'Ожидание…',downloading:'⬇ Загружается',completed:'✓ Завершено',failed:'✕ Ошибка',cancelled:'— Отменено'}[s]||s;}
+function sLabel(s){return{pending:T('dl_st_pending'),downloading:T('dl_st_downloading'),completed:T('dl_st_completed'),failed:T('dl_st_failed'),cancelled:T('dl_st_cancelled')}[s]||s;}
 function sColor(s){return{pending:'#aaa',downloading:'var(--color-primary,#5288c1)',completed:'#4caf50',failed:'#e53935',cancelled:'#aaa'}[s]||'#aaa';}
 
 // Расширение файла → цвет иконки (упрощённая палитра TG)

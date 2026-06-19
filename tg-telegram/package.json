@@ -1,7 +1,7 @@
 {
   "name": "com.sidiusz.telegram-web",
   "productName": "Telegram Web Desktop", 
-  "version": "1.1.2",
+  "version": "1.2.0",
   "description": "",
   "type": "commonjs",
   "main": "main.cjs",
@@ -11,6 +11,12 @@
     "start": "electron ."
   },
   "license": "MIT",
+  "build": {
+    "files": [
+      "**/*",
+      "!.cdp.mjs"
+    ]
+  },
   "dependencies": {
     "adm-zip": "^0.5.10",
     "electron-store": "^11.0.2"

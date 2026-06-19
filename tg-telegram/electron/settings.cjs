@@ -24,6 +24,7 @@ const DEFAULTS = {
     notif_hide_text: false,      // скрывать текст входящих → «Вам пришло новое сообщение»
     notif_hide_sender: false,    // скрывать имя/аватар → «Анонимный пользователь»
     webnotif_hint_shown: false,
+    whatsnew_shown_version: null,   // версия, для которой уже показали «Что нового»
     devtools_enabled: false,
     update_check_interval: '1h',
     skipped_version: null,
@@ -49,6 +50,7 @@ function loadSettings() {
         notif_hide_text: store.get('notif_hide_text', DEFAULTS.notif_hide_text),
         notif_hide_sender: store.get('notif_hide_sender', DEFAULTS.notif_hide_sender),
         webnotif_hint_shown: store.get('webnotif_hint_shown', DEFAULTS.webnotif_hint_shown),
+        whatsnew_shown_version: store.get('whatsnew_shown_version', DEFAULTS.whatsnew_shown_version),
         devtools_enabled: store.get('devtools_enabled', DEFAULTS.devtools_enabled),
         update_check_interval: store.get('update_check_interval', DEFAULTS.update_check_interval),
         skipped_version: store.get('skipped_version', DEFAULTS.skipped_version),
