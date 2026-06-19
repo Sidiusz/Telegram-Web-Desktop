@@ -70,8 +70,8 @@ function buildHtml() {
     html,body{margin:0;width:100%;height:100%;overflow:hidden;background:transparent;
         font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;user-select:none;}
     #stack{display:flex;flex-direction:column;gap:8px;padding:0;}
-    .card{background:rgba(30,39,51,.98);border-radius:14px;padding:12px 14px;color:#fff;
-        box-shadow:0 10px 32px rgba(0,0,0,.55),0 0 0 1px rgba(255,255,255,.06);
+    .card{background:#212121;border-radius:16px;padding:12px 14px;color:#fff;
+        box-shadow:rgba(16,16,16,.61) 0 4px 8px 2px,0 0 0 1px rgba(255,255,255,.04);
         opacity:0;transform:translateY(-10px);transition:opacity .2s ease,transform .2s ease;}
     .card.show{opacity:1;transform:translateY(0);}
     .card.hide{opacity:0;transform:translateY(-8px);}
@@ -87,12 +87,12 @@ function buildHtml() {
     .close-x:hover{color:#fff;}
     .actions{display:flex;gap:8px;margin-top:10px;}
     .btn{flex:1;border:none;border-radius:8px;padding:7px 0;font-size:12px;font-weight:600;cursor:pointer;}
-    .btn.reply{background:#5288c1;color:#fff;}
+    .btn.reply{background:#8774e1;color:#fff;}
     .btn.reply:hover{filter:brightness(1.1);}
     .btn.read{background:rgba(255,255,255,.08);color:#c2c9d1;}
     .btn.read:hover{background:rgba(255,255,255,.14);color:#fff;}
     .progress{margin-top:10px;height:2px;border-radius:999px;overflow:hidden;background:rgba(255,255,255,.08);}
-    .bar{height:100%;background:#5288c1;width:100%;}
+    .bar{height:100%;background:#8774e1;width:100%;}
     @keyframes barshrink{from{width:100%;}to{width:0%;}}
 </style></head>
 <body>
@@ -142,11 +142,9 @@ function buildHtml() {
         const el=document.createElement('div'); el.className='card';
         const title=(data.title||'Telegram').trim()||'Telegram';
         const text=(data.body||'').trim()||'Новое сообщение';
-        // Группы/каналы (peerId < 0) — отвечать нельзя списком, кнопка «Открыть».
-        const canReply = data.peerId && String(data.peerId).charAt(0)!=='-';
-
         const top=document.createElement('div'); top.className='top';
         const av=document.createElement('div'); av.className='avatar';
+        if(data.anon){av.style.background='#6b6b6b';}
         if(data.icon){const im=document.createElement('img');im.src=data.icon;im.onerror=function(){av.textContent=firstLetter(title);};av.appendChild(im);}
         else av.textContent=firstLetter(title);
         const bd=document.createElement('div'); bd.className='body';
@@ -158,7 +156,7 @@ function buildHtml() {
         top.appendChild(av); top.appendChild(bd); top.appendChild(cx);
 
         const acts=document.createElement('div'); acts.className='actions';
-        const reply=document.createElement('button'); reply.className='btn reply'; reply.textContent=canReply?'Ответить':'Открыть';
+        const reply=document.createElement('button'); reply.className='btn reply'; reply.textContent='Открыть';
         reply.onclick=function(){ipcRenderer.send('notif-action',{action:'open',peerId:data.peerId});removeCard(id);};
         const read=document.createElement('button'); read.className='btn read'; read.textContent='Прочитано';
         read.onclick=function(){ipcRenderer.send('notif-action',{action:'read',peerId:data.peerId});removeCard(id);};
@@ -244,6 +242,7 @@ function queueNotification(data) {
         title: String((data && data.title) || '').trim() || 'Telegram',
         body: String((data && data.body) || '').trim() || 'Новое сообщение',
         icon: String((data && data.icon) || ''),
+        anon: !!(data && data.anon),
         peerId: (data && data.peerId) || '',
         playSound: data && data.playSound !== false,
         duration: (data && data.duration) || 6,

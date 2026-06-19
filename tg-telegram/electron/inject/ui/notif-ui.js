@@ -32,7 +32,7 @@ if(window.tgBridge){
 // ── Обновления ────────────────────────────────────────────────────────────
 async function showUpdateModal(data){
     const verLine='Доступна версия <b>v'+data.version+'</b>'+(data.current?' (сейчас: v'+data.current+')':'');
-    const clBox='<div id="_upd_cl_" style="margin-top:10px;background:#1a1a1a;border-radius:6px;padding:10px 12px;font-size:13px;color:#ccc;line-height:1.6;white-space:pre-wrap;max-height:200px;overflow-y:auto;">Загрузка...</div>';
+    const clBox='<div id="_upd_cl_" style="margin-top:12px;background:#1a1a1a;border-radius:12px;padding:12px 14px;font-size:14px;color:#ccc;line-height:1.6;white-space:pre-wrap;max-height:220px;overflow-y:auto;">Загрузка...</div>';
     const fname=data.filename||('Telegram Web Desktop Setup '+data.version+'.exe');
     showModal({
         title:'Доступно обновление',

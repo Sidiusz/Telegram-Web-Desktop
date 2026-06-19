@@ -76,57 +76,26 @@ function buildMenu(count) {
     return Menu.buildFromTemplate(items);
 }
 
-// Logo + pill badge in the corner. Nested <image> needs BOTH href and xlink:href
-// so it renders across rasterizers; if the composite still fails, fall back to a
-// pure-shape red circle that always renders.
-function makeBadgeIcon(count) {
-    if (baseIcon.isEmpty()) return makeCircleCountIcon(count);
-    const label = count > 99 ? '99+' : String(count);
-    const isWide = label.length >= 3;
-    const bW = isWide ? 22 : 16, bH = 16;
-    const bX = 32 - bW, bY = 32 - bH;
-    const fontSize = isWide ? 9 : 11;
-    const b64 = baseIcon.toPNG().toString('base64');
-    const svg = `<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="32" height="32">
-  <image href="data:image/png;base64,${b64}" xlink:href="data:image/png;base64,${b64}" width="32" height="32"/>
-  <rect x="${bX}" y="${bY}" width="${bW}" height="${bH}" rx="${bH/2}" ry="${bH/2}" fill="#F23C34" stroke="#1c1c1c" stroke-width="1.5"/>
-  <text x="${bX + bW/2}" y="${bY + bH/2 + 0.5}" text-anchor="middle" dominant-baseline="central"
-        font-family="Arial Black,Arial,sans-serif" font-size="${fontSize}" font-weight="900" fill="#fff">${label}</text>
-</svg>`;
-    try {
-        const img = nativeImage.createFromDataURL('data:image/svg+xml;base64,' + Buffer.from(svg).toString('base64'));
-        return img.isEmpty() ? makeCircleCountIcon(count) : img;
-    } catch (e) {
-        return makeCircleCountIcon(count);
+// Electron does not rasterize SVG → nativeImage here, so the badge is drawn on a
+// canvas in the renderer and sent as a PNG data URL (createFromDataURL supports PNG).
+function setTrayImageFromDataURL(dataURL) {
+    if (!tray) return;
+    if (dataURL) {
+        try { const img = nativeImage.createFromDataURL(dataURL); if (!img.isEmpty()) tray.setImage(img); } catch (e) {}
+    } else {
+        tray.setImage(baseIcon);
     }
-}
-
-// Pure-shape fallback: whole tray icon becomes a red count circle.
-function makeCircleCountIcon(count) {
-    const label = count > 99 ? '99+' : String(count);
-    const fontSize = label.length >= 3 ? 13 : 16;
-    const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32">
-  <circle cx="16" cy="16" r="15" fill="#F23C34"/>
-  <text x="16" y="16.5" text-anchor="middle" dominant-baseline="central"
-        font-family="Arial Black,Arial,sans-serif" font-size="${fontSize}" font-weight="900" fill="#fff">${label}</text>
-</svg>`;
-    try {
-        const img = nativeImage.createFromDataURL('data:image/svg+xml;base64,' + Buffer.from(svg).toString('base64'));
-        return img.isEmpty() ? baseIcon : img;
-    } catch (e) { return baseIcon; }
 }
 
 function updateTrayBadge(count) {
     _lastCount = count;
     if (!tray) return;
-    if (count > 0) {
-        tray.setImage(makeBadgeIcon(count));
-        tray.setToolTip('Telegram Web Desktop (' + count + ')');
-    } else {
-        tray.setImage(baseIcon);
-        tray.setToolTip('Telegram Web Desktop');
-    }
+    tray.setToolTip(count > 0 ? ('Telegram Web Desktop (' + count + ')') : 'Telegram Web Desktop');
     tray.setContextMenu(buildMenu(count));
 }
 
-module.exports = { createTray, updateTrayBadge, setTrayLang };
+function getTrayBaseDataURL() {
+    try { return baseIcon.isEmpty() ? null : baseIcon.toDataURL(); } catch (e) { return null; }
+}
+
+module.exports = { createTray, updateTrayBadge, setTrayLang, setTrayImageFromDataURL, getTrayBaseDataURL };

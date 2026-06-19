@@ -2,11 +2,16 @@
 // проигрываем обратную анимацию (снимаем _in_), затем удаляем — чтобы у «Назад»
 // был такой же слайд/фейд, как при открытии.
 function closeNativePanel(animate){
+    // Глушим live-таймер «Загрузок» — иначе он перерисует downloads в _tgpc_
+    // следующей панели (открыл Настройки поверх Загрузок → видел снова Загрузки).
+    if(_dlNativeTimer){ clearInterval(_dlNativeTimer); _dlNativeTimer=null; }
+    if(window.__tgdlNativeRefresh) delete window.__tgdlNativeRefresh;
     if(!_nativePanel) return;
     var p=_nativePanel; _nativePanel=null;
+    var st=document.getElementById('Settings'); if(st) st.classList.remove('_tgpush_');  // вернуть экран
     if(animate===false){ p.remove(); return; }
     p.classList.remove('_in_');
-    setTimeout(function(){ if(p&&p.parentNode) p.remove(); }, 240);
+    setTimeout(function(){ if(p&&p.parentNode) p.remove(); }, 280);
 }
 
 // Открывает нативный экран Настроек TG (клик по пункту «Настройки» в сайд-меню).
@@ -55,8 +60,8 @@ function openNativePanel(opts){
     settings.appendChild(panel);
     _nativePanel=panel;
     if(opts.renderContent) opts.renderContent(content);
-    // Анимация появления (как нативный slide-in).
-    requestAnimationFrame(()=>panel.classList.add('_in_'));
+    // Push-анимация: текущий экран назад + наша панель наезжает поверх.
+    requestAnimationFrame(()=>{ settings.classList.add('_tgpush_'); panel.classList.add('_in_'); });
     return panel;
 }
 
@@ -169,75 +174,73 @@ function openAddonsNative(){
     });
 }
 
+var GROUP_NAMES={ desktop_like_chat:{ru:'Оформление сообщений',en:'Message layout'} };
+function groupName(g){ var e=GROUP_NAMES[g]; return e?(e[curLang()]||e.en):g; }
+
 async function renderAddonsNative(content){
     if(!content)return;
-    content.innerHTML='<div class="_tpempty_">Загрузка…</div>';
+    content.innerHTML='<div class="_tpempty_">'+T('loading')+'</div>';
     let addons=[];
     try{ addons=await INV('get_addons'); }
-    catch(e){ content.innerHTML='<div class="_tpempty_">Ошибка загрузки</div>'; return; }
+    catch(e){ content.innerHTML='<div class="_tpempty_">'+T('load_error')+'</div>'; return; }
     content.innerHTML='';
 
     let applyBar=null;
-    function markDirty(){ if(applyBar) applyBar.style.display='flex'; }
+    const markDirty=()=>{ if(applyBar) applyBar.style.display='flex'; };
+    const ce=cls=>{const d=document.createElement('div');if(cls)d.className=cls;return d;};
+    const lbl=t=>{const d=ce('_ns_lbl_');d.textContent=t;content.appendChild(d);};
+    const card=()=>{const d=ce('_ns_card_');content.appendChild(d);return d;};
+    const main=(title,sub)=>{const m=ce('_ns_main_');const t=ce('_ns_title_');t.textContent=title;m.appendChild(t);if(sub){const x=ce('_ns_sub_');x.textContent=sub;m.appendChild(x);}return m;};
 
-    function grpHdr(text){ const h=document.createElement('div'); h.className='_addongrp_'; h.textContent=text; content.appendChild(h); }
-
-    function row(a){
-        const r=document.createElement('div'); r.className='_addonrow_';
-        const ico=document.createElement('div'); ico.className='_ai_';
-        ico.innerHTML='<i class="icon icon-bots" aria-hidden="true"></i>';
-        const meta=document.createElement('div'); meta.className='_am_';
-        const nm=document.createElement('div'); nm.className='_an_';
-        nm.textContent=a.display_name||a.name;
-        const badge=document.createElement('span'); badge.className='_badge_'; badge.textContent=a.addon_type;
-        nm.appendChild(badge);
-        const sub=document.createElement('div'); sub.className='_as_';
-        sub.textContent=(a.version?('v'+a.version):'')+(a.embedded?' · встроенное':' · пользовательское');
-        meta.appendChild(nm); meta.appendChild(sub);
-
-        const sw=document.createElement('label'); sw.className='_tgsw_';
-        const chk=document.createElement('input'); chk.type='checkbox'; chk.checked=!!a.enabled;
-        const tr=document.createElement('span'); tr.className='_tr_';
-        sw.appendChild(chk); sw.appendChild(tr);
-        a._chk=chk;
-        chk.addEventListener('change',async()=>{
-            if(chk.checked && a.group){
-                for(const o of addons){
-                    if(o.key!==a.key && o.group===a.group && o.enabled){
-                        o.enabled=false;
-                        if(o._chk) o._chk.checked=false;
-                        await INV('toggle_addon',{key:o.key,enabled:false});
-                    }
-                }
-            }
-            a.enabled=chk.checked;
-            await INV('toggle_addon',{key:a.key,enabled:chk.checked});
-            markDirty();
-        });
-
-        r.appendChild(ico); r.appendChild(meta);
+    // ungrouped add-on → toggle row (+delete for custom)
+    function toggleRow(cd,a){
+        const r=ce('_ns_row_'); cd.appendChild(r);
+        r.appendChild(main(a.display_name||a.name, a.version?('v'+a.version):null));
         if(!a.embedded){
-            const del=document.createElement('button'); del.className='_addon_del_'; del.title='Удалить';
+            const del=document.createElement('button'); del.className='_addon_del_'; del.title=T('dl_delete');
             del.innerHTML='<svg viewBox="0 0 24 24" width="16" height="16" fill="none"><path d="M3 6h18M8 6V4h8v2M19 6l-1 14H6L5 6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>';
-            del.addEventListener('click',()=>{
-                showModal({title:'Удалить дополнение',msg:'Удалить «'+(a.display_name||a.name)+'»?',okText:'УДАЛИТЬ',okDanger:true,onOk:async()=>{await INV('delete_addon',{name:a.name});renderAddonsNative(content);}});
-            });
+            del.addEventListener('click',()=>showModal({title:T('ad_del_t'),msg:'«'+(a.display_name||a.name)+'»?',okText:T('del_upper'),okDanger:true,onOk:async()=>{await INV('delete_addon',{name:a.name});renderAddonsNative(content);}}));
             r.appendChild(del);
         }
+        const sw=document.createElement('label'); sw.className='_ns_swt_';
+        const chk=document.createElement('input'); chk.type='checkbox'; chk.checked=!!a.enabled;
+        sw.appendChild(chk); sw.appendChild(document.createElement('i'));
+        chk.addEventListener('change',async()=>{ a.enabled=chk.checked; await INV('toggle_addon',{key:a.key,enabled:chk.checked}); markDirty(); });
         r.appendChild(sw);
-        content.appendChild(r);
     }
 
-    const embedded=addons.filter(a=>a.embedded);
-    const user=addons.filter(a=>!a.embedded);
-    if(embedded.length){ grpHdr('Встроенные'); embedded.forEach(row); }
-    grpHdr('Пользовательские (.js / .crx)');
-    if(user.length) user.forEach(row);
-    else{ const em=document.createElement('div'); em.className='_tpempty_'; em.style.padding='24px 16px'; em.textContent='Нет пользовательских дополнений'; content.appendChild(em); }
+    // same-group add-ons are mutually exclusive → radio (incl. "Off")
+    function radioGroup(g,list){
+        lbl(groupName(g));
+        const cd=card(); const radios=[];
+        const refresh=()=>{ const anyOn=list.some(a=>a.enabled); radios.forEach(rd=>rd.el.classList.toggle('_on_', rd.a?rd.a.enabled:!anyOn)); };
+        const pick=(addon)=>{ list.forEach(a=>{ const want=(a===addon); if(a.enabled!==want){ a.enabled=want; INV('toggle_addon',{key:a.key,enabled:want}); } }); refresh(); markDirty(); };
+        const addRadio=(label,addon)=>{
+            const r=ce('_ns_row_'); r.style.cursor='pointer'; cd.appendChild(r);
+            r.appendChild(main(label, addon?('v'+(addon.version||'')):null));
+            const rad=ce('_ns_radio_'); r.appendChild(rad);
+            radios.push({el:rad,a:addon});
+            r.addEventListener('click',()=>pick(addon));
+        };
+        addRadio(T('addon_off'),null);
+        list.forEach(a=>addRadio(a.display_name||a.name,a));
+        refresh();
+    }
 
-    applyBar=document.createElement('div'); applyBar.className='_addons_apply_'; applyBar.style.display='none';
+    const groups={};
+    addons.forEach(a=>{ if(a.group)(groups[a.group]=groups[a.group]||[]).push(a); });
+    const embSingle=addons.filter(a=>a.embedded && !a.group);
+    const userSingle=addons.filter(a=>!a.embedded && !a.group);
+
+    Object.keys(groups).forEach(g=>radioGroup(g,groups[g]));
+    if(embSingle.length){ lbl(T('ad_builtin')); const cd=card(); embSingle.forEach(a=>toggleRow(cd,a)); }
+    lbl(T('ad_user'));
+    if(userSingle.length){ const cd=card(); userSingle.forEach(a=>toggleRow(cd,a)); }
+    else { const em=ce('_tpempty_'); em.style.padding='16px'; em.textContent=T('ad_none'); content.appendChild(em); }
+
+    applyBar=ce('_addons_apply_'); applyBar.style.display='none';
     const ab=document.createElement('button');
-    ab.innerHTML='<i class="icon icon-reload"></i> Применить (перезагрузить)';
+    ab.innerHTML='<i class="icon icon-reload"></i> '+T('ad_apply');
     ab.addEventListener('click',()=>INV('apply_addons'));
     applyBar.appendChild(ab);
     content.appendChild(applyBar);
@@ -320,74 +323,61 @@ async function renderDownloadsNative(content){
     if(!merged.length){
         const empty=document.createElement('div');
         empty.className='_tpempty_';
-        empty.textContent='Нет загрузок';
+        empty.textContent=T('dl_empty');
         content.appendChild(empty);
         return;
     }
-    merged.forEach(d=>content.appendChild(_nativeDlRow(d, ()=>renderDownloadsNative(content))));
+    const card=document.createElement('div'); card.className='_ns_card_'; card.style.marginTop='10px';
+    merged.forEach(d=>card.appendChild(_nativeDlRow(d, ()=>renderDownloadsNative(content))));
+    content.appendChild(card);
 }
 
-// Строка-загрузка в нативном стиле (клон .ListItem multiline). cb — перерисовка.
+// Строка-загрузка в стиле _ns_ (как настройки/дополнения). cb — перерисовка.
 function _nativeDlRow(d, cb){
     const done=d.status==='completed';
     const active=d.status==='downloading'||d.status==='pending';
-    const failed=d.status==='failed';
-    const row=document.createElement('div');
-    row.className='ListItem multiline'+(done?'':'');
-    const btn=document.createElement('div');
-    btn.className='ListItem-button'; btn.setAttribute('role','button'); btn.tabIndex=0;
-    // иконка по расширению
+    const row=document.createElement('div'); row.className='_ns_row_';
     const ext=_fileExt(d.filename);
-    const ico=document.createElement('i');
-    ico.className='icon ListItem-main-icon';
-    ico.setAttribute('aria-hidden','true');
-    ico.style.cssText='display:flex;align-items:center;justify-content:center;font-size:9px;font-weight:700;color:#fff;border-radius:50%;width:30px;height:30px;background:'+_extColor(ext)+';font-style:normal;';
+    const ico=document.createElement('div');
+    ico.style.cssText='display:flex;align-items:center;justify-content:center;font-size:10px;font-weight:700;color:#fff;border-radius:8px;width:34px;height:34px;flex-shrink:0;background:'+_extColor(ext)+';';
     ico.textContent=(ext||'?').slice(0,4).toUpperCase();
-    btn.appendChild(ico);
-    const item=document.createElement('div');
-    item.className='multiline-item';
-    const title=document.createElement('span');
-    title.className='title';
-    title.textContent=d.filename||'(без имени)';
-    title.style.overflow='hidden'; title.style.textOverflow='ellipsis'; title.style.whiteSpace='nowrap';
-    const sub=document.createElement('span');
-    sub.className='subtitle';
-    sub.style.color=sColor(d.status);
+    row.appendChild(ico);
+    const m=document.createElement('div'); m.className='_ns_main_';
+    const title=document.createElement('div'); title.className='_ns_title_';
+    title.textContent=d.filename||'—';
+    title.style.cssText+='overflow:hidden;text-overflow:ellipsis;white-space:nowrap;';
+    const sub=document.createElement('div'); sub.className='_ns_sub_'; sub.style.color=sColor(d.status);
     if(active){
         const fmt=window.__tgdl&&window.__tgdl.fmtProgress||function(){return '';};
-        sub.textContent=d.status==='pending'?'Ожидание…':fmt(d.recv,d.total);
+        sub.textContent=d.status==='pending'?T('dl_waiting'):fmt(d.recv,d.total);
     } else if(done){
         const fb=window.__tgdl?window.__tgdl.fmtBytes:function(){return '';};
-        sub.textContent='Завершено'+(d.total?(' · '+fb(d.total)):'');
+        sub.textContent=T('dl_done')+(d.total?(' · '+fb(d.total)):'');
     } else {
         sub.textContent=sLabel(d.status);
     }
-    item.appendChild(title); item.appendChild(sub);
-    btn.appendChild(item);
-    // действия справа: только «Папка» и «Удалить». «Открыть» убрано — клик по
-    // самой строке (ListItem-button) уже открывает файл (см. ниже btn.click).
-    const right=document.createElement('div');
-    right.className='_tpright_';
+    m.appendChild(title); m.appendChild(sub); row.appendChild(m);
+    const right=document.createElement('div'); right.className='_tpright_';
     if(done&&d.id!=null){
-        const fld=document.createElement('button'); fld.title='Показать в папке';
+        const fld=document.createElement('button'); fld.title=T('dl_show_folder');
         fld.innerHTML='<svg viewBox="0 0 24 24" fill="none"><path d="M3 7a2 2 0 012-2h4l2 2h8a2 2 0 012 2v7a2 2 0 01-2 2H5a2 2 0 01-2-2V7z" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/></svg>';
-        fld.addEventListener('click',e=>{e.stopPropagation();INV('open_download_folder',{id:d.id}).then(r=>{if(r&&r.error)toast('Файл не найден');}).catch(()=>{});});
+        fld.addEventListener('click',e=>{e.stopPropagation();INV('open_download_folder',{id:d.id}).then(r=>{if(r&&r.error)toast(T('dl_not_found'));}).catch(()=>{});});
         right.appendChild(fld);
     }
     if(d.id!=null){
-        const del=document.createElement('button'); del.className='danger'; del.title='Удалить';
+        const del=document.createElement('button'); del.className='danger'; del.title=T('dl_delete');
         del.innerHTML='<svg viewBox="0 0 24 24" fill="none"><path d="M3 6h18M8 6V4h8v2M19 6l-1 14H6L5 6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>';
         del.addEventListener('click',e=>{
             e.stopPropagation();
-            showModal({title:'Удалить загрузку',msg:'Удалить «'+(d.filename||'')+'»?<br><small style="color:#aaa">Файл также будет удалён с диска.</small>',okText:'УДАЛИТЬ',okDanger:true,onOk:async()=>{await INV('delete_download',{id:d.id});cb();}});
+            showModal({title:T('dl_del_t'),msg:'«'+(d.filename||'')+'»?',okText:T('del_upper'),okDanger:true,onOk:async()=>{await INV('delete_download',{id:d.id});cb();}});
         });
         right.appendChild(del);
     }
-    btn.appendChild(right);
+    row.appendChild(right);
     if(done&&d.id!=null){
-        btn.addEventListener('click',()=>INV('open_download_file',{id:d.id}).then(r=>{if(r&&r.error){toast('Файл не найден');cb();}}).catch(()=>{}));
+        row.style.cursor='pointer';
+        row.addEventListener('click',()=>INV('open_download_file',{id:d.id}).then(r=>{if(r&&r.error){toast(T('dl_not_found'));cb();}}).catch(()=>{}));
     }
-    row.appendChild(btn);
     return row;
 }
 

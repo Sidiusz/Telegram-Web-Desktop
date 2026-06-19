@@ -179,6 +179,8 @@ function setupNotificationSettingsSync() {
         addToggle('notif_cat_private', 'Личные чаты');
         addToggle('notif_cat_group', 'Группы');
         addToggle('notif_cat_channel', 'Каналы');
+        addToggle('notif_hide_text', 'Скрывать текст входящих сообщений');
+        addToggle('notif_hide_sender', 'Скрывать имя входящих сообщений');
 
         // Заголовок-категория: клон нативного заголовка с нашим текстом.
         var hdr = header.cloneNode(false);
@@ -198,6 +200,8 @@ function setupNotificationSettingsSync() {
             inputs.notif_cat_private.checked = s.notif_cat_private !== false;
             inputs.notif_cat_group.checked = s.notif_cat_group !== false;
             inputs.notif_cat_channel.checked = s.notif_cat_channel !== false;
+            inputs.notif_hide_text.checked = s.notif_hide_text === true;
+            inputs.notif_hide_sender.checked = s.notif_hide_sender === true;
             if (inputs.notif_duration) {
                 var d = parseInt(s.notif_duration, 10); if (isNaN(d)) d = 6;
                 inputs.notif_duration.input.value = d; inputs.notif_duration.refresh();
@@ -242,26 +246,4 @@ function setupNotificationSettingsSync() {
     setInterval(scan, 500);
 }
 
-// ─── Хинт: как включить звуковые уведомления ───────────────────────────────
-async function showWebNotifHintIfNeeded() {
-    try {
-        const s = await INV('get_settings');
-        if (s.webnotif_hint_shown) return;
-        showModal({
-            title: 'Звуковые уведомления',
-            msg: 'Чтобы включить всплывающие уведомления и звук, перейдите в<br><b>Настройки → Уведомления → Веб-уведомления</b><br>и включите галочку.',
-            checkLabel: 'Не показывать снова',
-            okText: 'ЗАКРЫТЬ',
-            cancelText: null,
-            onOk: async (checked) => {
-                if (checked) {
-                    try {
-                        const ss = await INV('get_settings');
-                        await INV('save_settings', { settings: Object.assign({}, ss, { webnotif_hint_shown: true }) });
-                    } catch(e) {}
-                }
-            },
-        });
-    } catch(e) {}
-}
-// ───────────────────────────────────────────────────────────────────────────
+// Старый вступительный хинт про веб-уведомления удалён — больше не актуален.

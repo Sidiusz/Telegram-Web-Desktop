@@ -1,4 +1,20 @@
 function tryInject(){ensureCSS();ensureToast();ensureCornerWrap();ensurePanels();}
+
+// Иконка трея с числом непрочитанных. На размере трея (~16px) угловой бейдж
+// нечитаем, поэтому при непрочитанных рисуем всю иконку красным кружком с крупным
+// числом. SVG→nativeImage тут не растеризуется — рисуем PNG на canvas (2×).
+function makeTrayPng(count){
+    try{
+        var label=count>99?'99+':String(count);
+        var S=64, c=document.createElement('canvas'); c.width=S; c.height=S;
+        var x=c.getContext('2d');
+        x.fillStyle='#F23C34'; x.beginPath(); x.arc(S/2,S/2,S/2-2,0,Math.PI*2); x.fill();
+        x.fillStyle='#fff'; x.textAlign='center'; x.textBaseline='middle';
+        x.font='900 '+(label.length>=3?30:40)+'px "Arial Black",Arial,sans-serif';
+        x.fillText(label,S/2,S/2+2);
+        return c.toDataURL('image/png');
+    }catch(e){return null;}
+}
 function waitBody(cb){if(document.body)cb();else{const t=setInterval(()=>{if(document.body){clearInterval(t);cb();}},50);}}
 
 waitBody(()=>{
@@ -37,6 +53,7 @@ waitBody(()=>{
         if(count!==_lastBadgeCount_){
             _lastBadgeCount_=count;
             INV('set_notifications_count',{count}).catch(()=>{});
+            INV('set_tray_image',{dataURL:count>0?makeTrayPng(count):null}).catch(()=>{});
         }
     },2000);
 });
