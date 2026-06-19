@@ -1,4 +1,13 @@
-function closeNativePanel(){ if(_nativePanel){ _nativePanel.remove(); _nativePanel=null; } }
+// animate=false — мгновенно (при открытии новой панели поверх). По умолчанию
+// проигрываем обратную анимацию (снимаем _in_), затем удаляем — чтобы у «Назад»
+// был такой же слайд/фейд, как при открытии.
+function closeNativePanel(animate){
+    if(!_nativePanel) return;
+    var p=_nativePanel; _nativePanel=null;
+    if(animate===false){ p.remove(); return; }
+    p.classList.remove('_in_');
+    setTimeout(function(){ if(p&&p.parentNode) p.remove(); }, 240);
+}
 
 // Открывает нативный экран Настроек TG (клик по пункту «Настройки» в сайд-меню).
 // Используется когда нашу панель зовут из гамбургер-меню при закрытых настройках.
@@ -14,7 +23,7 @@ function tgOpenSettings(){
 }
 function openNativePanel(opts){
     opts=opts||{};
-    closeNativePanel();
+    closeNativePanel(false);
     const settings=document.getElementById('Settings');
     if(!settings) return;
     // Снимаем эталон шапки с живого нативного раздела (любой .left-header внутри #Settings).
@@ -66,7 +75,7 @@ function openAppSettingsNative(){
         return;
     }
     openNativePanel({
-        title:'Настройки приложения',
+        title:T('app_settings'),
         renderHeader(hdr){
             // ничего лишнего в шапку не кладём (нативный раздел обычно без доп.кнопок)
         },
@@ -94,7 +103,7 @@ function openDownloadsNative(){
     }
     const refresh=()=>{ const c=document.getElementById('_tgpc_'); if(c) renderDownloadsNative(c); };
     const panel=openNativePanel({
-        title:'Загрузки',
+        title:T('downloads'),
         renderHeader(hdr){
             const clr=document.createElement('button');
             clr.className='_tpclr_';
@@ -148,7 +157,7 @@ function openAddonsNative(){
         return;
     }
     openNativePanel({
-        title:'Дополнения',
+        title:T('addons'),
         renderHeader(hdr){
             const fb=document.createElement('button');
             fb.className='_tpclr_'; fb.style.background='rgba(255,255,255,.08)'; fb.style.color='#fff';
@@ -245,18 +254,58 @@ function openChangelogNative(){
         return;
     }
     openNativePanel({
-        title:'Список изменений',
+        title:T('changelog'),
         renderContent(content){ renderChangelogNative(content); },
     });
+}
+// Сравнение версий "a.b.c" → -1/0/1.
+function _clCmpVer(a,b){
+    var pa=String(a).split('.').map(Number), pb=String(b).split('.').map(Number);
+    for(var i=0;i<Math.max(pa.length,pb.length);i++){ var x=pa[i]||0,y=pb[i]||0; if(x>y)return 1; if(x<y)return -1; }
+    return 0;
+}
+// Строит карточку версии: заголовок с номером (текущая — цветом) + пункты.
+function _clVerBlock(v, isCur){
+    var card=document.createElement('div'); card.className='_cl_ver_'+(isCur?' _cur_':'');
+    var hdr=document.createElement('div'); hdr.className='_cl_ver_hdr_';
+    var num=document.createElement('span'); num.className='_cl_vnum_'; num.textContent=(/^\d/.test(v.version)?'v':'')+v.version;
+    hdr.appendChild(num);
+    if(isCur){ var b=document.createElement('span'); b.className='_cl_cur_badge_'; b.textContent='текущая'; hdr.appendChild(b); }
+    card.appendChild(hdr);
+    var lines=String(v.notes||'').split(/\r?\n/).map(function(l){return l.trim();}).filter(Boolean);
+    if(!lines.length){ var em=document.createElement('div'); em.className='_cl_item_'; em.textContent='Без описания'; card.appendChild(em); return card; }
+    lines.forEach(function(line){
+        if(/^[_\-—]{3,}$/.test(line)){ var d=document.createElement('div'); d.className='_cl_div_'; card.appendChild(d); return; }
+        var item=document.createElement('div'); item.className='_cl_item_';
+        var txt=line.replace(/^[-•*]\s*/,'');
+        var m=txt.match(/^([^:]{2,24}):\s*(.+)$/);
+        if(m){ var t=document.createElement('span'); t.className='_cl_tag_'; t.textContent=m[1]+':'; var sp=document.createTextNode(' '+m[2]); item.appendChild(t); item.appendChild(sp); }
+        else { item.textContent=txt; }
+        card.appendChild(item);
+    });
+    return card;
 }
 async function renderChangelogNative(content){
     if(!content)return;
     content.innerHTML='<div class="_tpempty_">Загрузка…</div>';
+    var data=null;
+    try{ data=await INV('fetch_changelog_structured'); }catch(e){ data={error:String(e)}; }
+    // Есть структура по версиям — рисуем блоками.
+    if(data && !data.error && data.versions && data.versions.length){
+        content.innerHTML='';
+        var cur=data.current;
+        var versions=data.versions.slice().sort(function(a,b){ return _clCmpVer(b.version,a.version); });
+        var ci=versions.findIndex(function(v){ return v.version===cur; });
+        if(ci>0){ versions.unshift(versions.splice(ci,1)[0]); }  // текущую — в самый верх
+        versions.forEach(function(v){ content.appendChild(_clVerBlock(v, v.version===cur)); });
+        return;
+    }
+    // Fallback (API недоступен — напр. из РФ): плоский changelog.txt.
     try{
-        const r=await INV('fetch_changelog');
+        var r=await INV('fetch_changelog');
         content.innerHTML='';
         if(r&&r.error){ content.innerHTML='<div class="_tpempty_">Ошибка: '+r.error+'</div>'; return; }
-        const pre=document.createElement('div'); pre.className='_cl_content_';
+        var pre=document.createElement('div'); pre.className='_cl_content_';
         pre.textContent=(r&&r.text)||'Список изменений пуст.';
         content.appendChild(pre);
     }catch(e){ content.innerHTML='<div class="_tpempty_">Ошибка загрузки</div>'; }

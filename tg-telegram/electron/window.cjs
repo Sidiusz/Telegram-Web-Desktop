@@ -3,7 +3,7 @@ const { BrowserWindow, session, app, Menu, MenuItem } = require('electron');
 const path = require('path');
 const fs = require('fs');
 
-// Windows-стиль: если файл существует — добавляем « (1)», « (2)», … как в Проводнике.
+// Windows-style dedup: if the file exists, append " (1)", " (2)", … like Explorer.
 function uniquePath(p) {
     if (!fs.existsSync(p)) return p;
     const dir = path.dirname(p);
@@ -76,15 +76,30 @@ function createWindow(state) {
         mainWindow.webContents.executeJavaScript(NOTIF_INTERCEPT_JS).catch(e => console.error('[NOTIF]', e));
     });
 
-    mainWindow.webContents.on('did-finish-load', () => {
-        const s = loadSettings();
-        if (s.devtools_enabled) mainWindow.webContents.openDevTools();
-
+    const injectAll = () => {
         const allScripts = [...baseScripts, ...loadAddonScripts()];
         for (const script of allScripts) {
             mainWindow.webContents.executeJavaScript(script).catch(e => console.error('[SCRIPT]', e));
         }
+    };
+
+    mainWindow.webContents.on('did-finish-load', () => {
+        const s = loadSettings();
+        if (s.devtools_enabled) mainWindow.webContents.openDevTools();
+        injectAll();
     });
+
+    // Watchdog: when TG refreshes itself ("Reload" in the chat list) it reloads the
+    // page via a service worker — sometimes did-finish-load fires on an intermediate
+    // load and we miss injecting the final SW page, so our menu/panels vanish until
+    // restart. We check the window.__tgUIInjected marker and re-inject everything if
+    // it's gone (a fresh document without our injection).
+    setInterval(() => {
+        if (mainWindow.isDestroyed()) return;
+        mainWindow.webContents.executeJavaScript('!!window.__tgUIInjected', true)
+            .then(ok => { if (!ok) injectAll(); })
+            .catch(() => {});
+    }, 3000);
 
     mainWindow.webContents.on('before-input-event', (event, input) => {
         if (input.type !== 'keyDown') return;
@@ -104,7 +119,6 @@ function createWindow(state) {
         const menu = new Menu();
         const ef = params.editFlags || {};
 
-        // ── Изображение ────────────────────────────────────────────────
         if (params.mediaType === 'image' && params.srcURL) {
             menu.append(new MenuItem({
                 label: 'Сохранить изображение',
@@ -116,7 +130,7 @@ function createWindow(state) {
             }));
         }
 
-        // ── Поле ввода (редактируемое) ─────────────────────────────────
+        // Editable field
         if (params.isEditable) {
             if (menu.items.length) menu.append(new MenuItem({ type: 'separator' }));
             menu.append(new MenuItem({ role: 'undo',   label: 'Отменить',  enabled: ef.canUndo }));
@@ -129,7 +143,7 @@ function createWindow(state) {
             menu.append(new MenuItem({ type: 'separator' }));
             menu.append(new MenuItem({ role: 'selectAll', label: 'Выделить всё', enabled: ef.canSelectAll }));
         } else if (params.selectionText && params.selectionText.trim()) {
-            // ── Выделенный текст (не редактируемый) ────────────────────
+            // Selected (read-only) text
             if (menu.items.length) menu.append(new MenuItem({ type: 'separator' }));
             menu.append(new MenuItem({ role: 'copy', label: 'Копировать' }));
         }
@@ -173,8 +187,8 @@ function createWindow(state) {
         state.downloads.push({ id, url: item.getURL(), filename, path: savePath, status: 'downloading' });
         saveDownloads(state.downloads);
 
-        // origName = имя как в сообщении (до « (1)»); по нему рендерер матчит mid.
-        // filename = реально сохранённое имя (для записи/менеджера).
+        // origName = name as in the message (before " (1)"); the renderer matches mid
+        // by it. filename = the actual saved name (for the manager).
         mainWindow.webContents.send('download-event', { type: 'start', id, filename, origName: originalFilename });
 
         item.on('updated', (event, dlState) => {

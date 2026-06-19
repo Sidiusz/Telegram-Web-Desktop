@@ -197,6 +197,33 @@ window.__tgNotif=(function(){
 })();
 // ──────────────────────────────────────────────────────────────────────────
 
+// Сообщаем main язык интерфейса TG (для локализации меню трея). Шлём при смене.
+(function(){var last='';function send(){try{var l=curLang();if(l!==last){last=l;INV('report_lang',{lang:l}).catch(function(){});}}catch(e){}}send();setInterval(send,5000);})();
+
+// ── Хуки для меню трея ──────────────────────────────────────────────────────
+// «Настройки» из трея — открыть нашу панель настроек приложения.
+window.__tgOpenAppSettings=function(){ try{ openAppSettingsNative(); }catch(e){} };
+// «Прочитать всё» — по очереди (со сдвигом, чтобы меню TG не наслаивались)
+// помечаем прочитанными все непрочитанные чаты вне архива.
+window.__tgMarkAllRead=function(){
+    try{
+        var pids=[];
+        document.querySelectorAll('.chat-list .ListItem.Chat').forEach(function(it){
+            if(it.className.indexOf('chat-item-archive')>=0)return;
+            if(it.querySelector('.icon-muted'))return;
+            var b=it.querySelector('.chat-badge-transition, .Badge');
+            var n=b?parseInt((b.textContent||'').replace(/[^0-9]/g,''),10):0;
+            if(!n)return;
+            var a=it.querySelector('.Avatar[data-peer-id]');
+            if(a)pids.push(a.getAttribute('data-peer-id'));
+        });
+        pids.forEach(function(pid,i){
+            setTimeout(function(){ if(window.__tgNotif&&window.__tgNotif.markRead)window.__tgNotif.markRead(pid); }, i*450);
+        });
+    }catch(e){}
+};
+// ──────────────────────────────────────────────────────────────────────────
+
 // ── Перехват входящих → фирменный звук уведомления ─────────────────────────
 // При включённых «Веб-уведомлениях» Telegram уходит в путь системного
 // уведомления и НЕ играет свой in-app звук (системное мы фейкаем) → тишина.

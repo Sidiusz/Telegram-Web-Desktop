@@ -5,13 +5,14 @@ const path = require('path');
 const { execSync } = require('child_process');
 const { loadSettings, saveSettings } = require('./settings.cjs');
 
-// Репозиторий с релизами (туда заливается установщик + пишутся notes релиза).
+// Releases repo (installer uploads here + release notes)
 const RELEASE_REPO    = 'Sidiusz/tg-web-releases';
-// Основной путь: GitHub Releases API — версия из tag, чейнджлог из body, ссылка
-// из ассета .exe. Никакого ручного редактирования update.json больше не нужно.
+// Primary path: GitHub Releases API — version from tag, changelog from body,
+// link from the .exe asset. No manual update.json editing needed anymore.
 const RELEASES_API_URL = 'https://api.github.com/repos/' + RELEASE_REPO + '/releases/latest';
-// Резервный путь (на случай, когда api.github.com недоступен — напр. из РФ):
-// старый ручной update.json + changelog.txt в raw. Их же читают старые клиенты.
+const RELEASES_LIST_URL = 'https://api.github.com/repos/' + RELEASE_REPO + '/releases';
+// Fallback (when api.github.com is unreachable, e.g. from RU): the old manual
+// update.json + changelog.txt over raw. Old clients still read these.
 const UPDATE_INFO_URL = 'https://raw.githubusercontent.com/Sidiusz/tg-web-releases/main/update.json';
 const CHANGELOG_URL   = 'https://raw.githubusercontent.com/Sidiusz/tg-web-releases/main/changelog.txt';
 
@@ -45,18 +46,18 @@ function scheduleChecks() {
     }, 10000);
 }
 
-// Запрашиваем текст с максимальным отключением кэширования
+// Fetch text with caching fully disabled
 function fetchText(targetUrl, headers) {
     return new Promise((resolve, reject) => {
         const urlObj = new URL(targetUrl);
-        // Добавляем сразу два анти-кэш параметра
+        // Two anti-cache params at once
         urlObj.searchParams.set('_t', Date.now());
         urlObj.searchParams.set('rnd', Math.random().toString(36).substring(2));
 
         const req = net.request({ url: urlObj.toString(), redirect: 'follow' });
 
         req.setHeader('User-Agent', 'TelegramWebDesktop/1.0');
-        // Заставляем сервера GitHub (и любые прокси по пути) забыть про кэш
+        // Force GitHub servers (and any proxy in between) to ignore cache
         req.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
         req.setHeader('Pragma', 'no-cache');
         if (headers) for (const k in headers) req.setHeader(k, headers[k]);
@@ -64,7 +65,7 @@ function fetchText(targetUrl, headers) {
         let data = '';
         req.on('response', (res) => {
             if (res.statusCode >= 400) {
-                return reject(new Error(`Ошибка HTTP: ${res.statusCode}`));
+                return reject(new Error(`HTTP error: ${res.statusCode}`));
             }
             res.on('data', chunk => { data += chunk.toString(); });
             res.on('end', () => resolve(data));
@@ -79,31 +80,31 @@ function fetchText(targetUrl, headers) {
 function fetchJSON(url, headers) {
     return fetchText(url, headers).then(text => {
         try { return JSON.parse(text); }
-        catch (e) { throw new Error('Некорректный JSON: ' + text.slice(0, 100)); }
+        catch (e) { throw new Error('Invalid JSON: ' + text.slice(0, 100)); }
     });
 }
 
 function normVer(v) { return String(v == null ? '' : v).replace(/^v/i, '').trim(); }
 
-// Основной путь — GitHub Releases API. Возвращает {version,url,filename,notes} или
-// бросает (если API недоступен/нет .exe-ассета), чтобы вызвавший ушёл в fallback.
+// Primary path — GitHub Releases API. Returns {version,url,filename,notes} or
+// throws (if API is down / no .exe asset) so the caller falls back.
 async function fetchLatestRelease() {
     const rel = await fetchJSON(RELEASES_API_URL, { 'Accept': 'application/vnd.github+json' });
-    if (!rel || !rel.tag_name) throw new Error('release без tag_name');
+    if (!rel || !rel.tag_name) throw new Error('release without tag_name');
     const version = normVer(rel.tag_name);
     const assets  = Array.isArray(rel.assets) ? rel.assets : [];
     const exe = assets.find(a => /\.exe$/i.test(a.name || ''));
-    if (!version || !exe || !exe.browser_download_url) throw new Error('нет .exe-ассета в релизе');
+    if (!version || !exe || !exe.browser_download_url) throw new Error('no .exe asset in release');
     return { version, url: exe.browser_download_url, filename: exe.name, notes: rel.body || '' };
 }
 
-// Сводит источники: сперва API (авто), при ошибке — резервный update.json (РФ/оффлайн).
+// Reconcile sources: API first (auto), then fallback to update.json (RU/offline).
 async function resolveUpdateInfo() {
     try {
         const rel = await fetchLatestRelease();
         return Object.assign({ source: 'api' }, rel);
     } catch (e) {
-        console.log(`[Updater] GitHub API недоступен (${e.message}), пробуем update.json…`);
+        console.log(`[Updater] GitHub API unavailable (${e.message}), trying update.json…`);
     }
     const info = await fetchJSON(UPDATE_INFO_URL);
     if (!info || !info.version || !info.url) return null;
@@ -117,23 +118,22 @@ async function checkForUpdate({ silent = false } = {}) {
 
         const current = app.getVersion();
 
-        // ВЫВОД В КОНСОЛЬ ДЛЯ ОТЛАДКИ
-        console.log(`\n[Updater] === Проверка обновлений ===`);
-        console.log(`[Updater] Источник: ${info.source}`);
-        console.log(`[Updater] Локальная версия (app.getVersion()): v${current}`);
-        console.log(`[Updater] Версия на сервере:                  v${info.version}`);
+        console.log(`\n[Updater] === Update check ===`);
+        console.log(`[Updater] Source: ${info.source}`);
+        console.log(`[Updater] Local version (app.getVersion()): v${current}`);
+        console.log(`[Updater] Server version:                  v${info.version}`);
 
         if (compareVersions(info.version, current) <= 0) {
-            console.log(`[Updater] Версия актуальна. Обновление не требуется.`);
+            console.log(`[Updater] Up to date. No update needed.`);
             if (!silent) return { upToDate: true };
             return null;
         }
 
-        console.log(`[Updater] Найдено обновление! v${current} -> v${info.version}`);
+        console.log(`[Updater] Update found! v${current} -> v${info.version}`);
 
         const s = loadSettings();
         if (silent && s.skipped_version === info.version) {
-            console.log(`[Updater] Это обновление ранее было пропущено пользователем.`);
+            console.log(`[Updater] This update was previously skipped by the user.`);
             return null;
         }
 
@@ -143,14 +143,14 @@ async function checkForUpdate({ silent = false } = {}) {
                 version: info.version,
                 current,
                 url: info.url,
-                filename: info.filename,   // из API (имя ассета); null → renderer соберёт сам
-                notes: info.notes,         // из release body; null → renderer дёрнет fetch_changelog
+                filename: info.filename,   // from API (asset name); null → renderer builds it
+                notes: info.notes,         // from release body; null → renderer calls fetch_changelog
                 silent,
             });
         }
         return info;
     } catch (e) {
-        console.error(`[Updater] Ошибка при проверке:`, e.message);
+        console.error(`[Updater] Check error:`, e.message);
         if (!silent) throw e;
         return null;
     }
@@ -168,8 +168,8 @@ function downloadUpdate(url, filename, onProgress) {
         req.on('response', (res) => {
             if (res.statusCode >= 400) {
                 file.close();
-                fs.unlink(destPath, () => {}); 
-                return reject(new Error(`Ошибка скачивания: HTTP ${res.statusCode}`));
+                fs.unlink(destPath, () => {});
+                return reject(new Error(`Download error: HTTP ${res.statusCode}`));
             }
 
             const total = parseInt(res.headers['content-length'] || '0');
@@ -210,13 +210,22 @@ function compareVersions(a, b) {
     return 0;
 }
 
-// Чейнджлог: сперва notes последнего релиза (API), при недоступности — changelog.txt.
+// All releases as a list [{version, notes}] (newest first). For the block
+// "Changelog" screen. Throws when the API is down → caller falls back to the
+// flat changelog.txt.
+async function fetchReleases() {
+    const arr = await fetchJSON(RELEASES_LIST_URL, { 'Accept': 'application/vnd.github+json' });
+    if (!Array.isArray(arr)) return [];
+    return arr.filter(r => r && r.tag_name).map(r => ({ version: normVer(r.tag_name), notes: r.body || '' }));
+}
+
+// Changelog: latest release notes first (API), then changelog.txt when unavailable.
 async function fetchChangelog() {
     try {
         const rel = await fetchLatestRelease();
         if (rel && rel.notes && rel.notes.trim()) return rel.notes;
-    } catch (e) { /* API недоступен — уходим в raw */ }
+    } catch (e) { /* API down — fall back to raw */ }
     return fetchText(CHANGELOG_URL);
 }
 
-module.exports = { init, scheduleChecks, checkForUpdate, downloadUpdate, fetchChangelog };
+module.exports = { init, scheduleChecks, checkForUpdate, downloadUpdate, fetchChangelog, fetchReleases };
