@@ -177,23 +177,26 @@
             return;
         }
         var peerId = getCurrentPeerId();
-        if (peerId !== _lastPeerId) { _lastPeerId = peerId; _switchGrace = 2; }
-
         var mySrc = findMySrc();
         if (mySrc) {
             list.querySelectorAll('.Message.own:not(.last-in-group) .custom-message-avatar').forEach(function (el) { el.remove(); });
             list.querySelectorAll('.Message.own.last-in-group').forEach(function (msg) { _inject(msg, mySrc); });
         }
-        if (_switchGrace > 0) {
-            _switchGrace--;
+        // Аватар собеседника ставим ТОЛЬКО когда шапка уже показывает текущий чат
+        // (peer из шапки == peer из хэша). При переключении шапка отстаёт — раньше
+        // ждали тайм-аут (_switchGrace ~2 тика ≈ 2с, отсюда «долго грузятся»), теперь
+        // проверяем совпадение → мгновенно, когда готово, и без чужого аватара.
+        var hashPeer = (location.hash || '').match(/#(-?\d+)/);
+        hashPeer = hashPeer ? hashPeer[1] : '';
+        if (peerId && peerId === hashPeer) {
+            var partnerSrc = findPartnerSrc(peerId);
+            list.querySelectorAll('.Message:not(.own):not(.last-in-group) .custom-message-avatar').forEach(function (el) { el.remove(); });
+            list.querySelectorAll('.Message:not(.own).last-in-group').forEach(function (msg) {
+                if (partnerSrc) _inject(msg, partnerSrc);
+            });
+        } else {
             list.querySelectorAll('.Message:not(.own) .custom-message-avatar').forEach(function (el) { el.remove(); });
-            return;
         }
-        var partnerSrc = findPartnerSrc(peerId);
-        list.querySelectorAll('.Message:not(.own):not(.last-in-group) .custom-message-avatar').forEach(function (el) { el.remove(); });
-        list.querySelectorAll('.Message:not(.own).last-in-group').forEach(function (msg) {
-            if (partnerSrc) _inject(msg, partnerSrc);
-        });
     }
     // Личка определяется по ХЭШУ синхронно (#положительный peerId), без ожидания
     // .no-avatars в DOM — иначе класс встаёт с задержкой и пузыри прыгают.
@@ -209,6 +212,20 @@
     setInterval(tick, 1000);
     tick();
 
+    // После смены чата аватарки появлялись только на следующем тике (≈1с) — гоняем
+    // короткую серию частых проходов (~2с по 150мс), чтобы поймать момент, когда
+    // шапка/аватар нового чата домонтировались, и поставить аватарки сразу.
+    var _avT = null;
+    function avatarBurst() {
+        if (_avT) clearInterval(_avT);
+        var n = 0;
+        _avT = setInterval(function () {
+            injectAvatars();
+            if (++n >= 14) { clearInterval(_avT); _avT = null; }
+        }, 150);
+    }
+    function onNav() { applyPrivateClass(); injectAvatars(); avatarBurst(); }
+
     // Pre-warm: TG webZ переключает чат через history.pushState (событие hashchange
     // НЕ стреляет), а .tgdl-private навешивался только тиком в 1с — отсюда «прыжок»
     // (свои пузыри мигают справа до применения аддона). Перехватываем pushState/
@@ -219,10 +236,10 @@
         if (typeof orig !== 'function') return;
         history[k] = function () {
             var r = orig.apply(this, arguments);
-            try { applyPrivateClass(); } catch (e) {}
+            try { onNav(); } catch (e) {}
             return r;
         };
     });
-    window.addEventListener('popstate', applyPrivateClass);
-    window.addEventListener('hashchange', applyPrivateClass);
+    window.addEventListener('popstate', onNav);
+    window.addEventListener('hashchange', onNav);
 })();
