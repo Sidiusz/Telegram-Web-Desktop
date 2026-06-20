@@ -268,36 +268,11 @@ function registerIpc(getWindow) {
 
     ipcMain.handle('set_notifications_count', (e, { count }) => {
         const n = parseInt(count) || 0;
-        const prev = typeof state.lastNotificationCount === 'number' ? state.lastNotificationCount : null;
-        const win = getWindow();
-
-        if (win) {
-            if (n > 0) {
-                const label = n > 99 ? '99+' : String(n);
-                const isWide = label.length >= 3;
-                const W = isWide ? 44 : 32;
-                const H = 32;
-                const rx = H / 2;
-                const fontSize = isWide ? 18 : 20;
-                const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}">
-  <rect x="0" y="0" width="${W}" height="${H}" rx="${rx}" ry="${rx}" fill="#F23C34"/>
-  <text x="${W/2}" y="${H/2}" text-anchor="middle" dominant-baseline="central"
-        font-family="Arial Black,Arial,sans-serif" font-size="${fontSize}" font-weight="900" fill="#fff">${label}</text>
-</svg>`;
-                try {
-                    const img = require('electron').nativeImage.createFromDataURL(
-                        'data:image/svg+xml;base64,' + Buffer.from(svg).toString('base64')
-                    );
-                    win.setOverlayIcon(img, label + ' непрочитанных');
-                } catch (e) {}
-            } else {
-                try { win.setOverlayIcon(null, ''); } catch (e) {}
-            }
-        }
-
-        // Incoming popups are produced by the interceptor in scripts.cjs
-        // (detailed, with text). Here we only update the tray/overlay badge.
         state.lastNotificationCount = n;
+        // Нативный бейдж Electron на иконке таскбара (сам рисуется, без «attention»-
+        // подсветки кнопки). При холодном старте/восстановлении из трея кнопки ещё нет —
+        // переприменяем в window.cjs на событие show/restore.
+        try { app.setBadgeCount(n); } catch (e) {}
         updateTrayBadge(n);
     });
 
