@@ -47,36 +47,31 @@
                 border-bottom-left-radius: 0 !important;
                 border-bottom-right-radius: var(--border-radius-messages) !important;
             }
-            /* Картинка обрезается .media-inner — у него радиусы заданы под хвостик
-               СПРАВА (TR6, BR0, BL15). У нас хвостик СЛЕВА → правые углы скругляем,
-               нижний-левый острый (под хвостик у last-in-group), иначе скруглён. */
+            /* Скругляем ФОРМУ пузыря (.message-content) под хвостик СЛЕВА — и свои, и
+               входящие. Саму маску картинки (.media-inner/.full-media) скругляем ТОЛЬКО
+               для ОДИНОЧНЫХ медиа (:not(.is-album)). В альбомах (видео+картинка и т.п.)
+               кадры скруглять НЕ нужно — у альбома скруглены лишь внешние углы (нативно). */
             #MiddleColumn.tgdl-private .MessageList.no-avatars .Message.own .message-content.media,
-            #MiddleColumn.tgdl-private .MessageList.no-avatars .Message.own .message-content.media .media-inner,
-            #MiddleColumn.tgdl-private .MessageList.no-avatars .Message.own .message-content.media .full-media {
+            #MiddleColumn.tgdl-private .MessageList.no-avatars .Message:not(.own) .message-content.media,
+            #MiddleColumn.tgdl-private .MessageList.no-avatars .Message.own:not(.is-album) .message-content.media .media-inner,
+            #MiddleColumn.tgdl-private .MessageList.no-avatars .Message.own:not(.is-album) .message-content.media .full-media,
+            #MiddleColumn.tgdl-private .MessageList.no-avatars .Message:not(.own):not(.is-album) .message-content.media .media-inner,
+            #MiddleColumn.tgdl-private .MessageList.no-avatars .Message:not(.own):not(.is-album) .message-content.media .full-media {
+                border-top-left-radius: var(--border-radius-messages) !important;
                 border-top-right-radius: var(--border-radius-messages) !important;
                 border-bottom-right-radius: var(--border-radius-messages) !important;
                 border-bottom-left-radius: var(--border-radius-messages) !important;
             }
-            #MiddleColumn.tgdl-private .MessageList.no-avatars .Message.own.last-in-group .message-content.media,
-            #MiddleColumn.tgdl-private .MessageList.no-avatars .Message.own.last-in-group .message-content.media .media-inner,
-            #MiddleColumn.tgdl-private .MessageList.no-avatars .Message.own.last-in-group .message-content.media .full-media {
+            #MiddleColumn.tgdl-private .MessageList.no-avatars .Message.last-in-group .message-content.media,
+            #MiddleColumn.tgdl-private .MessageList.no-avatars .Message.last-in-group:not(.is-album) .message-content.media .media-inner,
+            #MiddleColumn.tgdl-private .MessageList.no-avatars .Message.last-in-group:not(.is-album) .message-content.media .full-media {
                 border-bottom-left-radius: 0 !important;
             }
 
-            /* Каналы/сообщества (no-avatars, не личка): убираем «хвостик» пузыря и
-               скругляем все углы — ровный вид без торчащего уголка (по просьбе). */
-            #MiddleColumn:not(.tgdl-private) .MessageList.no-avatars .Message .svg-appendix { display: none !important; }
-            /* Скругляем ВСЕ 4 угла. TG для .last-in-group зануляет нижний угол под
-               «хвостик» (longhand !important) — перебиваем явными longhand'ами с
-               той же спецификой (+ .last-in-group), иначе нижний-левый остаётся острым. */
-            #MiddleColumn:not(.tgdl-private) .MessageList.no-avatars .Message .message-content,
-            #MiddleColumn:not(.tgdl-private) .MessageList.no-avatars .Message.last-in-group .message-content,
-            #MiddleColumn:not(.tgdl-private) .MessageList.no-avatars .Message.first-in-group .message-content {
-                border-radius: var(--border-radius-messages) !important;
-                border-bottom-left-radius: var(--border-radius-messages) !important;
-                border-bottom-right-radius: var(--border-radius-messages) !important;
-                border-top-left-radius: var(--border-radius-messages) !important;
-            }
+            /* Каналы/сообщества (no-avatars, не личка) — НЕ трогаем: рендерим нативно
+               (хвостик и родные углы). Прежнее «выравнивание» (скрытие appendix +
+               принудительные углы) убрано — оно ломало вид на постах с «Комментариями»
+               (хвостик проступал на ховере). */
 
             /* Выделение: свои пузыри сдвигаем вправо как входящие, аватарки — тоже вправо,
                чтобы кружок-галочка встал ровно на их прежнее место (а не поверх). */
@@ -213,11 +208,34 @@
             if (partnerSrc) _inject(msg, partnerSrc);
         });
     }
+    // Личка определяется по ХЭШУ синхронно (#положительный peerId), без ожидания
+    // .no-avatars в DOM — иначе класс встаёт с задержкой и пузыри прыгают.
+    function hashIsPrivate() {
+        var m = (location.hash || '').match(/#(-?\d+)/);
+        return !!m && m[1].charAt(0) !== '-';
+    }
     function applyPrivateClass() {
         var mc = document.getElementById('MiddleColumn');
-        if (mc) mc.classList.toggle('tgdl-private', isPrivate());
+        if (mc) mc.classList.toggle('tgdl-private', hashIsPrivate());
     }
     function tick() { ensureStyles(); applyPrivateClass(); injectAvatars(); }
     setInterval(tick, 1000);
     tick();
+
+    // Pre-warm: TG webZ переключает чат через history.pushState (событие hashchange
+    // НЕ стреляет), а .tgdl-private навешивался только тиком в 1с — отсюда «прыжок»
+    // (свои пузыри мигают справа до применения аддона). Перехватываем pushState/
+    // replaceState/popstate/hashchange и ставим класс СИНХРОННО по хэшу — он уже на
+    // #MiddleColumn к моменту, когда React монтирует новый список → без вспышки.
+    ['pushState', 'replaceState'].forEach(function (k) {
+        var orig = history[k];
+        if (typeof orig !== 'function') return;
+        history[k] = function () {
+            var r = orig.apply(this, arguments);
+            try { applyPrivateClass(); } catch (e) {}
+            return r;
+        };
+    });
+    window.addEventListener('popstate', applyPrivateClass);
+    window.addEventListener('hashchange', applyPrivateClass);
 })();

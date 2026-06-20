@@ -175,7 +175,10 @@ function injectGeneralSettings(){
 
     var marker=document.createElement('div'); marker.setAttribute('data-tggen','1'); marker.style.display='none';
     sc.appendChild(marker);                                      // синхронный «замок» от двойного инжекта
-    function addSection(title, cardEl){ var h=_genHeader(headerTpl,title); h.setAttribute('data-tggen','1'); cardEl.setAttribute('data-tggen','1'); sc.appendChild(h); sc.appendChild(cardEl); }
+    // marginTop задаём явно: первый наш заголовок («Загрузки») идёт после скрытого
+    // маркера-замка, а не после карточки — нативное правило «card + header» не
+    // срабатывает и отступ становится 0 (заголовок липнет к предыдущему пункту).
+    function addSection(title, cardEl){ var h=_genHeader(headerTpl,title); h.setAttribute('data-tggen','1'); h.style.marginTop='1rem'; cardEl.setAttribute('data-tggen','1'); sc.appendChild(h); sc.appendChild(cardEl); }
 
     INV('get_settings').then(function(s){
         s=s||{};
