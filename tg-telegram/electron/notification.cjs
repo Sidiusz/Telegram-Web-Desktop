@@ -43,7 +43,19 @@ function init(getMainWindow) {
     });
 }
 
+// Рабочая область дисплея, на котором сейчас ГЛАВНОЕ окно (а не всегда основной
+// монитор) — иначе при переносе окна на второй (меньший) монитор уведомления
+// позиционируются по основному и «уезжают» за край. Фолбэк — основной дисплей.
 function primaryWorkArea() {
+    try {
+        const win = _getMainWindow && _getMainWindow();
+        if (win && !win.isDestroyed()) {
+            const b = win.getBounds();
+            const d = screen.getDisplayMatching(b) ||
+                      screen.getDisplayNearestPoint({ x: b.x + Math.round(b.width / 2), y: b.y + Math.round(b.height / 2) });
+            if (d) return d.workArea || { x: 0, y: 0, width: d.size.width, height: d.size.height };
+        }
+    } catch (e) {}
     const d = screen.getPrimaryDisplay();
     return d.workArea || { x: 0, y: 0, width: d.size.width, height: d.size.height };
 }

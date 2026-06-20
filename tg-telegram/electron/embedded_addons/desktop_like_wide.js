@@ -47,6 +47,21 @@
                 border-bottom-left-radius: 0 !important;
                 border-bottom-right-radius: var(--border-radius-messages) !important;
             }
+            /* Картинка обрезается .media-inner — у него радиусы заданы под хвостик
+               СПРАВА (TR6, BR0, BL15). У нас хвостик СЛЕВА → правые углы скругляем,
+               нижний-левый острый (под хвостик у last-in-group), иначе скруглён. */
+            #MiddleColumn.tgdl-private .MessageList.no-avatars .Message.own .message-content.media,
+            #MiddleColumn.tgdl-private .MessageList.no-avatars .Message.own .message-content.media .media-inner,
+            #MiddleColumn.tgdl-private .MessageList.no-avatars .Message.own .message-content.media .full-media {
+                border-top-right-radius: var(--border-radius-messages) !important;
+                border-bottom-right-radius: var(--border-radius-messages) !important;
+                border-bottom-left-radius: var(--border-radius-messages) !important;
+            }
+            #MiddleColumn.tgdl-private .MessageList.no-avatars .Message.own.last-in-group .message-content.media,
+            #MiddleColumn.tgdl-private .MessageList.no-avatars .Message.own.last-in-group .message-content.media .media-inner,
+            #MiddleColumn.tgdl-private .MessageList.no-avatars .Message.own.last-in-group .message-content.media .full-media {
+                border-bottom-left-radius: 0 !important;
+            }
 
             /* Каналы/сообщества (no-avatars, не личка): убираем «хвостик» пузыря и
                скругляем все углы — ровный вид без торчащего уголка (по просьбе). */

@@ -26,7 +26,12 @@ async function renderSt(target){
     let s={};
     try{s=await INV('get_settings');}catch(e){c.innerHTML='<div class="_empty_">'+T('error')+': '+e+'</div>';return;}
     c.innerHTML='';
+    buildSettingsSections(c, s);
+}
 
+// Строит секции настроек приложения в переданный контейнер. Используется и
+// кастомной панелью (renderSt), и инжектом в нативные «Общие настройки» (#3).
+function buildSettingsSections(c, s){
     const ce=cls=>{const d=document.createElement('div');if(cls)d.className=cls;return d;};
     const lbl=t=>{const d=ce('_ns_lbl_');d.textContent=t;c.appendChild(d);};
     const card=()=>{const d=ce('_ns_card_');c.appendChild(d);return d;};
@@ -114,6 +119,164 @@ async function renderSt(target){
     });
     const dvEl=document.getElementById('_dv_');
     if(dvEl)dvEl.addEventListener('change',async()=>{try{await INV('toggle_devtools',{open:dvEl.checked});}catch(e){}});
+}
+
+// ── #3: общие нативные строители виджетов (клонируем живые виджеты TG) ───────
+function _saveOne(patch){ INV('get_settings').then(function(s){ INV('save_settings',{settings:Object.assign({},s||{},patch)}); }).catch(function(){}); }
+function _genCardCls(){ var any=[].slice.call(document.querySelectorAll('#Settings [class]')).find(function(e){ return /RE8jeQLf/.test((e.className||'').toString()); }); return any?any.className:(_tgWidgetTpl.cardCls||null); }
+function _genHeaderTpl(){ return document.querySelector('#Settings .vcGtwOtR') || _tgWidgetTpl.header; }
+function _genCard(cardCls){ var d=document.createElement('div'); d.className=cardCls; return d; }
+function _genHeader(headerTpl,text){ var h=headerTpl.cloneNode(false); h.textContent=text; return h; }
+function _genToggle(labelText, checked, onChange){
+    var n=_tgWidgetTpl.toggle.cloneNode(true);
+    n.classList.remove('withSubLabel');
+    var sub=n.querySelector('.subLabel'); if(sub)sub.remove();
+    var av=n.querySelector('.user-avatar, .Avatar'); if(av)av.remove();
+    var lab=n.querySelector('.label'); if(lab)lab.textContent=labelText;
+    var inp=n.querySelector('input[type=checkbox]');
+    if(inp){ inp.removeAttribute('id'); inp.checked=!!checked; inp.addEventListener('change',function(){ onChange(inp.checked); }); }
+    return n;
+}
+function _genInput(labelText, value, numeric, onCommit){
+    var n=_tgWidgetTpl.input.cloneNode(true);
+    var inp=n.querySelector('input');
+    if(inp){
+        inp.removeAttribute('id'); inp.removeAttribute('readonly'); inp.removeAttribute('disabled');
+        inp.type=numeric?'number':'text';
+        inp.value=value==null?'':value;
+        var commit=function(){ onCommit(inp.value); };
+        inp.addEventListener('change',commit); inp.addEventListener('blur',commit);
+    }
+    var lab=n.querySelector('label'); if(lab)lab.textContent=labelText;
+    return { node:n, input:inp };
+}
+function _genButton(text, onClick){
+    var b=_tgWidgetTpl.button.cloneNode(true);
+    b.removeAttribute('id'); b.removeAttribute('disabled');
+    var rip=b.querySelector('.ripple-container'); if(rip)rip.innerHTML='';
+    var txt=b.querySelector('.Button-text'); if(txt){ txt.textContent=text; } else { b.textContent=text; }
+    b.addEventListener('click',function(e){ e.stopPropagation(); onClick(); });
+    b.style.marginTop='12px';
+    return b;
+}
+// Нативная строка-значение (как «Язык — Русский»): клон .ListItem.narrow.
+function _genRow(liEl, icon, title, value, onClick, danger){
+    var r=liEl.cloneNode(true); r.removeAttribute('id'); r.removeAttribute('style'); r.className='ListItem narrow';
+    var btn=r.querySelector('.ListItem-button'); if(!btn){ btn=document.createElement('div'); btn.className='ListItem-button'; r.appendChild(btn); }
+    btn.innerHTML=''; btn.setAttribute('role','button'); btn.setAttribute('tabindex','0');
+    if(icon){ var ic=document.createElement('i'); ic.className='icon icon-'+icon+' ListItem-main-icon'; ic.setAttribute('aria-hidden','true'); if(danger)ic.style.color='#ff5c5c'; btn.appendChild(ic); }
+    btn.appendChild(document.createTextNode(title));
+    var v=document.createElement('span'); v.className='settings-item__current-value'; v.textContent=value==null?'':value; btn.appendChild(v);
+    if(danger)btn.style.color='#ff5c5c';
+    if(onClick){ btn.addEventListener('click',function(e){ e.stopPropagation(); onClick(v); }); }
+    r._v=v;
+    return r;
+}
+
+// ── #3a: секции настроек приложения В КОНЦЕ нативных «Общие настройки» ───────
+// Заголовки (vcGtwOtR) и карточки (RE8jeQLf) добавляем ПРЯМЫМИ детьми
+// settings-content (как блок «Уведомления») — иначе родные стили (заданные по
+// прямому потомству) не применятся. Виджеты — клоны живых нативных (_tgWidgetTpl).
+function injectGeneralSettings(){
+    var sc=null, all=document.querySelectorAll('#Settings .settings-content');
+    for(var i=0;i<all.length;i++){ if(/Размер текста|Text size|Формат времени|Time format/i.test(all[i].textContent||'')){ sc=all[i]; break; } }
+    if(!sc) return;
+    if(sc.querySelector('[data-tggen]')) return;                 // уже вставлено
+    var headerTpl=_genHeaderTpl(), cardCls=_genCardCls();
+    if(!headerTpl || !cardCls) return;
+    if(!_tgWidgetTpl.toggle || !_tgWidgetTpl.input || !_tgWidgetTpl.button) return;   // ждём образцы
+    var liEl=document.querySelector('#Settings .ListItem.narrow'); if(!liEl) return;
+
+    var marker=document.createElement('div'); marker.setAttribute('data-tggen','1'); marker.style.display='none';
+    sc.appendChild(marker);                                      // синхронный «замок» от двойного инжекта
+    function addSection(title, cardEl){ var h=_genHeader(headerTpl,title); h.setAttribute('data-tggen','1'); cardEl.setAttribute('data-tggen','1'); sc.appendChild(h); sc.appendChild(cardEl); }
+
+    INV('get_settings').then(function(s){
+        s=s||{};
+        // Загрузки: длинное поле пути; иконка-папка ПОВЕРХ поля справа (overlay),
+        // клик — выбор папки. Полю даём padding-right, чтобы путь не лез под иконку.
+        var c1=_genCard(cardCls); c1.style.position='relative';
+        var folder=_genInput(T('st_folder'), s.save_path||'', false, function(val){ _saveOne({save_path:val||null}); });
+        folder.node.style.width='100%'; folder.node.style.marginBottom='0';   // убрать «подбородок» + центрировать
+        if(folder.input) folder.input.style.paddingRight='46px';
+        c1.appendChild(folder.node);
+        var pbtn=document.createElement('div'); pbtn.className='_tgfolderbtn_';
+        pbtn.style.cssText='position:absolute;right:26px;top:50%;transform:translateY(-50%);cursor:pointer;display:flex;align-items:center;justify-content:center;z-index:2;';
+        pbtn.innerHTML='<i class="icon icon-folder-tabs-folder" aria-hidden="true" style="font-size:24px"></i>';
+        pbtn.addEventListener('click',function(){ INV('open_folder_dialog').then(function(p){ if(p&&folder.input){ folder.input.value=p; _saveOne({save_path:p}); } }).catch(function(){}); });
+        c1.appendChild(pbtn);
+        addSection(T('sec_downloads'), c1);
+
+        // Окно: тумблеры
+        var c2=_genCard(cardCls);
+        c2.appendChild(_genToggle(T('st_tray'), !!s.minimize_to_tray, function(v){ _saveOne({minimize_to_tray:v}); }));
+        c2.appendChild(_genToggle(T('st_devtools'), !!s.devtools_enabled, function(v){ INV('toggle_devtools',{open:v}).catch(function(){}); _saveOne({devtools_enabled:v}); }));
+        addSection(T('sec_window'), c2);
+
+        // Автоперезагрузка: тумблер + интервал
+        var c3=_genCard(cardCls);
+        c3.appendChild(_genToggle(T('st_timer'), !!s.auto_reload_enabled, function(v){ _saveOne({auto_reload_enabled:v}); }));
+        var iv=_genInput(T('st_interval'), s.auto_reload_interval||3600, true, function(val){ var n=parseInt(val,10); if(!isNaN(n)&&n>0) _saveOne({auto_reload_interval:n}); });
+        c3.appendChild(iv.node);
+        addSection(T('sec_autoreload'), c3);
+
+        // Обновления: частота автопроверки — нативный «выпадающий список» (попап-радио)
+        var c4=_genCard(cardCls);
+        var ivKeys=['30m','1h','12h','24h','3d','7d','30d','never'];
+        var ivLbl={'30m':'iv_30m','1h':'iv_1h','12h':'iv_12h','24h':'iv_24h','3d':'iv_3d','7d':'iv_7d','30d':'iv_30d','never':'iv_never'};
+        var ivCur=s.update_check_interval||'1h';
+        c4.appendChild(_genRow(liEl,'reload',T('st_auto_check'),T(ivLbl[ivCur]||'iv_1h'),function(v){
+            pickModal({ title:T('st_auto_check'), current:ivCur,
+                options:ivKeys.map(function(k){ return { value:k, label:T(ivLbl[k]) }; }),
+                onSave:function(val){ ivCur=val; v.textContent=T(ivLbl[val]); _saveOne({update_check_interval:val}); } });
+        }));
+        addSection(T('sec_updates'), c4);
+
+        // Данные: очистить и перезагрузить (нативная строка, красная)
+        var c5=_genCard(cardCls);
+        c5.appendChild(_genRow(liEl,'delete',T('st_clear_cache'),'',function(){ INV('clear_cache').catch(function(){}); },true));
+        addSection(T('sec_data'), c5);
+    }).catch(function(){});
+}
+
+// ── #3b: категория «О приложении» в самом низу ГЛАВНОГО экрана настроек ──────
+// Отдельное облачко (vcGtwOtR-заголовок + RE8jeQLf-карточка) внизу
+// .settings-main-scroll: версия / ID / username / проверить обновления.
+function injectAboutSection(){
+    var scroll=document.querySelector('#Settings .settings-main-scroll');
+    if(!scroll) return;
+    if(scroll.querySelector('[data-tgabout]')) return;
+    var headerTpl=_genHeaderTpl(), cardCls=_genCardCls();
+    var liEl=document.querySelector('#Settings .ListItem.narrow');
+    if(!headerTpl || !cardCls || !liEl) return;
+    // Контейнер — где лежат карточки КАТЕГОРИЙ (а не профиль/ChatExtra вверху).
+    // Берём по нашей строке «Дополнения» (или «Активные сеансы»): её карточка-список
+    // лежит в нужном контейнере; добавляем нашу секцию в его КОНЕЦ → низ + отступы.
+    var anchor=document.querySelector('#_tgst_ad_')||document.querySelector('#Settings .icon-active-sessions');
+    var anchorCard=anchor&&anchor.closest('.RE8jeQLf');
+    var container=anchorCard?anchorCard.parentElement:scroll;
+    if(container.querySelector('[data-tgabout]')) return;
+
+    var h=_genHeader(headerTpl, T('about_app')); h.setAttribute('data-tgabout','1');
+    var card=_genCard(cardCls); card.setAttribute('data-tgabout','1');
+    var verRow=_genRow(liEl,'info',T('st_version'),'—',null);
+    var idRow=_genRow(liEl,'info',T('st_your_id'),'—',null);
+    var unRow=_genRow(liEl,'mention',T('st_username'),'—',null);
+    var updRow=_genRow(liEl,'reload',T('check_updates'),'',async function(){
+        toast(T('upd_checking'),'icon-reload');
+        try{ var r=await INV('check_update_manual'); if(!r||r.upToDate)toast(T('st_uptodate'),'icon-check'); else if(r.error)toast(T('error')+': '+r.error,'icon-close'); }
+        catch(e){ toast(T('st_check_err'),'icon-close'); }
+    });
+    card.appendChild(verRow); card.appendChild(idRow); card.appendChild(unRow); card.appendChild(updRow);
+    container.appendChild(h); container.appendChild(card);
+
+    INV('get_app_info').then(function(info){ if(info&&info.version)verRow._v.textContent=info.version; }).catch(function(){});
+    try{
+        var pa=document.querySelector('#Settings .ProfileInfo .Avatar[data-peer-id]')||document.querySelector('#Settings .Avatar[data-peer-id]');
+        if(pa)idRow._v.textContent=pa.getAttribute('data-peer-id')||'—';
+        var mn=document.querySelector('#Settings .icon-mention'); var li=mn&&mn.closest('.ListItem'); var t=li&&li.querySelector('.title');
+        if(t)unRow._v.textContent=t.textContent.trim();
+    }catch(e){}
 }
 
 // ── Corner-уведомления ───────────────────────────────────────────────────

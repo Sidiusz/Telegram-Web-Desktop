@@ -1,4 +1,41 @@
 
+// ── Кэш нативных виджетов для клонирования (#3) ─────────────────────────────
+// Чтобы наши настройки в «Общие настройки» выглядели 1-в-1 как родные, мы НЕ
+// рисуем свою вёрстку, а КЛОНИРУЕМ живые нативные виджеты TG (как блок
+// «Уведомления»): тумблер (label.Checkbox), поле ввода (.input-group),
+// кнопку (.Button). На странице «Общие» их нет — поэтому ловим образцы с любой
+// страницы настроек (Уведомления/Изменить профиль/…) и сохраняем в localStorage,
+// чтобы при следующих загрузках они были сразу.
+var _tgWidgetTpl = { toggle:null, input:null, button:null, header:null, cardCls:null };
+(function restoreWidgetTpl(){
+    try{
+        var raw=localStorage.getItem('_tgWidgetTpl');
+        if(!raw)return;
+        var o=JSON.parse(raw), box=document.createElement('div');
+        ['toggle','input','button','header'].forEach(function(k){
+            if(o[k]){ box.innerHTML=o[k]; if(box.firstElementChild) _tgWidgetTpl[k]=box.firstElementChild.cloneNode(true); box.innerHTML=''; }
+        });
+        if(o.cardCls) _tgWidgetTpl.cardCls=o.cardCls;
+    }catch(e){}
+})();
+function captureWidgetTpl(){
+    var st=document.getElementById('Settings'); if(!st) return;
+    var changed=false;
+    if(!_tgWidgetTpl.toggle){ var t=st.querySelector('label.Checkbox'); if(t){ _tgWidgetTpl.toggle=t.cloneNode(true); changed=true; } }
+    if(!_tgWidgetTpl.input){ var inp=st.querySelector('.input-group'); if(inp){ _tgWidgetTpl.input=inp.cloneNode(true); changed=true; } }
+    if(!_tgWidgetTpl.button){ var b=st.querySelector('.Button:not(.default):not(.translucent)'); if(b){ _tgWidgetTpl.button=b.cloneNode(true); changed=true; } }
+    if(!_tgWidgetTpl.header){ var h=st.querySelector('.vcGtwOtR'); if(h){ _tgWidgetTpl.header=h.cloneNode(false); changed=true; } }
+    if(!_tgWidgetTpl.cardCls){ var c=[].slice.call(st.querySelectorAll('[class]')).find(function(e){ return /RE8jeQLf/.test((e.className||'').toString()); }); if(c){ _tgWidgetTpl.cardCls=c.className; changed=true; } }
+    if(changed){
+        try{
+            var o={};
+            ['toggle','input','button','header'].forEach(function(k){ if(_tgWidgetTpl[k]) o[k]=_tgWidgetTpl[k].outerHTML; });
+            if(_tgWidgetTpl.cardCls) o.cardCls=_tgWidgetTpl.cardCls;
+            localStorage.setItem('_tgWidgetTpl', JSON.stringify(o));
+        }catch(e){}
+    }
+}
+
 // ── Синхронизация и разблокировка Telegram-уведомлений ────────────────────
 function setupNotificationSettingsSync() {
     function savePatch(patch) {
@@ -240,6 +277,9 @@ function setupNotificationSettingsSync() {
         // не трогаем: звук/попапы работают независимо (см. setupIncomingSound).
         injectNotifBlock();
         syncTgVolume();
+        captureWidgetTpl();                              // #3: ловим образцы нативных виджетов
+        try { injectGeneralSettings(); } catch (e) {}   // #3: секции в «Общие настройки»
+        try { injectAboutSection(); } catch (e) {}       // #3: «О приложении» внизу главного экрана
     }
 
     scan();

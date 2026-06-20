@@ -48,6 +48,14 @@ const CSS=`
 ._mo_ .Button:hover{background:var(--color-primary-opacity,rgba(135,116,225,.12));}
 ._mo_ .Button.danger{color:#e53935;}
 ._mo_ .Button.danger:hover{background:rgba(229,57,53,.12);}
+/* «Прочитать всё» из трея: помечаем чаты прочитанными через скрытое контекстное
+   меню TG — пока идёт операция, прячем любые контекст-меню (синтетические клики
+   через dispatchEvent проходят несмотря на pointer-events:none). */
+html._tgreading_ .Menu.context-menu,
+html._tgreading_ .bubble.menu-container.shown{opacity:0 !important;pointer-events:none !important;transition:none !important;}
+/* Кнопка-папка поверх поля «Папка для файлов»: белая, при наведении — primary. */
+._tgfolderbtn_{color:#fff;transition:color .12s;}
+._tgfolderbtn_:hover{color:var(--color-primary,#8774e1);}
 ._si_{padding:8px 0 16px 8px;color:#aaa;font-size:11px;text-transform:uppercase;letter-spacing:.5px;}
 ._si_:first-child{padding-top:16px;}
 ._it_{display:flex;align-items:center;justify-content:space-between;padding:10px 16px;border-bottom:1px solid #191919;min-height:24px;}
