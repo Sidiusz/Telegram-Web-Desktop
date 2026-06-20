@@ -29,7 +29,7 @@ const CSS=`
 ._badge_{display:inline-block;background:rgba(82,136,193,.2);color:#8bb8e8;font-size:10px;padding:1px 5px;border-radius:3px;margin-left:4px;}
 .Badge{display:inline-flex !important;align-items:center !important;justify-content:center !important;min-width:12px !important;height:12px !important;padding:0 3px !important;border-radius:6px !important;background:#F23C34 !important;color:#fff !important;font-size:9px !important;font-weight:700 !important;line-height:1 !important;box-sizing:border-box !important;letter-spacing:-.3px !important;}
 /* Копия нативной TG карточки (.modal-dialog): сплошной #212121, тень, без blur. */
-._toast_{position:fixed;top:52px;left:50%;transform:translateX(-50%) translateY(-12px);background:var(--color-background,#212121);color:#fff;padding:12px 18px;border-radius:16px;font-size:15px;opacity:0;transition:opacity .2s,transform .2s;pointer-events:none;z-index:2147483648;white-space:nowrap;display:flex;align-items:center;gap:10px;box-shadow:rgba(16,16,16,.61) 0 4px 8px 2px;max-width:calc(100vw - 32px);}
+._toast_{position:fixed;bottom:32px;top:auto;left:50%;transform:translateX(-50%) translateY(12px);background:var(--color-background,#212121);color:#fff;padding:12px 18px;border-radius:16px;font-size:15px;opacity:0;transition:opacity .2s,transform .2s;pointer-events:none;z-index:2147483648;white-space:nowrap;display:flex;align-items:center;gap:10px;border:1px solid rgba(255,255,255,.12);box-shadow:rgba(16,16,16,.61) 0 4px 8px 2px;max-width:calc(100vw - 32px);}
 ._toast_.on{opacity:1;transform:translateX(-50%) translateY(0);}
 ._toast_ .notif-icon{color:var(--color-primary,#5288c1);font-size:18px;flex-shrink:0;}
 /* Копия нативного TG .modal-dialog (confirm): #212121, r32, тень, заголовок 20/500,

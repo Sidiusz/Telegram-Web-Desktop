@@ -83,7 +83,8 @@ function buildHtml() {
         font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;user-select:none;}
     #stack{display:flex;flex-direction:column;gap:8px;padding:0;}
     .card{background:#212121;border-radius:16px;padding:12px 14px;color:#fff;
-        box-shadow:rgba(16,16,16,.61) 0 4px 8px 2px,0 0 0 1px rgba(255,255,255,.04);
+        border:1px solid rgba(255,255,255,.12);
+        box-shadow:rgba(16,16,16,.61) 0 4px 8px 2px;
         opacity:0;transform:translateY(-10px);transition:opacity .2s ease,transform .2s ease;}
     .card.show{opacity:1;transform:translateY(0);}
     .card.hide{opacity:0;transform:translateY(-8px);}

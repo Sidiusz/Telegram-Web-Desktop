@@ -9,8 +9,6 @@ app.commandLine.appendSwitch('disable-backgrounding-occluded-windows');
 // Dev only (unpackaged): expose CDP for local UI testing. Never in shipped builds.
 if (!app.isPackaged) app.commandLine.appendSwitch('remote-debugging-port', '9222');
 
-let reloadInterval = null;
-
 const { createWindow, getWindow } = require('./electron/window.cjs');
 const { createTray } = require('./electron/tray.cjs');
 const { initState, getState, registerIpc } = require('./electron/ipc.cjs');
@@ -57,33 +55,8 @@ app.whenReady().then(() => {
         const win = getWindow();
         win.webContents.once('did-finish-load', () => handleTgUrl(tgUrl));
     }
-
-    reloadInterval = setInterval(() => {
-        const s = state.settings;
-        if (!s) return;
-        const win = getWindow();
-        if (!win) return;
-
-        if (s.auto_reload_on_idle) {
-            const idle = (Date.now() - state.lastActivity) / 1000;
-            if (idle >= s.idle_timeout) {
-                win.webContents.reload();
-                state.lastActivity = Date.now();
-                return;
-            }
-        }
-        if (s.auto_reload_enabled) {
-            if (!state.lastReload) state.lastReload = Date.now();
-            const elapsed = (Date.now() - state.lastReload) / 1000;
-            if (elapsed >= s.auto_reload_interval) {
-                win.webContents.reload();
-                state.lastReload = Date.now();
-            }
-        }
-    }, 10000);
 });
 
 app.on('window-all-closed', () => {
-    if (reloadInterval) clearInterval(reloadInterval);
     if (process.platform !== 'darwin') app.quit();
 });

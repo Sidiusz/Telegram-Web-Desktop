@@ -77,7 +77,9 @@ function createWindow(state) {
     });
 
     const injectAll = () => {
-        const allScripts = [...baseScripts, ...loadAddonScripts()];
+        // NOTIF_INTERCEPT_JS первым и в общем наборе: иначе после self-reload TG
+        // (service worker) перехват Notification терялся (watchdog его не возвращал).
+        const allScripts = [NOTIF_INTERCEPT_JS, ...baseScripts, ...loadAddonScripts()];
         for (const script of allScripts) {
             mainWindow.webContents.executeJavaScript(script).catch(e => console.error('[SCRIPT]', e));
         }

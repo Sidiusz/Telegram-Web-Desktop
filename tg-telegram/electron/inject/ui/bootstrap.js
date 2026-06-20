@@ -52,7 +52,12 @@ waitBody(()=>{
     // (в архиве — игнор). Селекторы те же, что у сканера входящих (TG Web A:
     // .chat-list .ListItem.Chat + .chat-badge-transition; .ChatList/.Badge не
     // существуют — старые селекторы давали всегда 0, отсюда был регресс).
-    let _lastBadgeCount_=-1;
+    // _lastBadgeCount_ — последнее ОТПРАВЛЕННОЕ значение. При blur мы фейкаем
+    // visibilitychange → TG перерисовывает чат-лист, и .chat-badge-transition на
+    // один кадр пустой (анимация) → счётчик читает 0 и бейдж мигал. Поэтому СНИЖЕНИЕ
+    // подтверждаем на следующем тике (_pendingDrop): мерцание гасим, реальное
+    // прочтение применяем. Рост отправляем сразу.
+    let _lastBadgeCount_=-1, _pendingDrop=null;
     setInterval(()=>{
         let count=0;
         document.querySelectorAll('.chat-list .ListItem.Chat').forEach(it=>{
@@ -65,17 +70,16 @@ waitBody(()=>{
             });
             if(unread)count++;
         });
-        if(count!==_lastBadgeCount_){
-            _lastBadgeCount_=count;
-            INV('set_notifications_count',{count}).catch(()=>{});
-            INV('set_tray_image',{dataURL:count>0?makeTrayPng(count):null}).catch(()=>{});
-        }
+        if(count===_lastBadgeCount_){ _pendingDrop=null; return; }
+        // Снижение → требуем подтверждения один тик (фильтр мерцания).
+        if(_lastBadgeCount_>=0 && count<_lastBadgeCount_ && _pendingDrop!==count){ _pendingDrop=count; return; }
+        _pendingDrop=null;
+        _lastBadgeCount_=count;
+        INV('set_notifications_count',{count}).catch(()=>{});
+        INV('set_tray_image',{dataURL:count>0?makeTrayPng(count):null}).catch(()=>{});
     },2000);
 });
 
-['mousemove','keydown','click','scroll','touchstart'].forEach(ev=>{
-    document.addEventListener(ev,()=>INV('report_user_active').catch(()=>{}),{passive:true,capture:true});
-});
 // ── Drag-n-drop: блокируем переключение чатов при перетаскивании файла ───────
 // TG открывает чат под курсором при dragover по списку. Глушим pointer-events
 // у .chat-list пока тащим файл. Не считаем dragenter/dragleave (счётчик
@@ -141,6 +145,43 @@ document.addEventListener('contextmenu', function(e) {
 // на живой странице: и hash=, и location.assign сбрасываются в ''). Единственный
 // надёжный путь без перезагрузки — кликнуть по строке чат-листа.
 window.__tgNotif=(function(){
+    // Нативный вызов экшена Telegram (webZ): берём объект actions через getActions()
+    // и зовём actions[name](payload). Минифицированные id модулей/имена экспортов
+    // меняются между сборками TG, поэтому НЕ хардкодим — ищем getActions по стабильным
+    // признакам: тривиальная сигнатура `function(){return X}` + результат содержит
+    // экшен 'markChatMessagesRead' (имя-строка стабильно). Кэш объекта actions.
+    // false → вызывающий откатывается на эмуляцию через контекст-меню.
+    var _callAction=(function(){
+        var actions=null, done=false;
+        function discover(){
+            done=true;
+            try{
+                var req;
+                (window.webpackChunktelegram_t=window.webpackChunktelegram_t||[]).push([[Math.random()],{},function(r){req=r;}]);
+                if(!req||!req.m)return null;
+                var ids=Object.keys(req.m);
+                for(var i=0;i<ids.length;i++){
+                    var e; try{ e=req(ids[i]); }catch(_){ continue; }
+                    if(!e||typeof e!=='object')continue;
+                    for(var k in e){
+                        try{
+                            var f=e[k];
+                            if(typeof f!=='function'||f.length!==0)continue;
+                            if(!/^function \w*\(\)\{return [\w$.]+\}$/.test(f.toString()))continue;
+                            var a=f();
+                            if(a&&typeof a==='object'&&typeof a.markChatMessagesRead==='function')return a;
+                        }catch(_){}
+                    }
+                }
+                return null;
+            }catch(e){ return null; }
+        }
+        return function(name,payload){
+            if(!done) actions=discover();
+            if(!actions||typeof actions[name]!=='function') return false;
+            try{ actions[name](payload); return true; }catch(e){ return false; }
+        };
+    })();
     // Скрытие контекст-меню на время «прочитать всё» (ref-counted: вызовы markRead
     // идут со сдвигом и перекрываются, снимаем класс только когда все завершились).
     var _menuHide=0;
@@ -183,9 +224,17 @@ window.__tgNotif=(function(){
         // Фолбэк: строка вне видимой области (виртуализация) → перезагрузка с hash.
         try{ location.assign(location.origin+location.pathname+'#'+pid); }catch(e){}
     }
-    // ПКМ по строке → нативное меню TG → «Отметить как прочитанное».
-    // Чат НЕ открывается, текущий активный чат не меняется.
+    // Прочитать чат. ОСНОВНОЙ путь — прямой вызов экшена TG: не зависит ни от меню,
+    // ни от кликов пользователя (клик в пустоту больше не отменяет «прочитать»).
+    // Фолбэк — эмуляция через контекст-меню, если рантайм TG недоступен.
     function markRead(pid){
+        try{ pid=String(pid); }catch(e){ return; }
+        if(_callAction('markChatMessagesRead', { id: pid })) return;
+        markReadViaMenu(pid);
+    }
+    // Фолбэк: ПКМ по строке → нативное меню TG → «Отметить как прочитанное».
+    // Чат НЕ открывается, текущий активный чат не меняется.
+    function markReadViaMenu(pid){
         try{ pid=String(pid); }catch(e){ return; }
         var row=findRow(pid);
         if(!row)return;
@@ -269,7 +318,12 @@ window.__tgMarkAllRead=function(){
 // Следим за ростом счётчика непрочитанных в чат-листе (надёжно, по-сообщенно).
 // Если TG звук всё же сыграл сам (галка выключена) — не дублируем.
 (function setupIncomingSound(){
-    var counts={}, seeded=false, lastTgSound=0;
+    var counts={}, seeded=false, lastTgSound=0, seedTs=0;
+    // Холодная загрузка: строки чат-листа появляются РАНЬШE своих бейджей
+    // непрочитанных. seed ловит count=0, затем доезжают реальные числа → каждый
+    // чат выглядит «выросшим» и сыпет попап. Поэтому первые STARTUP_GRACE мс
+    // только обновляем счётчики, без попапов (бейджи успевают досинхрониться).
+    var STARTUP_GRACE=5000;
     // Кэш настроек (звук/громкость/категории). Обновляем периодически — это
     // дешёвый INV('get_settings'), и уведомления реагируют на переключатели
     // без перезагрузки.
@@ -346,6 +400,20 @@ window.__tgMarkAllRead=function(){
     }
     function avatarOf(it){var img=it.querySelector('.Avatar img.Avatar__media, .Avatar img');return img&&img.src?img.src:'';}
     function currentPeer(){var el=document.querySelector('.MiddleHeader .ChatInfo .Avatar[data-peer-id]');return el?el.getAttribute('data-peer-id'):'';}
+    // Текст последнего ВХОДЯЩЕГО сообщения из ОТКРЫТОГО чата (DOM пузыря). Нужно,
+    // когда в превью чат-листа висит черновик (ответ) и текста входящего там нет —
+    // но сам чат открыт (мы как раз отвечали), значит сообщение отрисовано.
+    function openChatLastIncomingText(){
+        var ml=document.querySelector('#MiddleColumn .MessageList');
+        if(!ml)return '';
+        var msgs=ml.querySelectorAll('.Message:not(.own)');
+        if(!msgs.length)return '';
+        var tc=msgs[msgs.length-1].querySelector('.text-content');
+        if(!tc)return '';
+        var clone=tc.cloneNode(true);
+        clone.querySelectorAll('.MessageMeta, .message-time, time, .reactions, .Reactions').forEach(function(e){e.remove();});
+        return (clone.textContent||'').trim().replace(/\s+/g,' ');
+    }
     function toDataUrl(src){
         return new Promise(function(res){
             if(!src||src.indexOf('blob:')!==0)return res(src||'');
@@ -364,7 +432,10 @@ window.__tgMarkAllRead=function(){
     }
     function sendPopup(item,pid){
         var title=titleOf(item)||'Telegram';
-        var text=textOf(item)||T('new_message');
+        var text=textOf(item);
+        // Превью пустое из-за черновика → читаем входящее из открытого чата.
+        if(!text && String(pid)===String(currentPeer())) text=openChatLastIncomingText();
+        text=text||T('new_message');
         toDataUrl(avatarOf(item)).then(function(icon){
             INV('show_notification',{title:title,body:text,icon:icon,sender:title,peerId:pid,playSound:false}).catch(function(){});
         });
@@ -396,13 +467,14 @@ window.__tgMarkAllRead=function(){
             var ctype=chatType(item,pid);
             if(cfg['notif_cat_'+ctype]===false)return;      // категория выключена в настройках
             if(!seeded)return;                              // первый проход — только seed
+            if(Date.now()-seedTs<STARTUP_GRACE)return;      // холодная загрузка: бейджи ещё доезжают
             if(prev===undefined)return;                     // впервые видим чат (виртуализация) — не новое
             if(cnt<=prev)return;                            // счётчик не вырос — не новое
             if(pid===openPeer&&focused)return;              // активный чат в фокусе — пропускаем
             fire=true;
             popup(item,pid);                                // текстовый попап на экран
         });
-        seeded=true;
+        if(!seeded){ seeded=true; seedTs=Date.now(); }
         if(fire)playSound();                                // один звук за тик, без наложений
     }
     scan();

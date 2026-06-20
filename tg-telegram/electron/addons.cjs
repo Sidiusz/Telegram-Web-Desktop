@@ -113,9 +113,11 @@ function getAddons() {
 
 function deleteAddon(name) {
     try { fs.unlinkSync(path.join(userAddonsDir(), name)); } catch (e) {}
-    // Чистим состояние
+    // Чистим состояние: выкидываем ключ из ОБОИХ списков (не включаем заново —
+    // иначе в enabled_addons копится мусор для уже удалённых файлов).
     const key = 'user:' + name;
-    toggleAddon(key, true); // убираем из disabled если было
+    addonStore.set('disabled_addons', addonStore.get('disabled_addons', []).filter(k => k !== key));
+    addonStore.set('enabled_addons', addonStore.get('enabled_addons', []).filter(k => k !== key));
 }
 
 // ── Открыть папку ─────────────────────────────────────────────────────────────
@@ -162,12 +164,19 @@ function loadScriptsFromDir(dir, embedded) {
             const ext      = path.extname(entry).toLowerCase().slice(1);
             if (ext !== 'js' && ext !== 'crx') continue;
             const addonKey = (embedded ? 'embedded:' : 'user:') + entry;
-            if (!isEnabled(addonKey)) continue;
-
             const fullPath = path.join(dir, entry);
+
             if (ext === 'js') {
-                try { scripts.push(fs.readFileSync(fullPath, 'utf8')); } catch (e) {}
+                let content;
+                try { content = fs.readFileSync(fullPath, 'utf8'); } catch (e) { continue; }
+                // Группу читаем здесь же. Без неё isEnabled считает grouped-аддоны
+                // включёнными по умолчанию и инжектит ВСЕ из группы, хотя в UI
+                // выбран «Выкл» (баг на свежей установке, до первого выбора).
+                const group = parseMeta(content).group || null;
+                if (!isEnabled(addonKey, group)) continue;
+                scripts.push(content);
             } else if (ext === 'crx') {
+                if (!isEnabled(addonKey)) continue;
                 try {
                     const data      = fs.readFileSync(fullPath);
                     const extracted = extractCrxContentScripts(data);
