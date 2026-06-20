@@ -216,6 +216,68 @@ function ensureCSS(){if(!document.getElementById('_tgcss_')){const s=document.cr
 function ensureToast(){if(!document.getElementById('_tgt_')&&document.body){const t=document.createElement('div');t.className='_toast_';t.id='_tgt_';document.body.appendChild(t);}}
 function toast(msg){ensureToast();const t=document.getElementById('_tgt_');if(!t)return;t.textContent=msg;t.classList.add('on');setTimeout(()=>t.classList.remove('on'),2000);}
 
+// ── Рантайм Telegram webZ: getGlobal() / getActions() ───────────────────────
+// Прямой доступ к состоянию и экшенам TG вместо эмуляции через DOM. Минифициро-
+// ванные id модулей и имена экспортов меняются между сборками, поэтому ищем по
+// признакам, а не по именам:
+//  • getActions — тривиальная 0-арг функция `function(){return X}`, результат имеет
+//    markChatMessagesRead. Тривиальность важна: такую функцию безопасно вызвать.
+//  • getGlobal — СОСЕД getActions в том же модуле, но его тело НЕ тривиально
+//    (есть side-effect), поэтому ищем по РЕЗУЛЬТАТУ (chats/users/messages/byTabId)
+//    среди 0-арг функций ТОЛЬКО этого модуля (он — модуль глобал-стейта, вызовы ок).
+// Стейт иммутабелен — кэшируем функции, зовём заново каждый раз. Повторяем поиск,
+// пока оба не найдены (стейт может ещё грузиться), но с лимитом. Сбой → null,
+// вызывающий откатывается на DOM-путь.
+var tgRuntime=(function(){
+    var _getG=null,_getA=null,_mod=null,_req=null,_tries=0;
+    function getReq(){
+        if(_req)return _req;
+        try{ (window.webpackChunktelegram_t=window.webpackChunktelegram_t||[]).push([[Math.random()],{},function(r){_req=r;}]); }catch(e){}
+        return _req;
+    }
+    var TRIV=/^function \w*\(\)\{return [\w$.]+\}$/;
+    function scanModule(e){
+        if(!e||typeof e!=='object')return;
+        for(var k in e){                                  // getActions — только тривиальные (pure)
+            if(_getA)break;
+            try{ var f=e[k];
+                if(typeof f==='function'&&f.length===0&&TRIV.test(f.toString())){
+                    var a=f(); if(a&&typeof a==='object'&&typeof a.markChatMessagesRead==='function') _getA=f;
+                }
+            }catch(_){}
+        }
+        for(var k2 in e){                                 // getGlobal — по результату
+            if(_getG)break;
+            try{ var f2=e[k2];
+                if(typeof f2!=='function'||f2.length!==0)continue;
+                var v=f2();
+                if(v&&typeof v==='object'&&v.chats&&v.users&&v.messages&&v.byTabId) _getG=f2;
+            }catch(_){}
+        }
+    }
+    function discover(){
+        var req=getReq(); if(!req||!req.m)return;
+        if(_mod!=null){ try{ scanModule(req(_mod)); }catch(e){} return; }
+        var ids=Object.keys(req.m);
+        for(var i=0;i<ids.length;i++){
+            var e; try{ e=req(ids[i]); }catch(_){ continue; }
+            if(!e||typeof e!=='object')continue;
+            var hit=false;                                // модуль глобал-стейта = есть тривиальная getActions
+            for(var k in e){ try{ var f=e[k];
+                if(typeof f==='function'&&f.length===0&&TRIV.test(f.toString())){
+                    var a=f(); if(a&&typeof a==='object'&&typeof a.markChatMessagesRead==='function'){ hit=true; break; }
+                } }catch(_){}
+            }
+            if(hit){ _mod=ids[i]; scanModule(e); break; }
+        }
+    }
+    function ensure(){ if((_getA&&_getG)||_tries>25)return; _tries++; discover(); }
+    return {
+        getActions:function(){ ensure(); try{ return _getA?_getA():null; }catch(e){ return null; } },
+        getGlobal: function(){ ensure(); try{ return _getG?_getG():null; }catch(e){ return null; } },
+    };
+})();
+
 // ── Плавающий значок загрузки удалён (#5): прогресс теперь in-message + модалка
 // ── Реестр загрузок #5 ─────────────────────────────────────────────────────
 // Связывает download id (main) ↔ message id (renderer) через имя файла:

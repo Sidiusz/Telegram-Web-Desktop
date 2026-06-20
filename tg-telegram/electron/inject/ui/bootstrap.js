@@ -48,31 +48,56 @@ waitBody(()=>{
     // «Что нового» — один раз на новую версию (ждём, пока UI прогрузится).
     setTimeout(()=>{ try{ showWhatsNewIfNeeded(); }catch(e){} },2500);
 
-    // Счётчик для трея/таскбара: число НЕприглушённых чатов с непрочитанными
-    // (в архиве — игнор). Селекторы те же, что у сканера входящих (TG Web A:
-    // .chat-list .ListItem.Chat + .chat-badge-transition; .ChatList/.Badge не
-    // существуют — старые селекторы давали всегда 0, отсюда был регресс).
-    // _lastBadgeCount_ — последнее ОТПРАВЛЕННОЕ значение. При blur мы фейкаем
-    // visibilitychange → TG перерисовывает чат-лист, и .chat-badge-transition на
-    // один кадр пустой (анимация) → счётчик читает 0 и бейдж мигал. Поэтому СНИЖЕНИЕ
-    // подтверждаем на следующем тике (_pendingDrop): мерцание гасим, реальное
-    // прочтение применяем. Рост отправляем сразу.
-    let _lastBadgeCount_=-1, _pendingDrop=null;
-    setInterval(()=>{
-        let count=0;
-        document.querySelectorAll('.chat-list .ListItem.Chat').forEach(it=>{
+    // Счётчик для трея/таскбара: число НЕприглушённых неархивных чатов с непрочи-
+    // танными. ОСНОВНОЙ источник — состояние TG (getGlobal): unreadCount берём из
+    // messages.byChatId[id].threadsById['-1'].readState, архив отсекаем по
+    // chats.listIds.active, mute — по notifyExceptionById (иначе notifyDefaults по
+    // типу чата). Состояние точное и без «кадров-мерцаний», в отличие от DOM
+    // (при blur TG перерисовывает чат-лист → бейдж на кадр пустой → счётчик мигал).
+    // Сверено вживую: совпадает 1-в-1 с подсчётом по DOM. Фолбэк — старый DOM-путь
+    // с подтверждением снижения (_pendingDrop), если рантайм недоступен.
+    function nativeUnreadCount(){
+        var g=tgRuntime.getGlobal();
+        if(!g||!g.chats||!g.chats.listIds||!g.chats.listIds.active||!g.messages||!g.messages.byChatId)return null;
+        var now=Math.floor(Date.now()/1000);
+        var active=g.chats.listIds.active, exc=g.chats.notifyExceptionById||{};
+        var defs=(g.settings&&g.settings.notifyDefaults)||{}, byId=g.chats.byId||{}, count=0;
+        for(var i=0;i<active.length;i++){
+            var id=active[i], mc=g.messages.byChatId[id];
+            var th=mc&&mc.threadsById&&mc.threadsById['-1'];
+            var unread=th&&th.readState?(th.readState.unreadCount||0):0;
+            if(unread<=0)continue;
+            var e=exc[id], muted;
+            if(e&&typeof e.mutedUntil!=='undefined') muted=e.mutedUntil>now;
+            else{ var c=byId[id], type=c&&c.type;
+                var dkey=(type==='chatTypePrivate')?'users':(type==='chatTypeChannel')?'channels':'groups';
+                var d=defs[dkey]; muted=d?(d.mutedUntil>now):false; }
+            if(muted)continue;
+            count++;
+        }
+        return count;
+    }
+    function domUnreadCount(){
+        var count=0;
+        document.querySelectorAll('.chat-list .ListItem.Chat').forEach(function(it){
             if(it.className.indexOf('chat-item-archive')>=0)return;
-            if(it.querySelector('.icon-muted'))return;          // приглушённые не считаем
-            let unread=false;
-            it.querySelectorAll('.chat-badge-transition').forEach(b=>{
-                const n=parseInt((b.textContent||'').replace(/[^0-9]/g,''),10);
+            if(it.querySelector('.icon-muted'))return;
+            var unread=false;
+            it.querySelectorAll('.chat-badge-transition').forEach(function(b){
+                var n=parseInt((b.textContent||'').replace(/[^0-9]/g,''),10);
                 if(!isNaN(n)&&n>0)unread=true;
             });
             if(unread)count++;
         });
+        return count;
+    }
+    let _lastBadgeCount_=-1, _pendingDrop=null;
+    setInterval(()=>{
+        var nat=nativeUnreadCount(), fromState=(nat!==null);
+        var count = fromState ? nat : domUnreadCount();
         if(count===_lastBadgeCount_){ _pendingDrop=null; return; }
-        // Снижение → требуем подтверждения один тик (фильтр мерцания).
-        if(_lastBadgeCount_>=0 && count<_lastBadgeCount_ && _pendingDrop!==count){ _pendingDrop=count; return; }
+        // Стейт точный → применяем сразу. DOM-снижение подтверждаем один тик.
+        if(!fromState && _lastBadgeCount_>=0 && count<_lastBadgeCount_ && _pendingDrop!==count){ _pendingDrop=count; return; }
         _pendingDrop=null;
         _lastBadgeCount_=count;
         INV('set_notifications_count',{count}).catch(()=>{});
@@ -145,43 +170,15 @@ document.addEventListener('contextmenu', function(e) {
 // на живой странице: и hash=, и location.assign сбрасываются в ''). Единственный
 // надёжный путь без перезагрузки — кликнуть по строке чат-листа.
 window.__tgNotif=(function(){
-    // Нативный вызов экшена Telegram (webZ): берём объект actions через getActions()
-    // и зовём actions[name](payload). Минифицированные id модулей/имена экспортов
-    // меняются между сборками TG, поэтому НЕ хардкодим — ищем getActions по стабильным
-    // признакам: тривиальная сигнатура `function(){return X}` + результат содержит
-    // экшен 'markChatMessagesRead' (имя-строка стабильно). Кэш объекта actions.
-    // false → вызывающий откатывается на эмуляцию через контекст-меню.
-    var _callAction=(function(){
-        var actions=null, done=false;
-        function discover(){
-            done=true;
-            try{
-                var req;
-                (window.webpackChunktelegram_t=window.webpackChunktelegram_t||[]).push([[Math.random()],{},function(r){req=r;}]);
-                if(!req||!req.m)return null;
-                var ids=Object.keys(req.m);
-                for(var i=0;i<ids.length;i++){
-                    var e; try{ e=req(ids[i]); }catch(_){ continue; }
-                    if(!e||typeof e!=='object')continue;
-                    for(var k in e){
-                        try{
-                            var f=e[k];
-                            if(typeof f!=='function'||f.length!==0)continue;
-                            if(!/^function \w*\(\)\{return [\w$.]+\}$/.test(f.toString()))continue;
-                            var a=f();
-                            if(a&&typeof a==='object'&&typeof a.markChatMessagesRead==='function')return a;
-                        }catch(_){}
-                    }
-                }
-                return null;
-            }catch(e){ return null; }
-        }
-        return function(name,payload){
-            if(!done) actions=discover();
-            if(!actions||typeof actions[name]!=='function') return false;
-            try{ actions[name](payload); return true; }catch(e){ return false; }
-        };
-    })();
+    // Нативный вызов экшена Telegram через общий tgRuntime (core.js): берём actions
+    // и зовём actions[name](payload). false → откат на DOM-эмуляцию.
+    function _callAction(name,payload){
+        try{
+            var acts=tgRuntime.getActions();
+            if(!acts||typeof acts[name]!=='function')return false;
+            acts[name](payload); return true;
+        }catch(e){ return false; }
+    }
     // Скрытие контекст-меню на время «прочитать всё» (ref-counted: вызовы markRead
     // идут со сдвигом и перекрываются, снимаем класс только когда все завершились).
     var _menuHide=0;
@@ -216,12 +213,17 @@ window.__tgNotif=(function(){
         },450);
     }
     function openChat(pid){
+        try{ pid=String(pid); }catch(e){ return; }
+        // ОСНОВНОЙ путь — нативный экшен TG openChat({id}) (проверено по исходнику
+        // обработчика: payload {id,...} → processOpenChatOrThread). Надёжнее клика
+        // по строке: не зависит от виртуализации чат-листа.
+        if(_callAction('openChat', { id: pid })){ focusComposer(); return; }
+        // Фолбэк 1: клик по строке чат-листа (если рантайм недоступен).
         try{
-            pid=String(pid);
             var row=findRow(pid);
             if(row){ clickRow(row); focusComposer(); return; }
         }catch(e){}
-        // Фолбэк: строка вне видимой области (виртуализация) → перезагрузка с hash.
+        // Фолбэк 2: строка вне видимой области (виртуализация) → перезагрузка с hash.
         try{ location.assign(location.origin+location.pathname+'#'+pid); }catch(e){}
     }
     // Прочитать чат. ОСНОВНОЙ путь — прямой вызов экшена TG: не зависит ни от меню,
