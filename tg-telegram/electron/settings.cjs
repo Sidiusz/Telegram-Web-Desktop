@@ -10,7 +10,6 @@ const DEFAULTS = {
     background_notifications_enabled: false,
     // ── Наши уведомления ────────────────────────────────────────────────────
     notif_sound: true,           // играть фирменный звук
-    notif_show_preview: true,    // показывать текст сообщения в попапе
     notif_duration: 6,           // сек — сколько живёт карточка
     notif_volume: 0.8,           // 0..1 — громкость звука
     // Категории КОМУ показывать/озвучивать (по типу чата)
@@ -33,7 +32,6 @@ function loadSettings() {
         popup_notifications: store.get('popup_notifications', DEFAULTS.popup_notifications),
         background_notifications_enabled: store.get('background_notifications_enabled', DEFAULTS.background_notifications_enabled),
         notif_sound: store.get('notif_sound', DEFAULTS.notif_sound),
-        notif_show_preview: store.get('notif_show_preview', DEFAULTS.notif_show_preview),
         notif_duration: store.get('notif_duration', DEFAULTS.notif_duration),
         notif_volume: store.get('notif_volume', DEFAULTS.notif_volume),
         notif_cat_private: store.get('notif_cat_private', DEFAULTS.notif_cat_private),

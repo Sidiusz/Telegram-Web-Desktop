@@ -20,7 +20,6 @@ const NTR = {
     read:          { ru: 'Прочитано',                 en: 'Read' },
     anon:          { ru: 'Анонимный пользователь',    en: 'Anonymous user' },
     new_msg_hidden:{ ru: 'Вам пришло новое сообщение', en: 'You have a new message' },
-    new_msg:       { ru: 'Новое сообщение',           en: 'New message' },
 };
 const ntr = (k) => { const e = NTR[k]; return (e && (e[_uiLang] || e.en)) || k; };
 
@@ -52,16 +51,15 @@ function registerIpc(getWindow) {
         version: app.getVersion(),
     }));
 
-    ipcMain.handle('show_notification', (e, { title, body, icon, sender, chatName, peerId }) => {
+    ipcMain.handle('show_notification', (e, { title, body, icon, sender, peerId }) => {
         const settings = state.settings || loadSettings();
         if (!settings.popup_notifications) return;
 
         const hideSender = settings.notif_hide_sender === true;
         const hideText = settings.notif_hide_text === true;
-        const showPreview = settings.notif_show_preview !== false && !hideText;
         queueNotification({
-            title: hideSender ? ntr('anon') : (sender || title || chatName || 'Telegram'),
-            body: showPreview ? body : (hideText ? ntr('new_msg_hidden') : ntr('new_msg')),
+            title: hideSender ? ntr('anon') : (sender || title || 'Telegram'),
+            body: hideText ? ntr('new_msg_hidden') : body,
             icon: hideSender ? '' : icon,
             anon: hideSender,
             peerId,
