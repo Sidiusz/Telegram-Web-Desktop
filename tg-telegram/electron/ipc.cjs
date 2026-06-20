@@ -146,9 +146,13 @@ function registerIpc(getWindow) {
     ipcMain.handle('clear_cache', async () => {
         const win = getWindow();
         if (win) {
+            // НЕ трогаем 'serviceworkers': их снос ломает TG после перезагрузки
+            // («Service Worker is disabled», отваливается стриминг медиа и часть
+            // функционала, аватарки-blob перестают грузиться). Чистим только кэши.
             await win.webContents.session.clearStorageData({
-                storages: ['appcache', 'filesystem', 'shadercache', 'serviceworkers', 'cachestorage'],
+                storages: ['appcache', 'filesystem', 'shadercache', 'cachestorage'],
             });
+            await win.webContents.session.clearCache();
             win.loadURL(TG_URL);
         }
     });

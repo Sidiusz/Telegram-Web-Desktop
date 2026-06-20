@@ -41,14 +41,30 @@ function parseMeta(content) {
 
 // ── Состояние включён/выключен ────────────────────────────────────────────────
 
+// Группы с дефолтным аддоном: пока пользователь явно не выбрал другой вариант в
+// группе и явно не отключил дефолт — дефолтный аддон включён «из коробки».
+const GROUP_DEFAULTS = { desktop_like_chat: 'embedded:desktop_like_standart.js' };
+const GROUP_MEMBERS  = { desktop_like_chat: ['embedded:desktop_like_standart.js', 'embedded:desktop_like_wide.js'] };
+
 function isEnabled(addonKey, group) {
     const disabled = addonStore.get('disabled_addons', []);
+    const enabled  = addonStore.get('enabled_addons', []);
     // Явно выключен — выключен
     if (disabled.includes(addonKey)) return false;
     // Явно включён — включён
-    if (!disabled.includes(addonKey) && addonStore.get('enabled_addons', []).includes(addonKey)) return true;
-    // Аддоны с группой (взаимоисключающие) — по умолчанию выключены
-    if (group) return false;
+    if (enabled.includes(addonKey)) return true;
+    // Аддоны с группой (взаимоисключающие) — по умолчанию выключены, КРОМЕ дефолта
+    // группы: он включён, пока в группе явно не выбран ДРУГОЙ аддон (явное отключение
+    // самого дефолта уже отсечено проверкой disabled выше).
+    if (group) {
+        const def = GROUP_DEFAULTS[group];
+        if (def && addonKey === def) {
+            const members = GROUP_MEMBERS[group] || [];
+            const anotherEnabled = members.some(m => m !== def && enabled.includes(m));
+            if (!anotherEnabled) return true;
+        }
+        return false;
+    }
     // Остальные — по умолчанию включены (например hide_ads)
     return true;
 }
