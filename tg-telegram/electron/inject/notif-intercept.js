@@ -1,4 +1,10 @@
 (function(){
+    // Guard: переинъекция в том же документе — no-op (как у UI_JS). Нужен потому,
+    // что теперь notif-intercept входит в re-inject набор (watchdog), иначе после
+    // self-reload TG (service worker) перехват Notification терялся навсегда.
+    if (window.__tgNotifIntercept) return;
+    window.__tgNotifIntercept = true;
+
     function normalizeText(value, fallback) {
         var text = String(value == null ? '' : value).trim();
         return text || fallback;

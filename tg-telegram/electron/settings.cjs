@@ -5,10 +5,6 @@ const store = new Store({ name: 'settings' });
 
 const DEFAULTS = {
     save_path: null,
-    auto_reload_enabled: false,
-    auto_reload_interval: 3600,
-    auto_reload_on_idle: false,
-    idle_timeout: 300,
     minimize_to_tray: false,
     popup_notifications: true,
     background_notifications_enabled: false,
@@ -33,10 +29,6 @@ const DEFAULTS = {
 function loadSettings() {
     return {
         save_path: store.get('save_path', DEFAULTS.save_path),
-        auto_reload_enabled: store.get('auto_reload_enabled', DEFAULTS.auto_reload_enabled),
-        auto_reload_interval: store.get('auto_reload_interval', DEFAULTS.auto_reload_interval),
-        auto_reload_on_idle: store.get('auto_reload_on_idle', DEFAULTS.auto_reload_on_idle),
-        idle_timeout: store.get('idle_timeout', DEFAULTS.idle_timeout),
         minimize_to_tray: store.get('minimize_to_tray', DEFAULTS.minimize_to_tray),
         popup_notifications: store.get('popup_notifications', DEFAULTS.popup_notifications),
         background_notifications_enabled: store.get('background_notifications_enabled', DEFAULTS.background_notifications_enabled),

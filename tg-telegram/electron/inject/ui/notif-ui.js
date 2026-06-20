@@ -81,12 +81,17 @@ function setupUpdateListeners(){
 }
 setupUpdateListeners();
 
+// Версия, которую описывает текст ниже (wn_1..wn_3). Показываем «Что нового»
+// ТОЛЬКО для неё — иначе при апдейте на новую версию всплывал бы старый текст.
+// При новом релизе: обновить wn_* в lang.js + поднять эту строку.
+const WHATSNEW_VERSION='1.2.0';
 // ── «Что нового» — один раз при первом запуске новой версии ─────────────────
 async function showWhatsNewIfNeeded(){
     try{
         const info=await INV('get_app_info');
         const ver=info&&info.version;
         if(!ver)return;
+        if(ver!==WHATSNEW_VERSION)return;                     // текст не про эту версию
         const s=await INV('get_settings');
         if(s&&s.whatsnew_shown_version===ver)return;          // уже показывали для этой версии
         const item=t=>'<div style="display:flex;gap:10px;align-items:flex-start;margin-top:12px;">'

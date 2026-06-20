@@ -27,7 +27,6 @@ const ntr = (k) => { const e = NTR[k]; return (e && (e[_uiLang] || e.en)) || k; 
 let state = {
     downloads: [],
     downloadCounter: 0,
-    lastActivity: Date.now(),
     settings: null,
     lastNotificationCount: null,
 };
@@ -76,6 +75,9 @@ function registerIpc(getWindow) {
     ipcMain.handle('save_settings', (e, { settings }) => {
         saveSettings(settings);
         state.settings = loadSettings();
+        // Интервал автопроверки обновлений мог измениться — перепланируем сразу,
+        // чтобы смена применялась без перезапуска.
+        scheduleChecks();
     });
 
     // Open/close DevTools instantly without a reload
@@ -244,10 +246,6 @@ function registerIpc(getWindow) {
     });
 
     ipcMain.handle('open_addons_folder', () => openAddonsFolder());
-
-    ipcMain.handle('report_user_active', () => {
-        state.lastActivity = Date.now();
-    });
 
     // Renderer reports Telegram's UI language → localize tray menu.
     ipcMain.handle('report_lang', (e, { lang }) => {

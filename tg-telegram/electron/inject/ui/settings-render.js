@@ -3,16 +3,10 @@ let _saveTimer=null;
 function scheduleSave(){
     clearTimeout(_saveTimer);
     _saveTimer=setTimeout(async()=>{
-        const are=document.getElementById('_are_'); if(!are) return;
-        const num=(id,def)=>{const e=document.getElementById(id);return e?(parseInt(e.value)||def):def;};
+        const sp=document.getElementById('_sp_'); if(!sp) return;
         const chk=id=>{const e=document.getElementById(id);return !!(e&&e.checked);};
-        const sp=document.getElementById('_sp_');
         const settings={
-            save_path:(sp&&sp.value)||null,
-            auto_reload_enabled:are.checked,
-            auto_reload_interval:num('_ari_',3600),
-            auto_reload_on_idle:chk('_aro_'),
-            idle_timeout:num('_it_',300),
+            save_path:sp.value||null,
             minimize_to_tray:chk('_tr_'),
             devtools_enabled:chk('_dv_'),
         };
@@ -50,14 +44,6 @@ function buildSettingsSections(c, s){
     const sp=document.createElement('input'); sp.className='_ns_inp_'; sp.id='_sp_'; sp.type='text'; sp.value=s.save_path||''; sp.style.flex='1';
     const pick=document.createElement('button'); pick.className='_ns_btn_ sec'; pick.id='_pp_'; pick.textContent=T('choose');
     r1b.appendChild(sp); r1b.appendChild(pick);
-
-    // ── Автоперезагрузка ──
-    lbl(T('sec_autoreload'));
-    const c2=card();
-    toggleRow(c2,T('st_timer'),null,'_are_',s.auto_reload_enabled);
-    const r2b=row(c2); r2b.appendChild(main(T('st_interval'))); r2b.appendChild(numInp('_ari_',s.auto_reload_interval||3600,60));
-    toggleRow(c2,T('st_onidle'),null,'_aro_',s.auto_reload_on_idle);
-    const r2d=row(c2); r2d.appendChild(main(T('st_idle_timeout'))); r2d.appendChild(numInp('_it_',s.idle_timeout||300,30));
 
     // ── Окно ──
     lbl(T('sec_window'));
@@ -212,13 +198,6 @@ function injectGeneralSettings(){
         c2.appendChild(_genToggle(T('st_tray'), !!s.minimize_to_tray, function(v){ _saveOne({minimize_to_tray:v}); }));
         c2.appendChild(_genToggle(T('st_devtools'), !!s.devtools_enabled, function(v){ INV('toggle_devtools',{open:v}).catch(function(){}); _saveOne({devtools_enabled:v}); }));
         addSection(T('sec_window'), c2);
-
-        // Автоперезагрузка: тумблер + интервал
-        var c3=_genCard(cardCls);
-        c3.appendChild(_genToggle(T('st_timer'), !!s.auto_reload_enabled, function(v){ _saveOne({auto_reload_enabled:v}); }));
-        var iv=_genInput(T('st_interval'), s.auto_reload_interval||3600, true, function(val){ var n=parseInt(val,10); if(!isNaN(n)&&n>0) _saveOne({auto_reload_interval:n}); });
-        c3.appendChild(iv.node);
-        addSection(T('sec_autoreload'), c3);
 
         // Обновления: частота автопроверки — нативный «выпадающий список» (попап-радио)
         var c4=_genCard(cardCls);
