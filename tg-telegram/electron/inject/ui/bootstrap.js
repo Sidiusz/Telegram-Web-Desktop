@@ -466,3 +466,37 @@ window.__tgMarkAllRead=function(){
     setInterval(scan,1000);
 })();
 // ──────────────────────────────────────────────────────────────────────────
+
+// ── Фикс прыжка прокрутки при смене монитора ───────────────────────────────
+// TG webZ кэширует высоту вьюпорта для «прокрутки к низу» и НЕ обновляет её после
+// переноса окна на монитор другой высоты → на новое сообщение целится мимо низа
+// ровно на разницу clientHeight (список «улетает» на пару сообщений вверх).
+// Сверено по логам: на 877px-вьюпорте докрут к низу верный, на 697px промах ≈180px
+// (877−697). Чиним так: если список был У НИЗА и пришло новое сообщение — пиннимся
+// к реальному низу несколько кадров, перебивая ошибочный докрут TG. Если юзер
+// листал историю (gap большой) — не трогаем.
+(function stickBottomOnNewMessage(){
+    var BOTTOM_EPS=80, lastGap=0, pinUntil=0, pinning=false;
+    function scroller(){ return document.querySelector('#MiddleColumn .MessageList'); }
+    // gap до низа держим по событию скролла (capture — scroll не всплывает)
+    document.addEventListener('scroll', function(e){
+        var sc=e.target; if(!sc||!sc.classList||!sc.classList.contains('MessageList'))return;
+        lastGap=sc.scrollHeight - sc.scrollTop - sc.clientHeight;
+    }, true);
+    function pin(){
+        var sc=scroller();
+        if(sc){ var max=sc.scrollHeight - sc.clientHeight; if(sc.scrollTop<max) sc.scrollTop=max; }
+        if(Date.now()<pinUntil) requestAnimationFrame(pin); else pinning=false;
+    }
+    var mo=new MutationObserver(function(muts){
+        var added=false;
+        for(var i=0;i<muts.length && !added;i++){ var ns=muts[i].addedNodes;
+            for(var j=0;j<ns.length;j++){ var n=ns[j]; if(n.nodeType===1&&n.classList&&n.classList.contains('Message')){ added=true; break; } } }
+        if(!added)return;
+        if(lastGap>BOTTOM_EPS)return;                    // юзер листал историю — не дёргаем
+        pinUntil=Date.now()+600; if(!pinning){ pinning=true; requestAnimationFrame(pin); }
+    });
+    function arm(){ var mc=document.getElementById('MiddleColumn')||document.body; if(mc) mo.observe(mc,{childList:true,subtree:true}); else setTimeout(arm,200); }
+    arm();
+})();
+// ──────────────────────────────────────────────────────────────────────────
