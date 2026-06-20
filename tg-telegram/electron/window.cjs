@@ -1,5 +1,5 @@
 'use strict';
-const { BrowserWindow, session, app, Menu, MenuItem } = require('electron');
+const { BrowserWindow, session, app, Menu, MenuItem, screen } = require('electron');
 const path = require('path');
 const fs = require('fs');
 
@@ -241,6 +241,37 @@ function createWindow(state) {
     const reapplyBadge = () => { try { app.setBadgeCount(state.lastNotificationCount || 0); } catch (e) {} };
     mainWindow.on('show', reapplyBadge);
     mainWindow.on('restore', reapplyBadge);
+
+    // Колоночная вёрстка TG webZ кэширует ширину окна (через ResizeObserver) и НЕ
+    // обновляет её, если окно сменило монитор без «настоящего» изменения размера или
+    // если страница перезагрузилась в момент перехода — средняя колонка остаётся
+    // узкой (TG считает окно ~1220px вместо реальных 1600 → чат сжат). Синтетический
+    // resize-event не помогает (ResizeObserver слушает реальный размер). Дёргаем
+    // рамку на 1px и возвращаем — это поднимает ResizeObserver, и TG пересчитывает
+    // колонки под фактическую ширину. Делаем после загрузки и при смене дисплея.
+    // Дёргаем масштаб на 0.001 и возвращаем: меняется CSS-ширина вьюпорта (innerWidth)
+    // → поднимается ResizeObserver TG → пересчёт колонок. Через zoom, а не размер окна,
+    // чтобы не разворачивать развёрнутое окно и без видимого скачка.
+    let _nudging = false;
+    function nudgeRelayout() {
+        if (_nudging || mainWindow.isDestroyed()) return;
+        _nudging = true;
+        try {
+            const wc = mainWindow.webContents;
+            const z = wc.getZoomFactor();
+            wc.setZoomFactor(z + 0.001);
+            setTimeout(() => { try { wc.setZoomFactor(z); } catch (e) {} _nudging = false; }, 50);
+        } catch (e) { _nudging = false; }
+    }
+    let _lastDisplayId = null;
+    try { _lastDisplayId = screen.getDisplayMatching(mainWindow.getBounds()).id; } catch (e) {}
+    mainWindow.on('moved', () => {
+        try {
+            const d = screen.getDisplayMatching(mainWindow.getBounds());
+            if (d && d.id !== _lastDisplayId) { _lastDisplayId = d.id; nudgeRelayout(); }
+        } catch (e) {}
+    });
+    mainWindow.webContents.on('did-finish-load', () => { setTimeout(nudgeRelayout, 500); });
     mainWindow.on('close', (e) => {
         if (forceQuit) return;
         const settings = loadSettings();
