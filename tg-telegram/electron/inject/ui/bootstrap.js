@@ -141,6 +141,11 @@ document.addEventListener('contextmenu', function(e) {
 // на живой странице: и hash=, и location.assign сбрасываются в ''). Единственный
 // надёжный путь без перезагрузки — кликнуть по строке чат-листа.
 window.__tgNotif=(function(){
+    // Скрытие контекст-меню на время «прочитать всё» (ref-counted: вызовы markRead
+    // идут со сдвигом и перекрываются, снимаем класс только когда все завершились).
+    var _menuHide=0;
+    function hideMenus(){ _menuHide++; try{ document.documentElement.classList.add('_tgreading_'); }catch(e){} }
+    function showMenus(){ _menuHide=Math.max(0,_menuHide-1); if(_menuHide===0){ try{ document.documentElement.classList.remove('_tgreading_'); }catch(e){} } }
     function findRow(pid){
         var rows=document.querySelectorAll('.chat-list .ListItem.Chat');
         for(var i=0;i<rows.length;i++){
@@ -184,11 +189,12 @@ window.__tgNotif=(function(){
         try{ pid=String(pid); }catch(e){ return; }
         var row=findRow(pid);
         if(!row)return;
-        // Запоминаем открытый чат, чтобы убедиться, что навигации не произошло.
-        var headerPeerEl=document.querySelector('.MiddleHeader .ChatInfo .Avatar[data-peer-id]');
-        var wasOpen=headerPeerEl?headerPeerEl.getAttribute('data-peer-id'):null;
         var btn=row.querySelector('.ListItem-button')||row;
         var r=btn.getBoundingClientRect();
+        // Прячем контекст-меню ДО его появления, чтобы юзер не видел вспышку.
+        hideMenus();
+        var settled=false;
+        function finish(){ if(settled)return; settled=true; setTimeout(showMenus,180); }   // даём меню закрыться невидимо
         var opt={bubbles:true,cancelable:true,view:window,button:2,
             clientX:r.left+r.width/2,clientY:r.top+r.height/2};
         btn.dispatchEvent(new MouseEvent('contextmenu',opt));
@@ -211,18 +217,18 @@ window.__tgNotif=(function(){
                             items[i].dispatchEvent(new MouseEvent('mouseup',{bubbles:true,cancelable:true,view:window,clientX:er.left+1,clientY:er.top+1}));
                             items[i].dispatchEvent(new MouseEvent('click',{bubbles:true,cancelable:true,view:window,clientX:er.left+1,clientY:er.top+1}));
                         }catch(e){ try{items[i].click();}catch(e2){} }
+                        dismissMenu(); finish();
                         return;
                     }
                 }
                 // Меню всплыло, но пункта нет (возможно уже прочитано) — закрываем.
-                dismissMenu();
+                dismissMenu(); finish();
                 return;
             }
-            if(++tries<maxTries)setTimeout(poll,50);
+            if(++tries<maxTries)setTimeout(poll,50); else finish();
         })();
         function dismissMenu(){
             try{ document.dispatchEvent(new KeyboardEvent('keydown',{key:'Escape',keyCode:27,which:27,bubbles:true})); }catch(e){}
-            try{ document.body.click(); }catch(e){}
         }
     }
     return {openChat:openChat, markRead:markRead};
@@ -328,7 +334,16 @@ window.__tgMarkAllRead=function(){
     function peerOf(it){var a=it.querySelector('.Avatar[data-peer-id]');return a?a.getAttribute('data-peer-id'):null;}
     function mutedOf(it){return !!it.querySelector('.icon-muted');}
     function titleOf(it){var t=it.querySelector('h3.fullName, .title h3, .fullName');return t?t.textContent.trim().replace(/\s+/g,' '):'';}
-    function textOf(it){var p=it.querySelector('.last-message');return p?p.textContent.trim().replace(/\s+/g,' '):'';}
+    function textOf(it){
+        var p=it.querySelector('.last-message');
+        if(!p)return '';
+        // Черновик (моё неотправленное) — в превью имеет приоритет над входящим;
+        // не утекаем его в уведомление, лучше фолбэк «Новое сообщение».
+        if(p.querySelector('[class*="draft" i]'))return '';
+        var s=(p.textContent||'').trim().replace(/\s+/g,' ');
+        if(/^(Черновик|Draft)\s*:/i.test(s))return '';
+        return s;
+    }
     function avatarOf(it){var img=it.querySelector('.Avatar img.Avatar__media, .Avatar img');return img&&img.src?img.src:'';}
     function currentPeer(){var el=document.querySelector('.MiddleHeader .ChatInfo .Avatar[data-peer-id]');return el?el.getAttribute('data-peer-id'):'';}
     function toDataUrl(src){
@@ -339,13 +354,27 @@ window.__tgMarkAllRead=function(){
             }).catch(function(){res('');});
         });
     }
-    // Текстовое уведомление на экран (звук отдельно — playSound:false).
-    function popup(item,pid){
+    function findItem(pid){
+        var found=null;
+        document.querySelectorAll('.chat-list .ListItem.Chat').forEach(function(x){
+            var a=x.querySelector('.Avatar[data-peer-id]');
+            if(a&&a.getAttribute('data-peer-id')===String(pid))found=x;
+        });
+        return found;
+    }
+    function sendPopup(item,pid){
         var title=titleOf(item)||'Telegram';
         var text=textOf(item)||T('new_message');
         toDataUrl(avatarOf(item)).then(function(icon){
             INV('show_notification',{title:title,body:text,icon:icon,sender:title,peerId:pid,playSound:false}).catch(function(){});
         });
+    }
+    // Текстовое уведомление на экран (звук отдельно — playSound:false).
+    // Превью .last-message обновляется на КАДР позже бейджа: на первое сообщение оно
+    // ещё пустое, а иногда показывает МОЁ предыдущее/черновик. Поэтому всегда читаем
+    // с паузой (~320мс) и перечитываем строку по pid (могла перевиртуализироваться).
+    function popup(item,pid){
+        setTimeout(function(){ sendPopup(findItem(pid)||item, pid); }, 320);
     }
 
     function scan(){

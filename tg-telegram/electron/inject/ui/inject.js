@@ -14,7 +14,7 @@ function injectMenu(){
         // Уже вставлены — только обновляем подписи на текущий язык (TG ставит
         // <html lang> не сразу, меню могло вставиться ещё на en) и выходим.
         if(bubble.querySelector('#_tgmi_dl_')){
-            const map={_tgmi_dl_:'downloads',_tgmi_ad_:'addons',_tgmi_st_:'app_settings',_tgmi_cl_:'changelog',_tgmi_upd_:'check_updates'};
+            const map={_tgmi_dl_:'downloads',_tgmi_ad_:'addons',_tgmi_cl_:'changelog',_tgmi_upd_:'check_updates'};
             Object.keys(map).forEach(id=>{const sp=bubble.querySelector('#'+id+' span');if(sp)sp.textContent=T(map[id]);});
             return;
         }
@@ -43,7 +43,7 @@ function injectMenu(){
 
         const dl = mi('_tgmi_dl_', 'icon-download', T('downloads'), () => openDownloadsNative());
         const ad = mi('_tgmi_ad_', 'icon-bots', T('addons'), () => openAddonsNative());
-        const st = mi('_tgmi_st_', 'icon-settings', T('app_settings'), () => openAppSettingsNative());
+        // #3: «Настройки приложения» убрали из меню — секции переехали в «Общие настройки».
         const cl = mi('_tgmi_cl_', 'icon-info', T('changelog'), () => openChangelogNative());
         const upd = mi('_tgmi_upd_', 'icon-reload', T('check_updates'), async () => {
             toast(T('upd_checking'), 'icon-reload');
@@ -67,7 +67,6 @@ function injectMenu(){
             bubble.insertBefore(sep1, anchor);
             bubble.insertBefore(dl, anchor);
             bubble.insertBefore(ad, anchor);
-            bubble.insertBefore(st, anchor);
             bubble.insertBefore(cl, anchor);
             bubble.insertBefore(upd, anchor);
             bubble.insertBefore(sep2, anchor);
@@ -93,7 +92,7 @@ function injectSettingsRows(){
     if(!anchor || anchor.closest('#RightColumn, .RightColumn')) return;
     const list  = anchor.closest('.ListItem.narrow').parentElement;
     if(!list) return;
-    if(list.querySelector('#_tgst_app_,#_tgst_dl_,#_tgst_ad_')) return;   // уже вставлено
+    if(list.querySelector('#_tgst_ad_')) return;   // уже вставлено
 
     // Клонируем живую нативную строку → собираем свою по тому же шаблону.
     const tmpl = anchor.closest('.ListItem.narrow');
@@ -114,33 +113,22 @@ function injectSettingsRows(){
         return row;
     }
 
-    // 1) «Настройки приложения» — сразу под «Общие настройки» (если она есть вверху)
-    const appRow = makeRow('_tgst_app_', 'settings', T('app_settings'));
-    appRow.querySelector('.ListItem-button').addEventListener('click', () => openAppSettingsNative());
-    // «Общие настройки» (icon-chat/General) идёт первой; вставим после неё, иначе — в начало списка.
+    // #3: «Настройки приложения» как отдельный пункт убрали — её секции теперь
+    // встраиваются прямо в «Общие настройки» (injectGeneralSettings). В главном
+    // списке оставляем «Дополнения», а «Проверить обновления» кладём в самый низ.
+
+    // «Дополнения» — сразу под «Общие настройки» (первая строка списка), иначе в начало.
+    const adRow = makeRow('_tgst_ad_', 'bots', T('addons'));
+    adRow.querySelector('.ListItem-button').addEventListener('click', () => openAddonsNative());
     const chatRow = list.querySelector('.ListItem.narrow .icon-chat, .ListItem.narrow .ListItem-main-icon');
     const generalAnchor = chatRow && chatRow.closest('.ListItem.narrow');
     if(generalAnchor && generalAnchor !== tmpl){
-        generalAnchor.after(appRow);
+        generalAnchor.after(adRow);
     } else {
-        list.insertBefore(appRow, list.firstChild);
+        list.insertBefore(adRow, list.firstChild);
     }
 
-    // 1b) «Дополнения» — сразу под «Настройки приложения».
-    const adRow = makeRow('_tgst_ad_', 'bots', T('addons'));
-    adRow.querySelector('.ListItem-button').addEventListener('click', () => openAddonsNative());
-    appRow.after(adRow);
-
-    // 2) «Загрузки» — после «Данные и память» (если есть), иначе после «Уведомления».
-    const dlRow = makeRow('_tgst_dl_', 'download', T('downloads'));
-    dlRow.querySelector('.ListItem-button').addEventListener('click', () => openDownloadsNative());
-    const dataRow = data && data.closest('.ListItem.narrow');
-    if(dataRow){
-        dataRow.after(dlRow);
-    } else if(notif){
-        notif.closest('.ListItem.narrow').after(dlRow);
-    } else {
-        appRow.after(dlRow);
-    }
+    // «Проверить обновления» и «О приложении» — отдельной категорией-облачком в
+    // самом низу главного экрана настроек (injectAboutSection), не строками здесь.
 }
 // ─────────────────────────────────────────────────────────────────────────────

@@ -17,6 +17,31 @@ function showModal({title,msg,url,checkLabel,okText,okDanger,cancelText,onOk,onC
     mo.addEventListener('click',e=>{if(e.target===mo){close();if(onCancel)onCancel();}});
 }
 
+// Нативный «выпадающий список» как попап (как «Автоудаление аккаунта»): радио-
+// список вариантов + ОТМЕНА/СОХРАНИТЬ. Использует те же классы, что и TG
+// (.modal-dialog/.Radio), поэтому выглядит 1-в-1 родным.
+function pickModal(opts){
+    var title=opts.title||'', options=opts.options||[], current=opts.current, onSave=opts.onSave;
+    var sel=current;
+    var mo=document.createElement('div'); mo.className='_mo_';
+    var radios=options.map(function(o){
+        return '<label class="Radio'+(o.value===current?' checked':'')+'"><input type="radio" name="_tgpick_" value="'+o.value+'"'+(o.value===current?' checked':'')+'><div class="Radio-main"><span class="label">'+o.label+'</span></div></label>';
+    }).join('');
+    mo.innerHTML='<div class="modal-dialog"><div class="modal-header"><div class="modal-title">'+title+'</div></div>'
+        +'<div class="modal-content"><div class="radio-group _tgpick_grp_">'+radios+'</div>'
+        +'<div class="dialog-buttons"><button class="Button danger" id="_pk_cn_">'+T('cancel')+'</button>'
+        +'<button class="Button" id="_pk_ok_">'+T('save_upper')+'</button></div></div></div>';
+    document.body.appendChild(mo);
+    var labels=mo.querySelectorAll('label.Radio');
+    mo.querySelectorAll('input[name=_tgpick_]').forEach(function(inp){
+        inp.addEventListener('change',function(){ if(inp.checked){ sel=inp.value; labels.forEach(function(l){ l.classList.toggle('checked', l.contains(inp)); }); } });
+    });
+    var close=function(){ mo.remove(); };
+    mo.querySelector('#_pk_cn_').addEventListener('click',close);
+    mo.querySelector('#_pk_ok_').addEventListener('click',function(){ close(); if(onSave)onSave(sel); });
+    mo.addEventListener('click',function(e){ if(e.target===mo)close(); });
+}
+
 window._tgLink=async function(url){
     try{await INV('open_url',{url});}catch(e){}
 };
