@@ -110,6 +110,18 @@ var L={
     wn_2:           {ru:'В «Настройки → Уведомления» теперь можно включить всплывающие карточки уведомлений.', en:'In Settings → Notifications you can now enable popup notification cards.'},
     wn_3:           {ru:'Загрузки теперь работают прямо в сообщениях.', en:'Downloads now work right inside messages.'},
     wn_ok:          {ru:'ПОНЯТНО',                   en:'GOT IT'},
+    // media-type previews for notifications (when message has no text)
+    mt_photo:       {ru:'Фото',                      en:'Photo'},
+    mt_video:       {ru:'Видео',                     en:'Video'},
+    mt_gif:         {ru:'GIF',                        en:'GIF'},
+    mt_round:       {ru:'Видеосообщение',            en:'Video message'},
+    mt_voice:       {ru:'Голосовое сообщение',       en:'Voice message'},
+    mt_audio:       {ru:'Аудио',                     en:'Audio'},
+    mt_file:        {ru:'Файл',                       en:'File'},
+    mt_sticker:     {ru:'Стикер',                     en:'Sticker'},
+    mt_poll:        {ru:'Опрос',                      en:'Poll'},
+    mt_contact:     {ru:'Контакт',                    en:'Contact'},
+    mt_location:    {ru:'Геопозиция',                 en:'Location'},
     // misc UI
     new_message:    {ru:'Новое сообщение',           en:'New message'},
     ctx_open_folder:{ru:'Открыть папку',             en:'Open folder'},

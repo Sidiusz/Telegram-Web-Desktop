@@ -14,7 +14,7 @@ function makeTrayPng(count){
         // Бейдж: круг радиусом ~30% иконки, прижат к правому-нижнему углу.
         var r=Math.round(S*0.30), cx=S-r-1, cy=S-r-1;
         x.beginPath(); x.arc(cx,cy,r+2,0,Math.PI*2); x.fillStyle='rgba(0,0,0,.55)'; x.fill();  // тонкая тёмная окантовка
-        x.beginPath(); x.arc(cx,cy,r,0,Math.PI*2); x.fillStyle='#F23C34'; x.fill();
+        x.beginPath(); x.arc(cx,cy,r,0,Math.PI*2); x.fillStyle='#6B6B6B'; x.fill();   // серый, как нативный бейдж Electron
         x.fillStyle='#fff'; x.textAlign='center'; x.textBaseline='middle';
         x.font='900 '+(label.length>=3?16:24)+'px "Arial Black",Arial,sans-serif';
         x.fillText(label,cx,cy+1);
@@ -48,8 +48,8 @@ waitBody(()=>{
     // «Что нового» — один раз на новую версию (ждём, пока UI прогрузится).
     setTimeout(()=>{ try{ showWhatsNewIfNeeded(); }catch(e){} },2500);
 
-    // Счётчик для трея/таскбара: число НЕприглушённых неархивных чатов с непрочи-
-    // танными. ОСНОВНОЙ источник — состояние TG (getGlobal): unreadCount берём из
+    // Счётчик для трея/таскбара: СУММА непрочитанных сообщений по НЕприглушённым
+    // неархивным чатам. ОСНОВНОЙ источник — состояние TG (getGlobal): unreadCount из
     // messages.byChatId[id].threadsById['-1'].readState, архив отсекаем по
     // chats.listIds.active, mute — по notifyExceptionById (иначе notifyDefaults по
     // типу чата). Состояние точное и без «кадров-мерцаний», в отличие от DOM
@@ -73,7 +73,7 @@ waitBody(()=>{
                 var dkey=(type==='chatTypePrivate')?'users':(type==='chatTypeChannel')?'channels':'groups';
                 var d=defs[dkey]; muted=d?(d.mutedUntil>now):false; }
             if(muted)continue;
-            count++;
+            count+=unread;                               // сумма непрочитанных сообщений (не чатов)
         }
         return count;
     }
@@ -82,12 +82,12 @@ waitBody(()=>{
         document.querySelectorAll('.chat-list .ListItem.Chat').forEach(function(it){
             if(it.className.indexOf('chat-item-archive')>=0)return;
             if(it.querySelector('.icon-muted'))return;
-            var unread=false;
+            var max=0;
             it.querySelectorAll('.chat-badge-transition').forEach(function(b){
                 var n=parseInt((b.textContent||'').replace(/[^0-9]/g,''),10);
-                if(!isNaN(n)&&n>0)unread=true;
+                if(!isNaN(n)&&n>max)max=n;
             });
-            if(unread)count++;
+            count+=max;                                  // сумма непрочитанных сообщений
         });
         return count;
     }
@@ -313,22 +313,21 @@ window.__tgMarkAllRead=function(){
 };
 // ──────────────────────────────────────────────────────────────────────────
 
-// ── Перехват входящих → фирменный звук уведомления ─────────────────────────
-// При включённых «Веб-уведомлениях» Telegram уходит в путь системного
-// уведомления и НЕ играет свой in-app звук (системное мы фейкаем) → тишина.
-// Чиним: сами играем фирменный /a/notification.mp3 на каждое входящее.
-// Следим за ростом счётчика непрочитанных в чат-листе (надёжно, по-сообщенно).
-// Если TG звук всё же сыграл сам (галка выключена) — не дублируем.
-(function setupIncomingSound(){
-    var counts={}, seeded=false, lastTgSound=0, seedTs=0;
-    // Холодная загрузка: строки чат-листа появляются РАНЬШE своих бейджей
-    // непрочитанных. seed ловит count=0, затем доезжают реальные числа → каждый
-    // чат выглядит «выросшим» и сыпет попап. Поэтому первые STARTUP_GRACE мс
-    // только обновляем счётчики, без попапов (бейджи успевают досинхрониться).
-    var STARTUP_GRACE=5000;
-    // Кэш настроек (звук/громкость/категории). Обновляем периодически — это
-    // дешёвый INV('get_settings'), и уведомления реагируют на переключатели
-    // без перезагрузки.
+// ── Входящие сообщения → попап-уведомление + фирменный звук ─────────────────
+// Источник истины — состояние TG (getGlobal), НЕ DOM. Детект нового сообщения:
+// рост threadInfo.lastMessageId в треде «-1». Текст/отправитель/тип чата берём
+// из состояния (messages.byChatId[id].byId, users/chats.byId). Это убирает все
+// прежние костыли DOM-скрапера: гонку превью (320мс), утечку черновика, промахи
+// виртуализации чат-листа, эвристику типа чата по композеру. Единственный
+// остаточный DOM-контакт — аватар (best-effort: в состоянии лежит лишь photoId,
+// без готового URL) и фокус/открытый чат (это свойства окна, не состояния).
+// При включённых «Веб-уведомлениях» TG уходит в путь системного уведомления и НЕ
+// играет свой in-app звук → мы играем /a/notification.mp3 сами; если TG всё же
+// сыграл свой (галка выкл) — не дублируем (lastTgSound).
+(function setupIncomingNotifications(){
+    var seen={}, seeded=false, lastTgSound=0;
+    // Кэш настроек (звук/громкость/категории). Обновляем периодически — дёшево
+    // (INV('get_settings')), уведомления реагируют на переключатели без перезагрузки.
     var cfg={notif_sound:true,notif_volume:0.8,notif_cat_private:true,notif_cat_group:true,notif_cat_channel:true};
     function refreshCfg(){
         try{ INV('get_settings').then(function(s){ if(s)cfg=s; }).catch(function(){}); }catch(e){}
@@ -357,64 +356,19 @@ window.__tgMarkAllRead=function(){
         }catch(e){}
     }
 
-    // Тип чата по данным строки чат-листа.
-    // Тип чата для категорий: private | group | channel.
-    // private — peerId > 0 (надёжно). Группа и канал в чат-листе НЕразличимы
-    // (оба className "group", id отрицательный), поэтому канал учим при открытии
-    // чата: у канала (не-админ) нет поля ввода #editable-message-text.
-    // Кэш peerId→тип; неизвестные отрицательные считаем группой (ничего не глушим зря).
-    var typeCache = {};
-    function learnType(){
-        var pid = currentPeer();
-        if(!pid || pid.charAt(0)!=='-') return;          // открыт не отрицательный чат
-        // форум-супергруппа сначала показывает список тем без композера — не канал
-        var headerForum = document.querySelector('.MiddleHeader .Avatar.forum, .MiddleHeader [class*="forum"]');
-        if(headerForum){ typeCache[pid]='group'; return; }
-        var hasComposer = !!document.getElementById('editable-message-text');
-        typeCache[pid] = hasComposer ? 'group' : 'channel';
-    }
-    function chatType(item,pid){
-        if(parseInt(pid,10)>0) return 'private';
-        if(item && item.className.indexOf('forum')>=0) return 'group';   // форум = супергруппа
-        return typeCache[pid] || 'group';
-    }
-
-    function badgeOf(it){
-        var max=0;
-        it.querySelectorAll('.chat-badge-transition').forEach(function(b){
-            var n=parseInt((b.textContent||'').replace(/[^0-9]/g,''),10);
-            if(!isNaN(n)&&n>max)max=n;
-        });
-        return max;
-    }
-    function peerOf(it){var a=it.querySelector('.Avatar[data-peer-id]');return a?a.getAttribute('data-peer-id'):null;}
-    function mutedOf(it){return !!it.querySelector('.icon-muted');}
-    function titleOf(it){var t=it.querySelector('h3.fullName, .title h3, .fullName');return t?t.textContent.trim().replace(/\s+/g,' '):'';}
-    function textOf(it){
-        var p=it.querySelector('.last-message');
-        if(!p)return '';
-        // Черновик (моё неотправленное) — в превью имеет приоритет над входящим;
-        // не утекаем его в уведомление, лучше фолбэк «Новое сообщение».
-        if(p.querySelector('[class*="draft" i]'))return '';
-        var s=(p.textContent||'').trim().replace(/\s+/g,' ');
-        if(/^(Черновик|Draft)\s*:/i.test(s))return '';
-        return s;
-    }
-    function avatarOf(it){var img=it.querySelector('.Avatar img.Avatar__media, .Avatar img');return img&&img.src?img.src:'';}
+    // Окно: открытый чат и фокус — для пропуска активного чата (нет состояния «фокус»).
     function currentPeer(){var el=document.querySelector('.MiddleHeader .ChatInfo .Avatar[data-peer-id]');return el?el.getAttribute('data-peer-id'):'';}
-    // Текст последнего ВХОДЯЩЕГО сообщения из ОТКРЫТОГО чата (DOM пузыря). Нужно,
-    // когда в превью чат-листа висит черновик (ответ) и текста входящего там нет —
-    // но сам чат открыт (мы как раз отвечали), значит сообщение отрисовано.
-    function openChatLastIncomingText(){
-        var ml=document.querySelector('#MiddleColumn .MessageList');
-        if(!ml)return '';
-        var msgs=ml.querySelectorAll('.Message:not(.own)');
-        if(!msgs.length)return '';
-        var tc=msgs[msgs.length-1].querySelector('.text-content');
-        if(!tc)return '';
-        var clone=tc.cloneNode(true);
-        clone.querySelectorAll('.MessageMeta, .message-time, time, .reactions, .Reactions').forEach(function(e){e.remove();});
-        return (clone.textContent||'').trim().replace(/\s+/g,' ');
+    // Аватар best-effort: ищем строку чат-листа по peerId и берём уже отрисованный src.
+    // Нет строки (виртуализация) → без иконки (main подставит первую букву).
+    function domAvatar(pid){
+        var rows=document.querySelectorAll('.chat-list .ListItem.Chat .Avatar[data-peer-id]');
+        for(var i=0;i<rows.length;i++){
+            if(rows[i].getAttribute('data-peer-id')===String(pid)){
+                var img=rows[i].querySelector('img.Avatar__media, img');
+                return img&&img.src?img.src:'';
+            }
+        }
+        return '';
     }
     function toDataUrl(src){
         return new Promise(function(res){
@@ -424,62 +378,91 @@ window.__tgMarkAllRead=function(){
             }).catch(function(){res('');});
         });
     }
-    function findItem(pid){
-        var found=null;
-        document.querySelectorAll('.chat-list .ListItem.Chat').forEach(function(x){
-            var a=x.querySelector('.Avatar[data-peer-id]');
-            if(a&&a.getAttribute('data-peer-id')===String(pid))found=x;
-        });
-        return found;
+
+    // Категория чата для фильтра настроек: private | group | channel.
+    function chatCategory(type){
+        if(type==='chatTypePrivate')return 'private';
+        if(type==='chatTypeChannel')return 'channel';
+        return 'group';                                  // basic/super group
     }
-    function sendPopup(item,pid){
-        var title=titleOf(item)||'Telegram';
-        var text=textOf(item);
-        // Превью пустое из-за черновика → читаем входящее из открытого чата.
-        if(!text && String(pid)===String(currentPeer())) text=openChatLastIncomingText();
-        text=text||T('new_message');
-        toDataUrl(avatarOf(item)).then(function(icon){
-            INV('show_notification',{title:title,body:text,icon:icon,sender:title,peerId:pid,playSound:false}).catch(function(){});
-        });
+    // Приглушён ли чат: персональное исключение, иначе дефолт по типу (как в бейдже трея).
+    function isMuted(g,id,type,now){
+        var exc=g.chats.notifyExceptionById||{}, e=exc[id];
+        if(e&&typeof e.mutedUntil!=='undefined')return e.mutedUntil>now;
+        var defs=(g.settings&&g.settings.notifyDefaults)||{};
+        var dkey=(type==='chatTypePrivate')?'users':(type==='chatTypeChannel')?'channels':'groups';
+        var d=defs[dkey]; return d?(d.mutedUntil>now):false;
     }
-    // Текстовое уведомление на экран (звук отдельно — playSound:false).
-    // Превью .last-message обновляется на КАДР позже бейджа: на первое сообщение оно
-    // ещё пустое, а иногда показывает МОЁ предыдущее/черновик. Поэтому всегда читаем
-    // с паузой (~320мс) и перечитываем строку по pid (могла перевиртуализироваться).
-    function popup(item,pid){
-        setTimeout(function(){ sendPopup(findItem(pid)||item, pid); }, 320);
+    // Имя отправителя (для префикса в группах): user → имя+фамилия, иначе chat.title.
+    function senderName(g,msg){
+        var sid=msg&&msg.senderId; if(!sid)return '';
+        var u=g.users&&g.users.byId&&g.users.byId[sid];
+        if(u)return ((u.firstName||'')+' '+(u.lastName||'')).trim();
+        var c=g.chats&&g.chats.byId&&g.chats.byId[sid];
+        return c?(c.title||''):'';
+    }
+    // Текст сообщения. Текст/подпись — в приоритете (покрывает и webPage-превью).
+    // Медиа без подписи → локализованная метка типа. Служебное (action) → null (не уведомляем).
+    function msgText(g,msg){
+        var c=msg&&msg.content; if(!c)return T('new_message');
+        if(c.text&&c.text.text)return c.text.text;
+        if(c.action)return null;                         // вступил/покинул/закрепил — служебное
+        if(c.sticker)return ((c.sticker.emoji||'')+' '+T('mt_sticker')).trim();
+        if(c.photo)return T('mt_photo');
+        if(c.video)return c.video.isRound?T('mt_round'):(c.video.isGif?T('mt_gif'):T('mt_video'));
+        if(c.voice)return T('mt_voice');
+        if(c.audio)return T('mt_audio');
+        if(c.document)return c.document.fileName||T('mt_file');
+        if(c.poll)return T('mt_poll');
+        if(c.contact)return T('mt_contact');
+        if(c.location||c.geo)return T('mt_location');
+        return T('new_message');
+    }
+    function sendPopup(pid,title,text){
+        text=(text||'').replace(/\s+/g,' ').trim();      // превью в одну строку, как в TG
+        toDataUrl(domAvatar(pid)).then(function(icon){
+            INV('show_notification',{title:title,body:text,icon:icon,sender:title,peerId:String(pid),playSound:false}).catch(function(){});
+        });
     }
 
     function scan(){
-        learnType();                                        // учим тип открытого чата (канал/группа)
-        var items=document.querySelectorAll('.chat-list .ListItem.Chat');
-        if(!items.length)return;
-        var openPeer=currentPeer();
-        var focused=document.hasFocus();
-        var fire=false;
-        items.forEach(function(item){
-            if(item.className.indexOf('chat-item-archive')>=0)return;
-            var pid=peerOf(item);
-            if(!pid)return;
-            var cnt=badgeOf(item);
-            var prev=counts[pid];
-            counts[pid]=cnt;
-            if(cnt<=0)return;
-            if(mutedOf(item))return;                        // приглушённые — без звука и попапа
-            var ctype=chatType(item,pid);
-            if(cfg['notif_cat_'+ctype]===false)return;      // категория выключена в настройках
-            if(!seeded)return;                              // первый проход — только seed
-            if(Date.now()-seedTs<STARTUP_GRACE)return;      // холодная загрузка: бейджи ещё доезжают
-            if(prev===undefined)return;                     // впервые видим чат (виртуализация) — не новое
-            if(cnt<=prev)return;                            // счётчик не вырос — не новое
-            if(pid===openPeer&&focused)return;              // активный чат в фокусе — пропускаем
+        var g=tgRuntime.getGlobal();
+        if(!g||!g.chats||!g.chats.listIds||!g.chats.listIds.active||!g.messages||!g.messages.byChatId)return;
+        var now=Math.floor(Date.now()/1000);
+        var active=g.chats.listIds.active, byId=g.chats.byId||{};
+        var openPeer=currentPeer(), focused=document.hasFocus(), fire=false;
+        for(var i=0;i<active.length;i++){
+            var id=active[i];
+            var mc=g.messages.byChatId[id];
+            var th=mc&&mc.threadsById&&mc.threadsById['-1'];
+            if(!th)continue;
+            var mid=(th.threadInfo&&th.threadInfo.lastMessageId)||0;
+            var unread=th.readState?(th.readState.unreadCount||0):0;
+            var prev=seen[id];
+            seen[id]={mid:mid,unread:unread};
+            if(!seeded)continue;                            // первый проход — только seed (без попапов)
+            if(prev===undefined)continue;                   // впервые видим чат — не считаем новым
+            if(mid<=prev.mid)continue;                      // нет более нового сообщения
+            var chat=byId[id]; if(!chat)continue;
+            var type=chat.type, cat=chatCategory(type);
+            if(cfg['notif_cat_'+cat]===false)continue;      // категория выключена в настройках
+            if(isMuted(g,id,type,now))continue;             // приглушённый — без звука и попапа
+            var msg=mc.byId&&mc.byId[mid];
+            // Входящее? Сообщение загружено → по isOutgoing; не загружено → по росту unread
+            // (своё исходящее unread не увеличивает).
+            var incoming=msg?!msg.isOutgoing:(unread>prev.unread);
+            if(!incoming)continue;
+            if(String(id)===String(openPeer)&&focused)continue;  // активный чат в фокусе — пропускаем
+            var text=msg?msgText(g,msg):T('new_message');
+            if(text===null)continue;                        // служебное сообщение
+            if(msg&&cat==='group'){ var sn=senderName(g,msg); if(sn)text=sn+': '+text; }
             fire=true;
-            popup(item,pid);                                // текстовый попап на экран
-        });
-        if(!seeded){ seeded=true; seedTs=Date.now(); }
-        if(fire)playSound();                                // один звук за тик, без наложений
+            sendPopup(id, chat.title||'Telegram', text);
+        }
+        if(!seeded)seeded=true;
+        if(fire)playSound();                                // один звук за тик
     }
     scan();
-    setInterval(scan,500);
+    setInterval(scan,1000);
 })();
 // ──────────────────────────────────────────────────────────────────────────

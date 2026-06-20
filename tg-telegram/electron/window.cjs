@@ -236,6 +236,11 @@ function createWindow(state) {
         return { action: 'deny' };
     });
     mainWindow.on('ready-to-show', () => mainWindow.show());
+    // Бейдж таскбара пропадает при холодном старте (кнопки ещё нет в момент
+    // setBadgeCount) и при восстановлении из трея — переприменяем на show/restore.
+    const reapplyBadge = () => { try { app.setBadgeCount(state.lastNotificationCount || 0); } catch (e) {} };
+    mainWindow.on('show', reapplyBadge);
+    mainWindow.on('restore', reapplyBadge);
     mainWindow.on('close', (e) => {
         if (forceQuit) return;
         const settings = loadSettings();
