@@ -103,6 +103,12 @@ var L={
     dl_st_completed:{ru:'✓ Завершено',               en:'✓ Completed'},
     dl_st_failed:   {ru:'✕ Ошибка',                  en:'✕ Failed'},
     dl_st_cancelled:{ru:'— Отменено',                en:'— Cancelled'},
+    // download corner indicator
+    dl_card_downloading:{ru:'Скачивание…',           en:'Downloading…'},
+    dl_card_saved:  {ru:'Сохранено',                 en:'Saved'},
+    dl_card_failed: {ru:'Не удалось скачать',         en:'Download failed'},
+    dl_card_open:   {ru:'Нажмите, чтобы открыть',     en:'Click to open'},
+    dl_card_file:   {ru:'Файл',                       en:'File'},
     // what's new (one-time on version bump)
     wn_title:       {ru:'Что нового',                en:"What's new"},
     wn_intro:       {ru:'В этой версии:',            en:'In this version:'},

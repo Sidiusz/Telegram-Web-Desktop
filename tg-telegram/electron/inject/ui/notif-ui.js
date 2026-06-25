@@ -81,6 +81,64 @@ function setupUpdateListeners(){
 }
 setupUpdateListeners();
 
+// ── Индикатор загрузки (любой) ──────────────────────────────────────────────
+// Угловая карточка на КАЖДУЮ загрузку: имя файла + прогресс-бар + статус. Питается
+// download-event (start/progress/done) из downloads-registry.onEvent — туда же
+// попадают и blob-сохранения из медиа-просмотрщика (save_blob шлёт start+done).
+// Для blob это «мгновенно»: карточка вспыхивает и сразу показывает «Сохранено».
+var _dlCards = {};
+function _dlRemoveCard(id){
+    var c=_dlCards[id]; if(!c)return;
+    delete _dlCards[id];
+    c.el.classList.add('out'); setTimeout(function(){ if(c.el.parentNode)c.el.remove(); },220);
+}
+function showDownloadIndicator(data){
+    if(!data||!data.id||!window.tgBridge) return;
+    ensureCornerWrap();
+    var w=document.getElementById('_cnw_'); if(!w) return;
+    var id=data.id;
+    if(data.type==='start'){
+        if(_dlCards[id]) return;
+        var el=document.createElement('div'); el.className='_cnotif_'; el.style.minWidth='280px';
+        var av=document.createElement('div'); av.className='_cnotif_av_';
+        av.innerHTML='<i class="icon icon-download" style="font-size:18px;color:#5288c1"></i>';
+        var body=document.createElement('div'); body.className='_cnotif_body_';
+        var title=document.createElement('div'); title.className='_cnotif_title_';
+        title.textContent=data.origName||data.filename||T('dl_card_file');
+        var text=document.createElement('div'); text.className='_cnotif_text_'; text.textContent=T('dl_card_downloading');
+        var bar=document.createElement('div'); bar.className='_upd_bar_';
+        var barInner=document.createElement('div'); barInner.className='_upd_prog_'; barInner.innerHTML='<span></span>';
+        bar.appendChild(barInner);
+        body.appendChild(title); body.appendChild(text); body.appendChild(bar);
+        var cls=document.createElement('button'); cls.className='_cnotif_close_'; cls.textContent='✕';
+        el.appendChild(av); el.appendChild(body); el.appendChild(cls);
+        w.appendChild(el);
+        cls.addEventListener('click',function(e){ e.stopPropagation(); _dlRemoveCard(id); });
+        _dlCards[id]={el:el, av:av, title:title, text:text, span:barInner.querySelector('span'), timer:null};
+    } else if(data.type==='progress'){
+        var c=_dlCards[id]; if(!c) return;
+        var r=data.received||0, t=data.total||0;
+        c.text.textContent=_fmtBytes_dl(r)+(t?' / '+_fmtBytes_dl(t):'');
+        if(c.span&&t) c.span.style.width=Math.round(r/t*100)+'%';
+    } else if(data.type==='done'){
+        if(!_dlCards[id]) showDownloadIndicator({type:'start', id:id, filename:data.filename, origName:data.origName});
+        var c2=_dlCards[id]; if(!c2) return;
+        var ok=data.status==='completed';
+        if(c2.timer) clearTimeout(c2.timer);
+        if(ok){
+            c2.text.textContent=T('dl_card_saved')+' · '+T('dl_card_open');
+            if(c2.span) c2.span.style.width='100%';
+            c2.av.innerHTML='<i class="icon icon-check" style="color:#4caf50;font-size:18px"></i>';
+            c2.el.style.cursor='pointer'; c2.el.title=T('dl_card_open');
+            c2.el.addEventListener('click',function(){ INV('open_download_file',{id:id}).catch(function(){}); });
+        } else {
+            c2.text.textContent=T('dl_card_failed');
+            c2.av.innerHTML='<i class="icon icon-close" style="color:#e53935;font-size:18px"></i>';
+        }
+        c2.timer=setTimeout(function(){ _dlRemoveCard(id); }, ok?4500:6000);
+    }
+}
+
 // Версия, которую описывает текст ниже (wn_1..wn_3). Показываем «Что нового»
 // ТОЛЬКО для неё — иначе при апдейте на новую версию всплывал бы старый текст.
 // При новом релизе: обновить wn_* в lang.js + поднять эту строку.

@@ -164,6 +164,28 @@ document.addEventListener('contextmenu', function(e) {
 }, true);
 // ──────────────────────────────────────────────────────────────────────────
 
+// ── Скачивание медиа из просмотрщика (blob:) ───────────────────────────────
+// Кнопка «Загрузка» в просмотрщике — это <a download href="blob:...">. В Electron
+// клик по нему НЕ скачивает: webContents.downloadURL(blob:) не работает (blob живёт
+// в рендерере и недоступен из main) — раньше клик «пытался открыть blob». Чиним в
+// рендерере: сами fetch'им blob → dataURL и отдаём байты в main (save_blob).
+document.addEventListener('click', function(e){
+    var a = (e.target && e.target.closest) ? e.target.closest('a[download]') : null;
+    if(!a) return;
+    var href = a.href || a.getAttribute('href') || '';
+    if(href.indexOf('blob:')!==0) return;            // только blob; обычные ссылки не трогаем
+    e.preventDefault();                              // отменяем сломанное нативное скачивание
+    e.stopImmediatePropagation();                    // и глушим обработчик external.js — иначе он
+                                                     // зовёт open_url(blob:) → диалог Windows «открыть blob»
+    var name = a.getAttribute('download') || a.download || 'file';
+    fetch(href).then(function(r){ return r.blob(); }).then(function(b){
+        var fr = new FileReader();
+        fr.onload = function(){ INV('save_blob', { dataUrl: fr.result, filename: name }).catch(function(){}); };
+        fr.readAsDataURL(b);
+    }).catch(function(){});
+}, true);
+// ──────────────────────────────────────────────────────────────────────────
+
 // ── Навигация из уведомлений: открыть чат / пометить прочитанным ───────────
 // Hash-навигация (location.hash='#peerId') в уже загруженной SPA Telegram Web A
 // НЕ работает — роутер игнорирует изменение hash после инициализации (проверено
@@ -425,45 +447,31 @@ window.__tgMarkAllRead=function(){
         });
     }
 
-    function scan(){
-        var g=tgRuntime.getGlobal();
-        if(!g||!g.chats||!g.chats.listIds||!g.chats.listIds.active||!g.messages||!g.messages.byChatId)return;
-        var now=Math.floor(Date.now()/1000);
-        var active=g.chats.listIds.active, byId=g.chats.byId||{};
-        var openPeer=currentPeer(), focused=document.hasFocus(), fire=false;
-        for(var i=0;i<active.length;i++){
-            var id=active[i];
-            var mc=g.messages.byChatId[id];
-            var th=mc&&mc.threadsById&&mc.threadsById['-1'];
-            if(!th)continue;
-            var mid=(th.threadInfo&&th.threadInfo.lastMessageId)||0;
-            var unread=th.readState?(th.readState.unreadCount||0):0;
-            var prev=seen[id];
-            seen[id]={mid:mid,unread:unread};
-            if(!seeded)continue;                            // первый проход — только seed (без попапов)
-            if(prev===undefined)continue;                   // впервые видим чат — не считаем новым
-            if(mid<=prev.mid)continue;                      // нет более нового сообщения
-            var chat=byId[id]; if(!chat)continue;
-            var type=chat.type, cat=chatCategory(type);
-            if(cfg['notif_cat_'+cat]===false)continue;      // категория выключена в настройках
-            if(isMuted(g,id,type,now))continue;             // приглушённый — без звука и попапа
-            var msg=mc.byId&&mc.byId[mid];
-            // Входящее? Сообщение загружено → по isOutgoing; не загружено → по росту unread
-            // (своё исходящее unread не увеличивает).
-            var incoming=msg?!msg.isOutgoing:(unread>prev.unread);
-            if(!incoming)continue;
-            if(String(id)===String(openPeer)&&focused)continue;  // активный чат в фокусе — пропускаем
-            var text=msg?msgText(g,msg):T('new_message');
-            if(text===null)continue;                        // служебное сообщение
-            if(msg&&cat==='group'){ var sn=senderName(g,msg); if(sn)text=sn+': '+text; }
-            fire=true;
-            sendPopup(id, chat.title||'Telegram', text);
-        }
-        if(!seeded)seeded=true;
-        if(fire)playSound();                                // один звук за тик
+    // Источник уведомлений — перехват notify-пайплайна Telegram (см. notif-intercept.js):
+    // в фокусе TG идёт через window.Notification, в фоне — через postMessage в service
+    // worker ('showMessageNotification'). Оба пути кладут сюда {title,body,icon,chatId,
+    // messageId,isSilent}. Старый опрос tgRuntime.getGlobal МЁРТВ: webZ переехал на Vite,
+    // глобального webpack-require больше нет, состояние из страницы недостижимо.
+    function handleTgNotif(p){
+        if(!p)return;
+        var pid = p.chatId!=null ? String(p.chatId) : '';
+        // Категория по знаку peerId: >0 личка, иначе группа/канал. Канал от группы по
+        // источнику не отличить — фильтр notif_cat_channel схлопнут в group.
+        var cat = (pid.charAt(0)==='-') ? 'group' : 'private';
+        if(cfg['notif_cat_'+cat]===false)return;                       // категория выключена
+        if(pid && String(pid)===String(currentPeer()) && document.hasFocus())return; // открытый чат в фокусе
+        var title=(p.title||'').trim()||'Telegram';
+        var text=(p.body||'').replace(/\s+/g,' ').trim();
+        // Иконку (blob:/data:) конвертим: main не достанет blob из рендерера. Нет иконки
+        // в payload — берём аватар из строки чат-листа по peerId.
+        toDataUrl(p.icon||domAvatar(pid)).then(function(icon){
+            INV('show_notification',{title:title,body:text,icon:icon,sender:title,peerId:pid,playSound:false}).catch(function(){});
+        });
+        if(!p.isSilent)playSound();                                    // звук (с дедупом lastTgSound)
     }
-    scan();
-    setInterval(scan,1000);
+    // Регистрируем приёмник и забираем то, что накопилось до старта UI_JS.
+    window.__tgOnNotif = handleTgNotif;
+    try{ (window.__tgNotifQueue||[]).splice(0).forEach(handleTgNotif); }catch(e){}
 })();
 // ──────────────────────────────────────────────────────────────────────────
 
