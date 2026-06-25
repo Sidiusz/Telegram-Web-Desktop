@@ -5,12 +5,9 @@
 // IIFE (shared scope — functions/state see each other).
 const fs = require('fs');
 const path = require('path');
+const { app } = require('electron');
 
 const rd = p => fs.readFileSync(path.join(__dirname, 'inject', p), 'utf8');
-
-const NOTIF_INTERCEPT_JS = rd('notif-intercept.js');
-const AUDIO_JS = rd('audio.js');
-const EXTERNAL_JS = rd('external.js');
 
 // Only the executable "tail" (bootstrap) order matters — it runs last; function
 // declarations are hoisted, so their relative order is not critical.
@@ -22,14 +19,39 @@ const UI_PARTS = [
     'modal.js',                  // showModal / makePanel / openPanel
     'native-panels.js',          // native "Downloads" / "App settings" panels
     'settings-render.js',        // render app settings + auto-save
-    'notif-ui.js',               // corner notifications, update progress
+    'notif-ui.js',               // corner notifications, update progress, download indicator
     'inject.js',                 // injectMenu / injectSettingsRows
     'bootstrap.js',              // tryInject / waitBody / start observers
-].map(name => rd(path.join('ui', name)));
+];
 
-// Guard marker: a re-run of UI_JS in the same document is a no-op (no duplicate
-// intervals/handlers). The watchdog in main reads the same marker: if it's gone
-// (TG reloaded/swapped the page during its own update) — re-inject everything.
-const UI_JS = '(function(){\nif(window.__tgUIInjected)return;window.__tgUIInjected=true;\n' + UI_PARTS.join('\n') + '\n})();';
+function buildUiJs() {
+    // Guard marker: a re-run of UI_JS in the same document is a no-op (no duplicate
+    // intervals/handlers). The watchdog in main reads the same marker: if it's gone
+    // (TG reloaded/swapped the page during its own update) — re-inject everything.
+    const parts = UI_PARTS.map(name => rd(path.join('ui', name)));
+    return '(function(){\nif(window.__tgUIInjected)return;window.__tgUIInjected=true;\n' + parts.join('\n') + '\n})();';
+}
 
-module.exports = { NOTIF_INTERCEPT_JS, AUDIO_JS, EXTERNAL_JS, UI_JS };
+function readAll() {
+    return {
+        NOTIF_INTERCEPT_JS: rd('notif-intercept.js'),
+        AUDIO_JS: rd('audio.js'),
+        EXTERNAL_JS: rd('external.js'),
+        UI_JS: buildUiJs(),
+    };
+}
+
+// В проде (asar — файлы инъекций неизменны) читаем и собираем один раз. В деве
+// (распакованный запуск) читаем заново на каждый инжект, чтобы правки inject/*
+// подхватывались простой перезагрузкой окна, без перезапуска приложения — как уже
+// делает loadAddonScripts() для аддонов.
+let _cache = null;
+function getScripts() {
+    if (app.isPackaged) {
+        if (!_cache) _cache = readAll();
+        return _cache;
+    }
+    return readAll();
+}
+
+module.exports = { getScripts };

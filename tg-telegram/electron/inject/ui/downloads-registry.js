@@ -72,6 +72,8 @@ const DL = window.__tgdl = (function(){
     // Main шлёт download-event. Связываем filename→mid.
     function onEvent(data){
         if(!data)return;
+        // Угловой индикатор на любую загрузку (вкл. blob из просмотрщика).
+        try{ if(typeof showDownloadIndicator==='function') showDownloadIndicator(data); }catch(e){}
         if(data.type==='start'){
             // Матчим по ОРИГИНАЛЬНОМУ имени (как в сообщении). filename может быть
             // « (1)» из-за дедупликации на диске — по нему матчить нельзя.

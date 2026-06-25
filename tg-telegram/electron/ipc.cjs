@@ -12,6 +12,19 @@ const { checkForUpdate, downloadUpdate, scheduleChecks, init: initUpdater, fetch
 
 const TG_URL = 'https://web.telegram.org/a/';
 
+// Windows-style dedup: «file.jpg» → «file (1).jpg», как в Проводнике.
+function uniquePath(p) {
+    if (!fs.existsSync(p)) return p;
+    const dir = path.dirname(p);
+    const ext = path.extname(p);
+    const base = path.basename(p, ext);
+    for (let i = 1; i < 10000; i++) {
+        const cand = path.join(dir, `${base} (${i})${ext}`);
+        if (!fs.existsSync(cand)) return cand;
+    }
+    return p;
+}
+
 // Язык интерфейса (приходит из рендерера, см. report_lang). Для строк уведомлений
 // в main-процессе, где T() из inject недоступен.
 let _uiLang = 'ru';
@@ -245,6 +258,41 @@ function registerIpc(getWindow) {
             click: () => win.webContents.copyImageAt(x, y),
         }));
         menu.popup({ window: win });
+    });
+
+    // Сохранение blob-файла из медиа-просмотрщика. TG отдаёт «Загрузку» как
+    // <a download href="blob:...">, но webContents.downloadURL(blob:) в Electron не
+    // работает (blob живёт в рендерере, недоступен из main) — клик «пытался открыть
+    // blob» вместо скачивания. Поэтому рендерер сам fetch'ит blob → dataURL и шлёт
+    // байты сюда, а main пишет файл в папку сохранений и регистрирует в менеджере.
+    ipcMain.handle('save_blob', (e, { dataUrl, filename }) => {
+        try {
+            const m = /^data:([^;,]*)?(;base64)?,([\s\S]*)$/.exec(dataUrl || '');
+            if (!m) return { error: 'bad-data' };
+            const buf = m[2] ? Buffer.from(m[3], 'base64') : Buffer.from(decodeURIComponent(m[3]));
+            const settings = state.settings || loadSettings();
+            const dir = settings.save_path || app.getPath('downloads');
+            const safeName = String(filename || 'file').replace(/[\/:*?"<>|]/g, '_').trim() || 'file';
+            const dest = uniquePath(path.join(dir, safeName));
+            fs.writeFileSync(dest, buf);
+
+            state.downloadCounter += 1;
+            const id = state.downloadCounter;
+            const savedName = path.basename(dest);
+            state.downloads.push({ id, url: '', filename: savedName, path: dest, status: 'completed' });
+            saveDownloads(state.downloads);
+
+            const win = getWindow();
+            if (win && !win.isDestroyed()) {
+                // Тот же контракт, что и will-download: start → done, чтобы карточка
+                // появилась в менеджере загрузок.
+                win.webContents.send('download-event', { type: 'start', id, filename: savedName, origName: safeName });
+                win.webContents.send('download-event', { type: 'done', id, status: 'completed' });
+            }
+            return { ok: true, id, path: dest };
+        } catch (err) {
+            return { error: err.message };
+        }
     });
 
     ipcMain.handle('open_addons_folder', () => openAddonsFolder());

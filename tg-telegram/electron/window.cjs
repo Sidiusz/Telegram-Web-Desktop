@@ -15,7 +15,7 @@ function uniquePath(p) {
     }
     return p;
 }
-const { NOTIF_INTERCEPT_JS, EXTERNAL_JS, AUDIO_JS, UI_JS } = require('./scripts.cjs');
+const { getScripts } = require('./scripts.cjs');
 const { loadAddonScripts } = require('./addons.cjs');
 const { saveDownloads } = require('./downloads.cjs');
 const { loadSettings } = require('./settings.cjs');
@@ -70,16 +70,18 @@ function createWindow(state) {
         console.log(`[PAGE ${levels[level] || level}]`, message);
     });
 
-    const baseScripts = [EXTERNAL_JS, AUDIO_JS, UI_JS];
-
     mainWindow.webContents.on('dom-ready', () => {
+        const { NOTIF_INTERCEPT_JS } = getScripts();
         mainWindow.webContents.executeJavaScript(NOTIF_INTERCEPT_JS).catch(e => console.error('[NOTIF]', e));
     });
 
     const injectAll = () => {
-        // NOTIF_INTERCEPT_JS первым и в общем наборе: иначе после self-reload TG
-        // (service worker) перехват Notification терялся (watchdog его не возвращал).
-        const allScripts = [NOTIF_INTERCEPT_JS, ...baseScripts, ...loadAddonScripts()];
+        // getScripts() читает inject/* заново на каждый инжект (в деве) — правки
+        // подхватываются перезагрузкой окна, без перезапуска. NOTIF_INTERCEPT_JS первым
+        // и в общем наборе: иначе после self-reload TG (service worker) перехват
+        // Notification терялся (watchdog его не возвращал).
+        const { NOTIF_INTERCEPT_JS, EXTERNAL_JS, AUDIO_JS, UI_JS } = getScripts();
+        const allScripts = [NOTIF_INTERCEPT_JS, EXTERNAL_JS, AUDIO_JS, UI_JS, ...loadAddonScripts()];
         for (const script of allScripts) {
             mainWindow.webContents.executeJavaScript(script).catch(e => console.error('[SCRIPT]', e));
         }
@@ -223,17 +225,35 @@ function createWindow(state) {
         });
     });
 
+    // Жёстко держим версию /A (webZ). /K — отдельное приложение (webK), под которое
+    // наши инъекции/аддоны не рассчитаны. Любую навигацию/редирект на /k отменяем и
+    // возвращаемся на /A.
+    const isKVersionUrl = (url) => {
+        try {
+            const u = new URL(url);
+            return /(^|\.)telegram\.org$/i.test(u.hostname) && /^\/k(\/|$)/.test(u.pathname);
+        } catch (e) { return false; }
+    };
+    const forceAVersion = (e) => {
+        if (e) e.preventDefault();
+        // Уже на /A не перезагружаем без нужды — грузим только если реально ушли бы на /K.
+        mainWindow.loadURL(TG_URL);
+    };
+
     mainWindow.webContents.on('will-navigate', (e, url) => {
-        if (url.startsWith('blob:')) {
-            e.preventDefault();
-            mainWindow.webContents.downloadURL(url);
-        }
+        if (isKVersionUrl(url)) { forceAVersion(e); return; }
+        // blob: всегда означает «скачать» (просмотрщик отдаёт <a download href=blob:>).
+        // Само скачивание делает рендерер (bootstrap.js → save_blob: fetch'ит blob и шлёт
+        // байты в main). Здесь просто не пускаем навигацию: webContents.downloadURL(blob:)
+        // в Electron не работает и роняет Windows-диалог «выберите приложение для blob».
+        if (url.startsWith('blob:')) e.preventDefault();
+    });
+    mainWindow.webContents.on('will-redirect', (e, url) => {
+        if (isKVersionUrl(url)) forceAVersion(e);
     });
     mainWindow.webContents.setWindowOpenHandler(({ url }) => {
-        if (url.startsWith('blob:')) {
-            mainWindow.webContents.downloadURL(url);
-        }
-        return { action: 'deny' };
+        if (isKVersionUrl(url)) { mainWindow.loadURL(TG_URL); return { action: 'deny' }; }
+        return { action: 'deny' };   // blob/внешнее в новом окне не открываем (см. external.js)
     });
     mainWindow.on('ready-to-show', () => mainWindow.show());
     // Бейдж таскбара пропадает при холодном старте (кнопки ещё нет в момент

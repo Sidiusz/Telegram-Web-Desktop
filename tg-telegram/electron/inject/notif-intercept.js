@@ -88,9 +88,97 @@
 
     ensureBackgroundSupport();
 
-    // Telegram-уведомления (Notification / SW) проглатываем без действий: системное
-    // уведомление не показываем, звук и попапы делает перехватчик в UI_JS.
-    function notify() {}
+    // ── Мост в наш попап ────────────────────────────────────────────────────
+    // Состояние TG больше НЕ достать через webpack (TG webZ переехал на Vite —
+    // глобальный __webpack_require__ исчез), поэтому старый опрос getGlobal мёртв.
+    // Источник уведомлений теперь — сам Telegram: на новое сообщение он зовёт
+    // notify-пайплайн, который мы перехватываем (см. ниже) и отдаём в UI_JS, где
+    // показывается наш угловой попап и играется звук.
+    window.__tgNotifQueue = window.__tgNotifQueue || [];
+    function pushTgNotif(p) {
+        try {
+            if (!p) return;
+            if (typeof window.__tgOnNotif === 'function') window.__tgOnNotif(p);
+            else window.__tgNotifQueue.push(p);
+        } catch (e) {}
+    }
+    // peerId для попапа (для кнопок «Открыть»/«Прочитано»). В опциях window.Notification
+    // chatId нет (только tag=messageId) — ищем строку чат-листа по совпадению заголовка.
+    function lookupPeerByTitle(title) {
+        try {
+            var t = String(title == null ? '' : title).trim();
+            if (!t) return '';
+            var rows = document.querySelectorAll('.chat-list .ListItem.Chat');
+            for (var i = 0; i < rows.length; i++) {
+                var h = rows[i].querySelector('.info .title h3, .title h3');
+                if (h && (h.textContent || '').trim() === t) {
+                    var av = rows[i].querySelector('.Avatar[data-peer-id]');
+                    if (av) return av.getAttribute('data-peer-id') || '';
+                }
+            }
+        } catch (e) {}
+        return '';
+    }
+
+    // Telegram-уведомления (window.Notification) больше не «проглатываем молча» —
+    // маршрутизируем в наш попап. Срабатывает, когда окно В фокусе (TG в этом случае
+    // идёт по пути new Notification, а не через service worker, см. перехват SW ниже).
+    function notify(title, opts) {
+        opts = opts || {};
+        pushTgNotif({
+            title: String(title == null ? '' : title).trim(),
+            body: opts.body || '',
+            icon: opts.icon || '',
+            chatId: lookupPeerByTitle(title),
+            messageId: opts.tag || '',
+            isSilent: !!opts.silent,
+        });
+    }
+
+    // Перехват service worker: в фоне (окно не в фокусе) TG не зовёт new Notification,
+    // а постит контроллеру SW {type:'showMessageNotification', payload:{title,body,icon,
+    // chatId,messageId,isSilent}} — и нативное уведомление рисует сам SW. Перехватываем
+    // этот postMessage: payload (с chatId!) уходит в наш попап, форвард в SW глушим,
+    // чтобы не было дубля-нативки.
+    function hookServiceWorker() {
+        try {
+            var sw = navigator.serviceWorker;
+            if (!sw || typeof sw.addEventListener !== 'function') return;
+            function wrap(ctrl) {
+                if (!ctrl || ctrl.__tgNotifHooked) return;
+                try {
+                    var orig = ctrl.postMessage;
+                    ctrl.postMessage = function(msg) {
+                        try {
+                            if (msg && msg.type === 'showMessageNotification' && msg.payload) {
+                                var p = msg.payload;
+                                pushTgNotif({
+                                    title: p.title || '',
+                                    body: p.body || '',
+                                    icon: p.icon || '',
+                                    chatId: p.chatId != null ? String(p.chatId) : '',
+                                    messageId: p.messageId != null ? String(p.messageId) : '',
+                                    isSilent: !!p.isSilent,
+                                });
+                                return;   // не форвардим в SW → нет дубля нативного уведомления
+                            }
+                        } catch (e) {}
+                        return orig.apply(ctrl, arguments);
+                    };
+                    ctrl.__tgNotifHooked = true;
+                } catch (e) {}
+            }
+            wrap(sw.controller);
+            sw.addEventListener('controllerchange', function() { wrap(sw.controller); });
+            // Контроллер появляется не сразу (SW активируется после загрузки) — добиваем.
+            var tries = 0;
+            var iv = setInterval(function() {
+                if (sw.controller) wrap(sw.controller);
+                if (++tries > 60) clearInterval(iv);
+            }, 1000);
+        } catch (e) {}
+    }
+    hookServiceWorker();
 
     function makeInstance(title, opts) {
         var instance = Object.create(NotificationShim.prototype || Object.prototype);

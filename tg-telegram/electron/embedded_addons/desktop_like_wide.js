@@ -102,6 +102,15 @@
             .MiddleHeader .HeaderActions { position: relative !important; z-index: 200 !important; }
             .MiddleHeader .HeaderActions, .MiddleHeader .HeaderActions .Button { pointer-events: all !important; }
 
+            /* Новый дизайн TG сделал шапку чата плавающим «островом» (max-width:728px,
+               авто-поля, скруглённая) — с лево-выровненными сообщениями она висит по
+               центру и не тянется. Возвращаем прежний вид: на всю ширину колонки. */
+            #MiddleColumn .MiddleHeader {
+                max-width: 100% !important; width: 100% !important;
+                margin-left: 0 !important; margin-right: 0 !important;
+                border-radius: 0 !important;
+            }
+
             @keyframes _tgAvIn_ { from { opacity: 0; transform: scale(0.6); } to { opacity: 1; transform: scale(1); } }
             .custom-message-avatar {
                 position: absolute; left: 4px; bottom: 0; width: 36px; height: 36px;
@@ -185,7 +194,9 @@
     function injectAvatars() {
         var list = document.querySelector('#MiddleColumn .MessageList');
         if (!list) return;
-        if (!isPrivate()) {
+        // Не личка определяем по ХЭШУ (стабильно), а НЕ по .no-avatars: класс мигает
+        // при перерисовках, и на таком кадре аватарки вайпались целиком и «пропадали».
+        if (!hashIsPrivate()) {
             list.querySelectorAll('.custom-message-avatar').forEach(function (el) { el.remove(); });
             return;
         }
@@ -195,20 +206,15 @@
             list.querySelectorAll('.Message.own:not(.last-in-group) .custom-message-avatar').forEach(function (el) { el.remove(); });
             list.querySelectorAll('.Message.own.last-in-group').forEach(function (msg) { _inject(msg, mySrc); });
         }
-        // Аватар собеседника ставим ТОЛЬКО когда шапка уже показывает текущий чат
-        // (peer из шапки == peer из хэша). При переключении шапка отстаёт — раньше
-        // ждали тайм-аут (_switchGrace ~2 тика ≈ 2с, отсюда «долго грузятся»), теперь
-        // проверяем совпадение → мгновенно, когда готово, и без чужого аватара.
+        // Аватар собеседника ставим, когда шапка показывает текущий чат (peer шапки ==
+        // peer хэша). При НЕсовпадении НИЧЕГО не удаляем — иначе на миг рассинхрона
+        // шапки аватарки пропадают; просто ждём следующего прохода.
         var hashPeer = (location.hash || '').match(/#(-?\d+)/);
         hashPeer = hashPeer ? hashPeer[1] : '';
         if (peerId && peerId === hashPeer) {
             var partnerSrc = findPartnerSrc(peerId);
             list.querySelectorAll('.Message:not(.own):not(.last-in-group) .custom-message-avatar').forEach(function (el) { el.remove(); });
-            list.querySelectorAll('.Message:not(.own).last-in-group').forEach(function (msg) {
-                if (partnerSrc) _inject(msg, partnerSrc);
-            });
-        } else {
-            list.querySelectorAll('.Message:not(.own) .custom-message-avatar').forEach(function (el) { el.remove(); });
+            if (partnerSrc) list.querySelectorAll('.Message:not(.own).last-in-group').forEach(function (msg) { _inject(msg, partnerSrc); });
         }
     }
     // Личка определяется по ХЭШУ синхронно (#положительный peerId), без ожидания
