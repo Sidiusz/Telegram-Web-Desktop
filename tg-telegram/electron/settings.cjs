@@ -8,18 +8,19 @@ const DEFAULTS = {
     minimize_to_tray: false,
     popup_notifications: true,
     background_notifications_enabled: false,
-    // ── Наши уведомления ────────────────────────────────────────────────────
-    notif_sound: true,           // играть фирменный звук
-    notif_duration: 6,           // сек — сколько живёт карточка
-    notif_volume: 0.8,           // 0..1 — громкость звука
-    // Категории КОМУ показывать/озвучивать (по типу чата)
-    notif_cat_private: true,     // личные сообщения (peerId > 0)
-    notif_cat_group: true,       // группы (peerId < 0)
-    notif_cat_channel: true,     // каналы (peerId < 0)
-    notif_hide_text: false,      // скрывать текст входящих → «Вам пришло новое сообщение»
-    notif_hide_sender: false,    // скрывать имя/аватар → «Анонимный пользователь»
+
+
+    notif_sound: true,
+    notif_duration: 6,чка
+    notif_volume: 0.8,
+
+    notif_cat_private: true, 
+    notif_cat_group: true,   
+    notif_cat_channel: true, 
+    notif_hide_text: false,  
+    notif_hide_sender: false,
     webnotif_hint_shown: false,
-    whatsnew_shown_version: null,   // версия, для которой уже показали «Что нового»
+    whatsnew_shown_version: null,
     devtools_enabled: false,
     update_check_interval: '1h',
     skipped_version: null,

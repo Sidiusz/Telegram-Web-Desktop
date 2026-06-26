@@ -19,7 +19,7 @@ function init(getMainWindow) {
         const height = Math.max(1, Math.min(Math.round(h) || 1, wa.height - MARGIN * 2));
         _win.setBounds({
             x: wa.x + wa.width - WIDTH - MARGIN,
-            y: wa.y + wa.height - height - MARGIN,   // привязка к нижнему-правому углу
+            y: wa.y + wa.height - height - MARGIN,   // anchor to bottom-right corner
             width: WIDTH,
             height,
         });
@@ -37,15 +37,14 @@ function init(getMainWindow) {
             win.focus();
             openChat(win, String(peerId));
         } else if (action === 'read') {
-            // Помечаем прочитанным в фоне — окно не показываем/не фокусируем.
+            // Mark as read in the background — don't show or focus the window.
             markRead(win, String(peerId));
         }
     });
 }
 
-// Рабочая область дисплея, на котором сейчас ГЛАВНОЕ окно (а не всегда основной
-// монитор) — иначе при переносе окна на второй (меньший) монитор уведомления
-// позиционируются по основному и «уезжают» за край. Фолбэк — основной дисплей.
+// Work area of the display the MAIN window is currently on (not always the primary
+// monitor) — otherwise dragging the window to a second, smaller display sends notifications off the edge. Falls back to the primary display.
 function primaryWorkArea() {
     try {
         const win = _getMainWindow && _getMainWindow();
@@ -60,16 +59,15 @@ function primaryWorkArea() {
     return d.workArea || { x: 0, y: 0, width: d.size.width, height: d.size.height };
 }
 
-// Открывает чат по peerId. Делегируем в рендерер: location.hash в уже
-// загруженной SPA Telegram Web A НЕ работает (роутер игнорирует изменение hash),
-// поэтому рендерер кликает по строке чат-листа (см. window.__tgNotif в UI_JS).
+// Opens a chat by peerId. Delegated to the renderer: location.hash does nothing in
+// the already-loaded Telegram Web A SPA (the router ignores hash changes), so the renderer clicks the chat-list row instead (see window.__tgNotif in UI_JS).
 function openChat(win, peerId) {
     const js = 'window.__tgNotif && window.__tgNotif.openChat(' + JSON.stringify(String(peerId)) + ');';
     win.webContents.executeJavaScript(js).catch(() => {});
 }
 
-// Помечает чат прочитанным через нативное меню TG (ПКМ по строке → «Отметить как
-// прочитанное»). Окно не показываем, чат не открывается, текущий чат не меняется.
+// Marks a chat read via TG's native context menu (right-click row → "Mark as read").
+// Window stays hidden, the chat doesn't open, the active chat doesn't change.
 function markRead(win, peerId) {
     const js = 'window.__tgNotif && window.__tgNotif.markRead(' + JSON.stringify(String(peerId)) + ');';
     win.webContents.executeJavaScript(js).catch(() => {});
@@ -179,10 +177,10 @@ function buildHtml() {
         const bar=document.createElement('div'); bar.className='bar'; prog.appendChild(bar);
 
         el.appendChild(top); el.appendChild(acts); el.appendChild(prog);
-        stack.appendChild(el); // новые снизу, у самого угла
+        stack.appendChild(el); // new ones go at the bottom, right at the corner
 
         cards.set(id,{el:el,timer:null});
-        while(cards.size>MAX_CARDS)dropOldest();   // лимит пула — старое уходит
+        while(cards.size>MAX_CARDS)dropOldest();   // pool limit — oldest gets dropped
         requestAnimationFrame(function(){
             el.classList.add('show'); reportSize();
             bar.style.animation='barshrink '+dur+'ms linear forwards';
@@ -191,7 +189,7 @@ function buildHtml() {
 
         el.onmouseenter=function(){const c=cards.get(id);if(c)clearTimeout(c.timer);bar.style.animationPlayState='paused';};
         el.onmouseleave=function(){
-            bar.style.animation='none'; void bar.offsetWidth;          // рестарт анимации
+            bar.style.animation='none'; void bar.offsetWidth;          // restart animation
             bar.style.animation='barshrink '+dur+'ms linear forwards';
             arm(id,dur);
         };

@@ -76,10 +76,8 @@ function createWindow(state) {
     });
 
     const injectAll = () => {
-        // getScripts() читает inject/* заново на каждый инжект (в деве) — правки
-        // подхватываются перезагрузкой окна, без перезапуска. NOTIF_INTERCEPT_JS первым
-        // и в общем наборе: иначе после self-reload TG (service worker) перехват
-        // Notification терялся (watchdog его не возвращал).
+        // getScripts() re-reads inject/* on every call in dev, so edits land on a reload.
+        // NOTIF_INTERCEPT_JS must come first: otherwise, after TG's own self-reload (service worker), the Notification intercept got lost and the watchdog never restored it.
         const { NOTIF_INTERCEPT_JS, EXTERNAL_JS, AUDIO_JS, UI_JS } = getScripts();
         const allScripts = [NOTIF_INTERCEPT_JS, EXTERNAL_JS, AUDIO_JS, UI_JS, ...loadAddonScripts()];
         for (const script of allScripts) {
@@ -93,11 +91,8 @@ function createWindow(state) {
         injectAll();
     });
 
-    // Watchdog: when TG refreshes itself ("Reload" in the chat list) it reloads the
-    // page via a service worker — sometimes did-finish-load fires on an intermediate
-    // load and we miss injecting the final SW page, so our menu/panels vanish until
-    // restart. We check the window.__tgUIInjected marker and re-inject everything if
-    // it's gone (a fresh document without our injection).
+    // Watchdog: TG's self-reload ("Reload" in the chat list) goes through a service
+    // worker, and did-finish-load can fire on an intermediate load and miss the final page — checks the __tgUIInjected marker and re-injects everything if it's gone.
     setInterval(() => {
         if (mainWindow.isDestroyed()) return;
         mainWindow.webContents.executeJavaScript('!!window.__tgUIInjected', true)
@@ -134,7 +129,6 @@ function createWindow(state) {
             }));
         }
 
-        // Editable field
         if (params.isEditable) {
             if (menu.items.length) menu.append(new MenuItem({ type: 'separator' }));
             menu.append(new MenuItem({ role: 'undo',   label: 'Отменить',  enabled: ef.canUndo }));
@@ -147,7 +141,6 @@ function createWindow(state) {
             menu.append(new MenuItem({ type: 'separator' }));
             menu.append(new MenuItem({ role: 'selectAll', label: 'Выделить всё', enabled: ef.canSelectAll }));
         } else if (params.selectionText && params.selectionText.trim()) {
-            // Selected (read-only) text
             if (menu.items.length) menu.append(new MenuItem({ type: 'separator' }));
             menu.append(new MenuItem({ role: 'copy', label: 'Копировать' }));
         }
@@ -191,8 +184,7 @@ function createWindow(state) {
         state.downloads.push({ id, url: item.getURL(), filename, path: savePath, status: 'downloading' });
         saveDownloads(state.downloads);
 
-        // origName = name as in the message (before " (1)"); the renderer matches mid
-        // by it. filename = the actual saved name (for the manager).
+        // origName is the name as sent in the message (renderer matches mid by it); filename is the actual saved name (for the manager).
         mainWindow.webContents.send('download-event', { type: 'start', id, filename, origName: originalFilename });
 
         item.on('updated', (event, dlState) => {
@@ -225,9 +217,8 @@ function createWindow(state) {
         });
     });
 
-    // Жёстко держим версию /A (webZ). /K — отдельное приложение (webK), под которое
-    // наши инъекции/аддоны не рассчитаны. Любую навигацию/редирект на /k отменяем и
-    // возвращаемся на /A.
+    // Hard-locks the /A (webZ) version. /K is a separate app (webK) our injections/
+    // addons aren't built for — any navigation/redirect to /k is cancelled and sent back to /A.
     const isKVersionUrl = (url) => {
         try {
             const u = new URL(url);
@@ -236,16 +227,14 @@ function createWindow(state) {
     };
     const forceAVersion = (e) => {
         if (e) e.preventDefault();
-        // Уже на /A не перезагружаем без нужды — грузим только если реально ушли бы на /K.
+        // Doesn't reload needlessly while already on /A — only loads when we'd actually land on /K.
         mainWindow.loadURL(TG_URL);
     };
 
     mainWindow.webContents.on('will-navigate', (e, url) => {
         if (isKVersionUrl(url)) { forceAVersion(e); return; }
-        // blob: всегда означает «скачать» (просмотрщик отдаёт <a download href=blob:>).
-        // Само скачивание делает рендерер (bootstrap.js → save_blob: fetch'ит blob и шлёт
-        // байты в main). Здесь просто не пускаем навигацию: webContents.downloadURL(blob:)
-        // в Electron не работает и роняет Windows-диалог «выберите приложение для blob».
+        // blob: always means "download" (the viewer gives an <a download href=blob:>). The
+        // renderer does the actual download (bootstrap.js → save_blob). Just block navigation here — webContents.downloadURL(blob:) doesn't work in Electron and pops a "choose an app" dialog.
         if (url.startsWith('blob:')) e.preventDefault();
     });
     mainWindow.webContents.on('will-redirect', (e, url) => {
@@ -253,25 +242,16 @@ function createWindow(state) {
     });
     mainWindow.webContents.setWindowOpenHandler(({ url }) => {
         if (isKVersionUrl(url)) { mainWindow.loadURL(TG_URL); return { action: 'deny' }; }
-        return { action: 'deny' };   // blob/внешнее в новом окне не открываем (см. external.js)
+        return { action: 'deny' };   // don't open blob/external links in a new window (see external.js)
     });
     mainWindow.on('ready-to-show', () => mainWindow.show());
-    // Бейдж таскбара пропадает при холодном старте (кнопки ещё нет в момент
-    // setBadgeCount) и при восстановлении из трея — переприменяем на show/restore.
+    // Taskbar badge vanishes on cold start (button doesn't exist yet when setBadgeCount runs) and on restore from tray — reapplied on show/restore.
     const reapplyBadge = () => { try { app.setBadgeCount(state.lastNotificationCount || 0); } catch (e) {} };
     mainWindow.on('show', reapplyBadge);
     mainWindow.on('restore', reapplyBadge);
 
-    // Колоночная вёрстка TG webZ кэширует ширину окна (через ResizeObserver) и НЕ
-    // обновляет её, если окно сменило монитор без «настоящего» изменения размера или
-    // если страница перезагрузилась в момент перехода — средняя колонка остаётся
-    // узкой (TG считает окно ~1220px вместо реальных 1600 → чат сжат). Синтетический
-    // resize-event не помогает (ResizeObserver слушает реальный размер). Дёргаем
-    // рамку на 1px и возвращаем — это поднимает ResizeObserver, и TG пересчитывает
-    // колонки под фактическую ширину. Делаем после загрузки и при смене дисплея.
-    // Дёргаем масштаб на 0.001 и возвращаем: меняется CSS-ширина вьюпорта (innerWidth)
-    // → поднимается ResizeObserver TG → пересчёт колонок. Через zoom, а не размер окна,
-    // чтобы не разворачивать развёрнутое окно и без видимого скачка.
+    // TG's column layout caches window width via ResizeObserver and won't recompute after a
+    // monitor change or mid-transition reload (chat stays narrow); a synthetic resize event doesn't trigger it, but nudging zoom by 0.001 does (no visible jump, unlike resizing the frame).
     let _nudging = false;
     function nudgeRelayout() {
         if (_nudging || mainWindow.isDestroyed()) return;

@@ -1,56 +1,42 @@
 // @name Desktop-like - Wide Messages
-// @version 2.1.0
-// @description Сообщения по левому краю + аватарки + широкие пузыри и нижняя панель.
+// @version 2.3.0
+// @description Left-aligned messages + avatars, plus wide bubbles and footer panel.
 // @group desktop_like_chat
 
 (function () {
-    // Применяется ТОЛЬКО в личных чатах (.MessageList.no-avatars). В группах TG сам
-    // рисует аватарки — не трогаем. НЕ меняем width/max-width у .messages-container:
-    // это ломает виртуализацию (пропадают сообщения при быстром скролле). Прижим — margin.
+    // Only for private chats (.MessageList.no-avatars); don't touch .messages-container width/max-width (breaks list virtualization).
     function ensureStyles() {
         if (document.getElementById('addon-desktop-wide') || !document.head) return;
         var s = document.createElement('style');
         s.id = 'addon-desktop-wide';
         s.textContent = `
-            /* Широкая область сообщений + прижим к левому краю — во ВСЕХ чатах
-               (и личные, и группы/каналы), иначе в группах остаётся центрованный
-               контейнер 728px с большим отступом слева. Ширину МЕНЯЕМ на загрузке
-               (в аддоне), а не вживую — тогда виртуализация считает её с самого начала. */
+            /* Widen + left-align in ALL chats, set at load (not live) so virtualization counts it from the start; ~3.5rem gutter clears the scrollbar. */
             #MiddleColumn .MessageList .messages-container {
-                /* Оставляем правый «жёлоб» ~3.5rem: широкие пузыри не доходят до
-                   скроллбара, чтобы сердечко/«переслать» справа не залезали на него. */
                 max-width: calc(100% - 3.5rem) !important; width: calc(100% - 3.5rem) !important;
                 margin-left: 0 !important; margin-right: auto !important;
                 box-sizing: border-box !important;
             }
 
-            /* Широкая нижняя панель ввода на ВСЮ ширину (width, не только max-width —
-               иначе панель сжимается по содержимому). Не виртуализирована, менять безопасно. */
+            /* Use width, not just max-width, or the footer shrinks to fit content; not virtualized, safe to resize. */
             #MiddleColumn .middle-column-footer { width: 100% !important; max-width: 100% !important; }
             #MiddleColumn .middle-column-footer .composer-wrapper { width: 100% !important; max-width: 100% !important; margin-left: 0 !important; }
 
-            /* Широкие пузыри — под ширину поля ввода. */
+            /* Widen bubbles to match the input field width. */
             #MiddleColumn .Message { --max-width: 70rem !important; }
 
-            /* Свои сообщения — на левую сторону. ТОЛЬКО в личных 1-на-1: класс
-               .tgdl-private вешает JS по hash (#положительный). В каналах/группах
-               (no-avatars, но #-100...) НЕ трогаем — иначе остаётся пустой отступ
-               слева под несуществующую аватарку и кривой хвостик пузыря. */
+            /* Flip own messages left only in private 1:1 chats (.tgdl-private); skip channels/groups (broken tail otherwise). */
             #MiddleColumn.tgdl-private .MessageList.no-avatars .Message { padding-left: 44px !important; position: relative !important; }
             #MiddleColumn.tgdl-private .MessageList.no-avatars .Message.own { justify-content: flex-start !important; }
             #MiddleColumn.tgdl-private .MessageList.no-avatars .Message.own .message-content-wrapper { margin-left: 0 !important; margin-right: auto !important; }
             #MiddleColumn.tgdl-private .MessageList.no-avatars .Message.own > .Avatar { display: none !important; }
 
-            /* Хвостик своих — слева (зеркалим), нижние углы как у входящего. */
+            /* Mirror own message's tail to the left; bottom corners match incoming style. */
             #MiddleColumn.tgdl-private .MessageList.no-avatars .Message.own .svg-appendix { transform: scaleX(-1) !important; left: -8px !important; right: auto !important; }
             #MiddleColumn.tgdl-private .MessageList.no-avatars .Message.own.last-in-group .message-content {
                 border-bottom-left-radius: 0 !important;
                 border-bottom-right-radius: var(--border-radius-messages) !important;
             }
-            /* Скругляем ФОРМУ пузыря (.message-content) под хвостик СЛЕВА — и свои, и
-               входящие. Саму маску картинки (.media-inner/.full-media) скругляем ТОЛЬКО
-               для ОДИНОЧНЫХ медиа (:not(.is-album)). В альбомах (видео+картинка и т.п.)
-               кадры скруглять НЕ нужно — у альбома скруглены лишь внешние углы (нативно). */
+            /* Round bubble corners for the left-tail layout; skip media masks on albums (they only round their outer corners natively). */
             #MiddleColumn.tgdl-private .MessageList.no-avatars .Message.own .message-content.media,
             #MiddleColumn.tgdl-private .MessageList.no-avatars .Message:not(.own) .message-content.media,
             #MiddleColumn.tgdl-private .MessageList.no-avatars .Message.own:not(.is-album) .message-content.media .media-inner,
@@ -68,21 +54,24 @@
                 border-bottom-left-radius: 0 !important;
             }
 
-            /* Каналы/сообщества (no-avatars, не личка) — НЕ трогаем: рендерим нативно
-               (хвостик и родные углы). Прежнее «выравнивание» (скрытие appendix +
-               принудительные углы) убрано — оно ломало вид на постах с «Комментариями»
-               (хвостик проступал на ховере). */
+            /* Groups (avatars shown): flip only OWN messages left with own avatar, like private; others stay native. */
+            #MiddleColumn .MessageList:not(.no-avatars) .Message.own { padding-left: 44px !important; position: relative !important; justify-content: flex-start !important; }
+            #MiddleColumn .MessageList:not(.no-avatars) .Message.own .message-content-wrapper { margin-left: 0 !important; margin-right: auto !important; }
+            #MiddleColumn .MessageList:not(.no-avatars) .Message.own > .Avatar { display: none !important; }
+            #MiddleColumn .MessageList:not(.no-avatars) .Message.own .svg-appendix { transform: scaleX(-1) !important; left: -8px !important; right: auto !important; }
+            #MiddleColumn .MessageList:not(.no-avatars) .Message.own.last-in-group .message-content {
+                border-bottom-left-radius: 0 !important;
+                border-bottom-right-radius: var(--border-radius-messages) !important;
+            }
+            #MiddleColumn .MessageList:not(.no-avatars) .Message.own .message-action-buttons-container { left: auto !important; right: -3rem !important; }
 
-            /* Выделение: свои пузыри сдвигаем вправо как входящие, аватарки — тоже вправо,
-               чтобы кружок-галочка встал ровно на их прежнее место (а не поверх). */
+            /* Channels stay native (untouched) — forced alignment broke "Comments" posts on hover. */
+
+            /* Selection mode: shift own bubbles/avatars right so the checkmark lands in its normal slot. */
             #MiddleColumn.tgdl-private .MessageList.no-avatars.select-mode-active .Message.own .message-content-wrapper { transform: translateX(40px) !important; }
             #MiddleColumn.tgdl-private .MessageList.no-avatars.select-mode-active .custom-message-avatar { left: 44px !important; }
 
-            /* Быстрая реакция (сердечко):
-               • на постах с кнопкой «переслать» (.has-action-button) — убираем совсем:
-                 там она конфликтует с меню действий (переслать/к оригиналу), реакции
-                 ставятся через ПКМ/меню реакций;
-               • на обычных сообщениях — просто за правым краем пузыря (не на timestamp). */
+            /* Quick-reaction heart: hidden if it'd conflict with the forward/action menu, else placed past the bubble's right edge. */
             #MiddleColumn .MessageList.no-avatars .Message .message-content.has-action-button .quick-reaction,
             #MiddleColumn .MessageList:not(.no-avatars) .Message:not(.own) .message-content.has-action-button .quick-reaction {
                 display: none !important;
@@ -91,24 +80,20 @@
             #MiddleColumn .MessageList:not(.no-avatars) .Message:not(.own) .message-content:not(.has-action-button) .quick-reaction {
                 left: auto !important; right: -1.9rem !important; bottom: -1px !important; top: auto !important; transform: none !important;
             }
-            /* У своих (личка, перевёрнуты влево) кнопки «переслать» — справа. */
+            /* Own messages (flipped left in private chats) get their forward button on the right. */
             #MiddleColumn.tgdl-private .MessageList.no-avatars .Message.own .message-action-buttons-container { left: auto !important; right: -3rem !important; }
 
-            /* Длинные цитаты (reply) не уезжают за экран. */
             #MiddleColumn .Message .EmbeddedMessage .message-text .embedded-text-wrapper { white-space: pre-wrap !important; }
 
-            /* Кнопки шапки не блокируются после закрытия правой колонки. */
+            /* Keep header buttons clickable after closing the right-side column. */
             .MiddleHeader .header-tools,
             .MiddleHeader .HeaderActions { position: relative !important; z-index: 200 !important; }
             .MiddleHeader .HeaderActions, .MiddleHeader .HeaderActions .Button { pointer-events: all !important; }
 
-            /* Новый дизайн TG сделал шапку чата плавающим «островом» (max-width:728px,
-               авто-поля, скруглённая) — с лево-выровненными сообщениями она висит по
-               центру и не тянется. Возвращаем прежний вид: на всю ширину колонки. */
+            /* New TG header island — stretch wide with equal side gaps (centered); keep TG's rounding + top gap. */
             #MiddleColumn .MiddleHeader {
-                max-width: 100% !important; width: 100% !important;
-                margin-left: 0 !important; margin-right: 0 !important;
-                border-radius: 0 !important;
+                width: calc(100% - 7rem) !important; max-width: calc(100% - 7rem) !important;
+                margin-left: auto !important; margin-right: auto !important;
             }
 
             @keyframes _tgAvIn_ { from { opacity: 0; transform: scale(0.6); } to { opacity: 1; transform: scale(1); } }
@@ -121,7 +106,6 @@
         document.head.appendChild(s);
     }
 
-    // ── Аватарки: кэш по peerId с TTL ─────────────────────────────────────────
     var PARTNER_TTL = 90, MY_TTL = 30;
     var _partnerCache = {};
     var _myAvatar = { src: '', age: 0 };
@@ -133,9 +117,7 @@
     function isPrivate() {
         var list = document.querySelector('#MiddleColumn .MessageList');
         if (!list || !list.classList.contains('no-avatars')) return false;
-        // Каналы/группы/новостные ленты тоже no-avatars. data-peer-id у них «обрезан»
-        // до положительного, а в URL-hash сохраняется минус (#-100...). Кастомные
-        // аватарки рисуем ТОЛЬКО в личных 1-на-1 (положительный peer в hash).
+        // Channels/groups are also no-avatars, but keep a positive data-peer-id while the hash keeps the minus (#-100...).
         var m = (location.hash || '').match(/#(-?\d+)/);
         return !!m && m[1].charAt(0) !== '-';
     }
@@ -191,24 +173,29 @@
             if (img && img.src !== src) img.src = src;
         }
     }
+    // Group = negative peer with avatars shown (channels are no-avatars → skip).
+    function isGroupChat() {
+        if (hashIsPrivate() || !/#-\d/.test(location.hash || '')) return false;
+        var list = document.querySelector('#MiddleColumn .MessageList');
+        return !!list && !list.classList.contains('no-avatars');
+    }
     function injectAvatars() {
         var list = document.querySelector('#MiddleColumn .MessageList');
         if (!list) return;
-        // Не личка определяем по ХЭШУ (стабильно), а НЕ по .no-avatars: класс мигает
-        // при перерисовках, и на таком кадре аватарки вайпались целиком и «пропадали».
-        if (!hashIsPrivate()) {
+        // Hash-gated, not .no-avatars — that class flickers on re-renders and wiped avatars mid-frame.
+        var priv = hashIsPrivate();
+        if (!priv && !isGroupChat()) {
             list.querySelectorAll('.custom-message-avatar').forEach(function (el) { el.remove(); });
             return;
         }
-        var peerId = getCurrentPeerId();
         var mySrc = findMySrc();
         if (mySrc) {
             list.querySelectorAll('.Message.own:not(.last-in-group) .custom-message-avatar').forEach(function (el) { el.remove(); });
             list.querySelectorAll('.Message.own.last-in-group').forEach(function (msg) { _inject(msg, mySrc); });
         }
-        // Аватар собеседника ставим, когда шапка показывает текущий чат (peer шапки ==
-        // peer хэша). При НЕсовпадении НИЧЕГО не удаляем — иначе на миг рассинхрона
-        // шапки аватарки пропадают; просто ждём следующего прохода.
+        if (!priv) return;   // groups: only own avatar; others render native
+        // Only set the partner avatar once header and hash agree on the peer; otherwise wait for the next pass to avoid flicker.
+        var peerId = getCurrentPeerId();
         var hashPeer = (location.hash || '').match(/#(-?\d+)/);
         hashPeer = hashPeer ? hashPeer[1] : '';
         if (peerId && peerId === hashPeer) {
@@ -217,8 +204,7 @@
             if (partnerSrc) list.querySelectorAll('.Message:not(.own).last-in-group').forEach(function (msg) { _inject(msg, partnerSrc); });
         }
     }
-    // Личка определяется по ХЭШУ синхронно (#положительный peerId), без ожидания
-    // .no-avatars в DOM — иначе класс встаёт с задержкой и пузыри прыгают.
+    // Synchronous hash check — waiting on .no-avatars in the DOM lags and makes bubbles jump.
     function hashIsPrivate() {
         var m = (location.hash || '').match(/#(-?\d+)/);
         return !!m && m[1].charAt(0) !== '-';
@@ -231,9 +217,7 @@
     setInterval(tick, 1000);
     tick();
 
-    // После смены чата аватарки появлялись только на следующем тике (≈1с) — гоняем
-    // короткую серию частых проходов (~2с по 150мс), чтобы поймать момент, когда
-    // шапка/аватар нового чата домонтировались, и поставить аватарки сразу.
+    // After a chat switch, run a short 150ms burst (~2s) so avatars appear before the next 1s tick.
     var _avT = null;
     function avatarBurst() {
         if (_avT) clearInterval(_avT);
@@ -245,11 +229,7 @@
     }
     function onNav() { applyPrivateClass(); injectAvatars(); avatarBurst(); }
 
-    // Pre-warm: TG webZ переключает чат через history.pushState (событие hashchange
-    // НЕ стреляет), а .tgdl-private навешивался только тиком в 1с — отсюда «прыжок»
-    // (свои пузыри мигают справа до применения аддона). Перехватываем pushState/
-    // replaceState/popstate/hashchange и ставим класс СИНХРОННО по хэшу — он уже на
-    // #MiddleColumn к моменту, когда React монтирует новый список → без вспышки.
+    // TG switches chats via pushState (no hashchange) — patch it to apply .tgdl-private synchronously and avoid a flash of own bubbles.
     ['pushState', 'replaceState'].forEach(function (k) {
         var orig = history[k];
         if (typeof orig !== 'function') return;
