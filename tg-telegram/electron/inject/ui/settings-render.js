@@ -109,10 +109,39 @@ function buildSettingsSections(c, s){
 
 // ── #3: общие нативные строители виджетов (клонируем живые виджеты TG) ───────
 function _saveOne(patch){ INV('get_settings').then(function(s){ INV('save_settings',{settings:Object.assign({},s||{},patch)}); }).catch(function(){}); }
-function _genCardCls(){ var any=[].slice.call(document.querySelectorAll('#Settings [class]')).find(function(e){ return /RE8jeQLf/.test((e.className||'').toString()); }); return any?any.className:(_tgWidgetTpl.cardCls||null); }
-function _genHeaderTpl(){ return document.querySelector('#Settings .vcGtwOtR') || _tgWidgetTpl.header; }
+// Заголовок секции — предыдущий сосед карточки, если он сам не карточка.
+function _cardHeader(card){
+    var h=card.previousElementSibling;
+    if(!h||h.hasAttribute('data-tggen')||h.hasAttribute('data-tgabout')) return null;
+    if(h.querySelector&&h.querySelector('.ListItem')) return null;
+    return h;
+}
+// Ищет ЖИВОЙ шаблон секции по СТИЛЮ (фон+радиус, держит .ListItem), а не по
+// фикс-хэшу: после Vite-редизайна RE8jeQLf/vcGtwOtR мертвы (прозрачны). Первый
+// элемент с фоном — самый внутренний держатель карточек (обёртки прозрачны).
+function _findNativeCardTpl(){
+    var st=document.getElementById('Settings'); if(!st) return null;
+    var els=st.querySelectorAll('div[class]');
+    for(var i=0;i<els.length;i++){
+        var e=els[i];
+        if(e.hasAttribute('data-tggen')||e.hasAttribute('data-tgabout')) continue;
+        if(!e.querySelector('.ListItem')) continue;
+        var cs=getComputedStyle(e);
+        if(cs.backgroundColor==='rgba(0, 0, 0, 0)'||parseFloat(cs.borderTopLeftRadius)<=0) continue;
+        return { cardCls:e.className, header:_cardHeader(e) };
+    }
+    return null;
+}
+function _genCardCls(){ var t=_findNativeCardTpl(); return (t&&t.cardCls)||_tgWidgetTpl.cardCls||null; }
+function _genHeaderTpl(){ var t=_findNativeCardTpl(); return (t&&t.header)||_tgWidgetTpl.header; }
 function _genCard(cardCls){ var d=document.createElement('div'); d.className=cardCls; return d; }
-function _genHeader(headerTpl,text){ var h=headerTpl.cloneNode(false); h.textContent=text; return h; }
+// Заголовок секции: клон живого нативного, либо свой div со стилем нативного
+// (на главном экране настроек нативных заголовков нет — клонировать нечего).
+function _genHeader(headerTpl,text){
+    var h=headerTpl?headerTpl.cloneNode(false):document.createElement('div');
+    if(!headerTpl) h.style.cssText='font-size:14px;font-weight:500;line-height:20px;color:rgb(170,170,170);padding:0 16px;';
+    h.textContent=text; return h;
+}
 function _genToggle(labelText, checked, onChange){
     var n=_tgWidgetTpl.toggle.cloneNode(true);
     n.classList.remove('withSubLabel');
@@ -124,6 +153,17 @@ function _genToggle(labelText, checked, onChange){
     return n;
 }
 function _genInput(labelText, value, numeric, onCommit){
+    // Нет образца .input-group (не открывали страниц с полями ввода) — строим своё
+    // поле в стиле нативного, чтобы секция «Загрузки» не зависела от клона.
+    if(!_tgWidgetTpl.input){
+        var w=document.createElement('div'); w.className='input-group touched';
+        var fi=document.createElement('input'); fi.type=numeric?'number':'text'; fi.value=value==null?'':value;
+        fi.className='form-control'; fi.style.cssText='width:100%;background:rgba(0,0,0,.18);border:1px solid var(--color-borders-input,#3a3a3a);border-radius:10px;color:#fff;padding:10px 12px;font-size:15px;outline:none;';
+        var lb=document.createElement('label'); lb.textContent=labelText; lb.style.cssText='display:block;font-size:13px;color:rgb(170,170,170);margin:0 0 6px 2px;';
+        var c2=function(){ onCommit(fi.value); }; fi.addEventListener('change',c2); fi.addEventListener('blur',c2);
+        w.appendChild(lb); w.appendChild(fi);
+        return { node:w, input:fi };
+    }
     var n=_tgWidgetTpl.input.cloneNode(true);
     var inp=n.querySelector('input');
     if(inp){
@@ -169,8 +209,8 @@ function injectGeneralSettings(){
     if(!sc) return;
     if(sc.querySelector('[data-tggen]')) return;                 // уже вставлено
     var headerTpl=_genHeaderTpl(), cardCls=_genCardCls();
-    if(!headerTpl || !cardCls) return;
-    if(!_tgWidgetTpl.toggle || !_tgWidgetTpl.input || !_tgWidgetTpl.button) return;   // ждём образцы
+    if(!cardCls) return;
+    if(!_tgWidgetTpl.toggle) return;   // тумблер обязателен (клон нативного); поле/кнопка — со своими фолбэками
     var liEl=document.querySelector('#Settings .ListItem.narrow'); if(!liEl) return;
 
     var marker=document.createElement('div'); marker.setAttribute('data-tggen','1'); marker.style.display='none';
@@ -230,7 +270,7 @@ function injectAboutSection(){
     if(scroll.querySelector('[data-tgabout]')) return;
     var headerTpl=_genHeaderTpl(), cardCls=_genCardCls();
     var liEl=document.querySelector('#Settings .ListItem.narrow');
-    if(!headerTpl || !cardCls || !liEl) return;
+    if(!cardCls || !liEl) return;
     // Контейнер — где лежат карточки КАТЕГОРИЙ (а не профиль/ChatExtra вверху).
     // Берём по нашей строке «Дополнения» (или «Активные сеансы»): её карточка-список
     // лежит в нужном контейнере; добавляем нашу секцию в его КОНЕЦ → низ + отступы.

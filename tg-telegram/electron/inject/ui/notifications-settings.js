@@ -9,7 +9,7 @@
 var _tgWidgetTpl = { toggle:null, input:null, button:null, header:null, cardCls:null };
 (function restoreWidgetTpl(){
     try{
-        var raw=localStorage.getItem('_tgWidgetTpl');
+        var raw=localStorage.getItem('_tgWidgetTpl2');
         if(!raw)return;
         var o=JSON.parse(raw), box=document.createElement('div');
         ['toggle','input','button','header'].forEach(function(k){
@@ -24,14 +24,18 @@ function captureWidgetTpl(){
     if(!_tgWidgetTpl.toggle){ var t=st.querySelector('label.Checkbox'); if(t){ _tgWidgetTpl.toggle=t.cloneNode(true); changed=true; } }
     if(!_tgWidgetTpl.input){ var inp=st.querySelector('.input-group'); if(inp){ _tgWidgetTpl.input=inp.cloneNode(true); changed=true; } }
     if(!_tgWidgetTpl.button){ var b=st.querySelector('.Button:not(.default):not(.translucent)'); if(b){ _tgWidgetTpl.button=b.cloneNode(true); changed=true; } }
-    if(!_tgWidgetTpl.header){ var h=st.querySelector('.vcGtwOtR'); if(h){ _tgWidgetTpl.header=h.cloneNode(false); changed=true; } }
-    if(!_tgWidgetTpl.cardCls){ var c=[].slice.call(st.querySelectorAll('[class]')).find(function(e){ return /RE8jeQLf/.test((e.className||'').toString()); }); if(c){ _tgWidgetTpl.cardCls=c.className; changed=true; } }
+    // Карточку и заголовок ловим по стилю (хэши меняются между сборками); перезаписываем при расхождении.
+    var nt=_findNativeCardTpl();
+    if(nt){
+        if(nt.cardCls && _tgWidgetTpl.cardCls!==nt.cardCls){ _tgWidgetTpl.cardCls=nt.cardCls; changed=true; }
+        if(nt.header && !_tgWidgetTpl.header){ _tgWidgetTpl.header=nt.header.cloneNode(false); changed=true; }
+    }
     if(changed){
         try{
             var o={};
             ['toggle','input','button','header'].forEach(function(k){ if(_tgWidgetTpl[k]) o[k]=_tgWidgetTpl[k].outerHTML; });
             if(_tgWidgetTpl.cardCls) o.cardCls=_tgWidgetTpl.cardCls;
-            localStorage.setItem('_tgWidgetTpl', JSON.stringify(o));
+            localStorage.setItem('_tgWidgetTpl2', JSON.stringify(o));
         }catch(e){}
     }
 }
