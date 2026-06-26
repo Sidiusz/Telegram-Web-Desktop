@@ -215,10 +215,9 @@ function injectGeneralSettings(){
 
     var marker=document.createElement('div'); marker.setAttribute('data-tggen','1'); marker.style.display='none';
     sc.appendChild(marker);                                      // синхронный «замок» от двойного инжекта
-    // marginTop задаём явно: первый наш заголовок («Загрузки») идёт после скрытого
-    // маркера-замка, а не после карточки — нативное правило «card + header» не
-    // срабатывает и отступ становится 0 (заголовок липнет к предыдущему пункту).
-    function addSection(title, cardEl){ var h=_genHeader(headerTpl,title); h.setAttribute('data-tggen','1'); h.style.marginTop='1rem'; cardEl.setAttribute('data-tggen','1'); sc.appendChild(h); sc.appendChild(cardEl); }
+    // Отступы задаём явно (16px над заголовком, 8px над карточкой) — нативные
+    // CSS-правила «header+card» на наших узлах не срабатывают, ритм был бы рваный.
+    function addSection(title, cardEl){ var h=_genHeader(headerTpl,title); h.setAttribute('data-tggen','1'); h.style.marginTop='16px'; cardEl.setAttribute('data-tggen','1'); cardEl.style.marginTop='8px'; sc.appendChild(h); sc.appendChild(cardEl); }
 
     INV('get_settings').then(function(s){
         s=s||{};
@@ -271,16 +270,21 @@ function injectAboutSection(){
     var headerTpl=_genHeaderTpl(), cardCls=_genCardCls();
     var liEl=document.querySelector('#Settings .ListItem.narrow');
     if(!cardCls || !liEl) return;
-    // Контейнер — где лежат карточки КАТЕГОРИЙ (а не профиль/ChatExtra вверху).
-    // Берём по нашей строке «Дополнения» (или «Активные сеансы»): её карточка-список
-    // лежит в нужном контейнере; добавляем нашу секцию в его КОНЕЦ → низ + отступы.
-    var anchor=document.querySelector('#_tgst_ad_')||document.querySelector('#Settings .icon-active-sessions');
-    var anchorCard=anchor&&anchor.closest('.RE8jeQLf');
-    var container=anchorCard?anchorCard.parentElement:scroll;
+    // Контейнер — обёртка ПОСЛЕДНЕЙ нативной карточки категорий: даёт нашей секции
+    // тот же боковой инсет (16px) и ширину, и кладёт её в самый низ экрана.
+    var sample=[].slice.call(scroll.querySelectorAll('div')).filter(function(e){
+        return !e.closest('[data-tgabout]') && e.querySelector('.ListItem') &&
+               getComputedStyle(e).borderTopLeftRadius!=='0px' && e.getBoundingClientRect().width>50;
+    });
+    var lastNative=sample[sample.length-1];
+    var container=lastNative?lastNative.parentElement:scroll;
     if(container.querySelector('[data-tgabout]')) return;
 
     var h=_genHeader(headerTpl, T('about_app')); h.setAttribute('data-tgabout','1');
     var card=_genCard(cardCls); card.setAttribute('data-tgabout','1');
+    h.style.marginTop='16px'; card.style.marginTop='8px'; card.style.marginBottom='16px';
+    // Фолбэк (не нашли обёртку с инсетом): задаём боковые поля вручную.
+    if(container===scroll){ h.style.marginLeft=h.style.marginRight='16px'; card.style.marginLeft=card.style.marginRight='16px'; }
     var verRow=_genRow(liEl,'info',T('st_version'),'—',null);
     var idRow=_genRow(liEl,'info',T('st_your_id'),'—',null);
     var unRow=_genRow(liEl,'mention',T('st_username'),'—',null);
