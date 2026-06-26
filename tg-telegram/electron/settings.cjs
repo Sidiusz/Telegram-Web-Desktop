@@ -11,7 +11,7 @@ const DEFAULTS = {
 
 
     notif_sound: true,
-    notif_duration: 6,чка
+    notif_duration: 6,
     notif_volume: 0.8,
 
     notif_cat_private: true, 
