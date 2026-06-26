@@ -12,7 +12,7 @@ const { checkForUpdate, downloadUpdate, scheduleChecks, init: initUpdater, fetch
 
 const TG_URL = 'https://web.telegram.org/a/';
 
-// Windows-style dedup: «file.jpg» → «file (1).jpg», как в Проводнике.
+// Windows-style dedup: turns "file.jpg" into "file (1).jpg", like Explorer.
 function uniquePath(p) {
     if (!fs.existsSync(p)) return p;
     const dir = path.dirname(p);
@@ -25,8 +25,7 @@ function uniquePath(p) {
     return p;
 }
 
-// Язык интерфейса (приходит из рендерера, см. report_lang). Для строк уведомлений
-// в main-процессе, где T() из inject недоступен.
+// UI language (set via report_lang) — used for notification strings in main, where the renderer's T() isn't available.
 let _uiLang = 'ru';
 const NTR = {
     open:          { ru: 'Открыть',                   en: 'Open' },
@@ -86,8 +85,7 @@ function registerIpc(getWindow) {
     ipcMain.handle('save_settings', (e, { settings }) => {
         saveSettings(settings);
         state.settings = loadSettings();
-        // Интервал автопроверки обновлений мог измениться — перепланируем сразу,
-        // чтобы смена применялась без перезапуска.
+        // Auto-check interval may have changed — reschedule now so it applies without a restart.
         scheduleChecks();
     });
 
@@ -110,10 +108,8 @@ function registerIpc(getWindow) {
         return result.filePaths[0];
     });
 
-    // Check existence on the fly: the filesystem is the source of truth, since a
-    // saved status:'completed' may be stale (file deleted from Explorer). When
-    // exists===false the renderer does not restore the "downloaded" checkmark
-    // (see restoreForChat).
+    // Check existence on the fly — the filesystem is the source of truth, since a saved
+    // 'completed' status can be stale; exists===false tells the renderer to skip the checkmark (see restoreForChat).
     ipcMain.handle('get_downloads', () => state.downloads.map(d => ({
         ...d,
         exists: d.path ? fs.existsSync(d.path) : false,
@@ -129,8 +125,7 @@ function registerIpc(getWindow) {
         }
     });
 
-    // File gone: drop the binding for this mid so "downloaded" is not restored
-    // after restart.
+    // File gone: drop the binding for this mid so "downloaded" isn't restored after restart.
     ipcMain.handle('forget_download', (e, { mid }) => {
         if (mid == null) return;
         let changed = false;
@@ -159,9 +154,8 @@ function registerIpc(getWindow) {
     ipcMain.handle('clear_cache', async () => {
         const win = getWindow();
         if (win) {
-            // НЕ трогаем 'serviceworkers': их снос ломает TG после перезагрузки
-            // («Service Worker is disabled», отваливается стриминг медиа и часть
-            // функционала, аватарки-blob перестают грузиться). Чистим только кэши.
+            // Don't touch 'serviceworkers' — removing it breaks TG after reload ("Service
+            // Worker is disabled", media streaming and blob avatars stop loading). Clear caches only.
             await win.webContents.session.clearStorageData({
                 storages: ['appcache', 'filesystem', 'shadercache', 'cachestorage'],
             });
@@ -170,7 +164,6 @@ function registerIpc(getWindow) {
         }
     });
 
-    // ── Updates ───────────────────────────────────────────────────────────────
     ipcMain.handle('fetch_changelog', async () => {
         try {
             const text = await fetchChangelog();
@@ -230,7 +223,6 @@ function registerIpc(getWindow) {
             console.error('Download update error:', e);
         }
     });
-    // ──────────────────────────────────────────────────────────────────────────
 
     ipcMain.handle('get_addons', () => getAddons());
 
@@ -260,11 +252,8 @@ function registerIpc(getWindow) {
         menu.popup({ window: win });
     });
 
-    // Сохранение blob-файла из медиа-просмотрщика. TG отдаёт «Загрузку» как
-    // <a download href="blob:...">, но webContents.downloadURL(blob:) в Electron не
-    // работает (blob живёт в рендерере, недоступен из main) — клик «пытался открыть
-    // blob» вместо скачивания. Поэтому рендерер сам fetch'ит blob → dataURL и шлёт
-    // байты сюда, а main пишет файл в папку сохранений и регистрирует в менеджере.
+    // webContents.downloadURL(blob:) doesn't work in Electron (blob lives in the renderer,
+    // unreachable from main), so the renderer fetches it to a dataURL and sends the bytes here to be written and registered.
     ipcMain.handle('save_blob', (e, { dataUrl, filename }) => {
         try {
             const m = /^data:([^;,]*)?(;base64)?,([\s\S]*)$/.exec(dataUrl || '');
@@ -284,8 +273,7 @@ function registerIpc(getWindow) {
 
             const win = getWindow();
             if (win && !win.isDestroyed()) {
-                // Тот же контракт, что и will-download: start → done, чтобы карточка
-                // появилась в менеджере загрузок.
+                // Same contract as will-download (start → done) so the card shows up in the download manager.
                 win.webContents.send('download-event', { type: 'start', id, filename: savedName, origName: safeName });
                 win.webContents.send('download-event', { type: 'done', id, status: 'completed' });
             }
@@ -319,9 +307,8 @@ function registerIpc(getWindow) {
     ipcMain.handle('set_notifications_count', (e, { count }) => {
         const n = parseInt(count) || 0;
         state.lastNotificationCount = n;
-        // Нативный бейдж Electron на иконке таскбара (сам рисуется, без «attention»-
-        // подсветки кнопки). При холодном старте/восстановлении из трея кнопки ещё нет —
-        // переприменяем в window.cjs на событие show/restore.
+        // Electron's native taskbar badge (self-drawn, no "attention" flash). On cold start/
+        // restore-from-tray the button doesn't exist yet — window.cjs reapplies it on show/restore.
         try { app.setBadgeCount(n); } catch (e) {}
         updateTrayBadge(n);
     });

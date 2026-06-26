@@ -210,9 +210,7 @@ function compareVersions(a, b) {
     return 0;
 }
 
-// All releases as a list [{version, notes}] (newest first). For the block
-// "Changelog" screen. Throws when the API is down → caller falls back to the
-// flat changelog.txt.
+// All releases as a list. For the block "Changelog" screen. Throws when the API is down
 async function fetchReleases() {
     const arr = await fetchJSON(RELEASES_LIST_URL, { 'Accept': 'application/vnd.github+json' });
     if (!Array.isArray(arr)) return [];

@@ -1,16 +1,13 @@
 'use strict';
 // Scripts injected into the Telegram page. Sources live in ./inject/* as plain
-// .js (no string escaping) — here they are only read and assembled. UI_JS is
-// stitched together from the logical fragments in ./inject/ui/* into a single
-// IIFE (shared scope — functions/state see each other).
+// .js (read & assembled here, no string escaping); UI_JS stitches the ./inject/ui/* fragments into one IIFE with shared scope.
 const fs = require('fs');
 const path = require('path');
 const { app } = require('electron');
 
 const rd = p => fs.readFileSync(path.join(__dirname, 'inject', p), 'utf8');
 
-// Only the executable "tail" (bootstrap) order matters — it runs last; function
-// declarations are hoisted, so their relative order is not critical.
+// Only bootstrap's position matters (it runs last) — function declarations are hoisted, so the rest can be in any order.
 const UI_PARTS = [
     'core.js',                   // INV, CSS, ensureCSS/toast
     'lang.js',                   // i18n: curLang / T
@@ -25,9 +22,8 @@ const UI_PARTS = [
 ];
 
 function buildUiJs() {
-    // Guard marker: a re-run of UI_JS in the same document is a no-op (no duplicate
-    // intervals/handlers). The watchdog in main reads the same marker: if it's gone
-    // (TG reloaded/swapped the page during its own update) — re-inject everything.
+    // Guard marker: re-running UI_JS in the same document is a no-op (no duplicate
+    // intervals/handlers). The main-process watchdog checks the same marker and re-injects everything if it's gone (TG swapped the page during its own update).
     const parts = UI_PARTS.map(name => rd(path.join('ui', name)));
     return '(function(){\nif(window.__tgUIInjected)return;window.__tgUIInjected=true;\n' + parts.join('\n') + '\n})();';
 }
@@ -41,10 +37,8 @@ function readAll() {
     };
 }
 
-// В проде (asar — файлы инъекций неизменны) читаем и собираем один раз. В деве
-// (распакованный запуск) читаем заново на каждый инжект, чтобы правки inject/*
-// подхватывались простой перезагрузкой окна, без перезапуска приложения — как уже
-// делает loadAddonScripts() для аддонов.
+// In prod (asar — injection files are immutable) read and assemble once. In dev
+// (unpacked), read fresh on every inject so edits to inject/* are picked up by a window reload alone, no app restart — same as loadAddonScripts() does for addons.
 let _cache = null;
 function getScripts() {
     if (app.isPackaged) {
