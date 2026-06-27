@@ -95,9 +95,19 @@
     // notify-пайплайн, который мы перехватываем (см. ниже) и отдаём в UI_JS, где
     // показывается наш угловой попап и играется звук.
     window.__tgNotifQueue = window.__tgNotifQueue || [];
+    // Дедуп: одно сообщение TG нередко приходит ОБОИМИ путями (window.Notification
+    // в фокусе + postMessage в service worker) → был дубль попапа и звука. Гасим
+    // повтор с тем же ключом (messageId+заголовок+текст) в окне 4с. Разные сообщения
+    // имеют разный messageId → разный ключ, их не глушим.
+    window.__tgNotifSeen = window.__tgNotifSeen || {};
     function pushTgNotif(p) {
         try {
             if (!p) return;
+            var now = Date.now(), seen = window.__tgNotifSeen;
+            var key = (p.messageId || '') + '|' + (p.title || '') + '|' + (p.body || '');
+            if (seen[key] && now - seen[key] < 4000) return;
+            seen[key] = now;
+            for (var k in seen) { if (now - seen[k] > 8000) delete seen[k]; }
             if (typeof window.__tgOnNotif === 'function') window.__tgOnNotif(p);
             else window.__tgNotifQueue.push(p);
         } catch (e) {}
