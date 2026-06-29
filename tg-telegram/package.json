@@ -1,7 +1,7 @@
 {
   "name": "com.sidiusz.telegram-web",
   "productName": "Telegram Web Desktop", 
-  "version": "1.2.2",
+  "version": "1.2.3",
   "description": "",
   "type": "commonjs",
   "main": "main.cjs",
