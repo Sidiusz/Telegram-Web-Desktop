@@ -78,7 +78,10 @@ waitBody(()=>{
         return count;
     }
     function domUnreadCount(){
-        var count=0;
+        // Дедуп по peerId: при переключении папок TG держит в DOM несколько .chat-list
+        // (Transition-слайды), один чат попадает в строку дважды → бейдж двоился.
+        // Считаем каждый peerId один раз (max непрочитанных по его строкам).
+        var byPid={}, count=0;
         document.querySelectorAll('.chat-list .ListItem.Chat').forEach(function(it){
             if(it.className.indexOf('chat-item-archive')>=0)return;
             if(it.querySelector('.icon-muted'))return;
@@ -87,18 +90,26 @@ waitBody(()=>{
                 var n=parseInt((b.textContent||'').replace(/[^0-9]/g,''),10);
                 if(!isNaN(n)&&n>max)max=n;
             });
-            count+=max;                                  // сумма непрочитанных сообщений
+            if(max<=0)return;
+            var av=it.querySelector('.Avatar[data-peer-id]');
+            var pid=av?av.getAttribute('data-peer-id'):null;
+            if(pid){ if(max>(byPid[pid]||0))byPid[pid]=max; }
+            else count+=max;                             // без peerId — дедуп невозможен
         });
+        for(var k in byPid)count+=byPid[k];              // сумма непрочитанных (раз на чат)
         return count;
     }
-    let _lastBadgeCount_=-1, _pendingDrop=null;
+    let _lastBadgeCount_=-1, _pendingChange=null;
     setInterval(()=>{
         var nat=nativeUnreadCount(), fromState=(nat!==null);
         var count = fromState ? nat : domUnreadCount();
-        if(count===_lastBadgeCount_){ _pendingDrop=null; return; }
-        // Стейт точный → применяем сразу. DOM-снижение подтверждаем один тик.
-        if(!fromState && _lastBadgeCount_>=0 && count<_lastBadgeCount_ && _pendingDrop!==count){ _pendingDrop=count; return; }
-        _pendingDrop=null;
+        if(count===_lastBadgeCount_){ _pendingChange=null; return; }
+        // Стейт (getGlobal) точный → применяем сразу. DOM-фолбэк мерцает при
+        // перерисовке чат-листа (иконки .icon-muted на кадр пропадают → мьюченные
+        // чаты влетают в счёт → всплеск 99+). Любое изменение подтверждаем одним
+        // повтором: разовый кадр-выброс не доживает до второго тика и не показывается.
+        if(!fromState && _lastBadgeCount_>=0 && _pendingChange!==count){ _pendingChange=count; return; }
+        _pendingChange=null;
         _lastBadgeCount_=count;
         INV('set_notifications_count',{count}).catch(()=>{});
         INV('set_tray_image',{dataURL:count>0?makeTrayPng(count):null}).catch(()=>{});
