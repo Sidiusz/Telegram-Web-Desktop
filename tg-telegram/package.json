@@ -15,6 +15,14 @@
     "files": [
       "**/*",
       "!.cdp.mjs"
+    ],
+    "protocols": [
+      {
+        "name": "Telegram URL",
+        "schemes": [
+          "tg"
+        ]
+      }
     ]
   },
   "dependencies": {

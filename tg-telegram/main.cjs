@@ -1,5 +1,6 @@
 'use strict';
 const { app, Menu } = require('electron');
+const path = require('path');
 
 app.commandLine.appendSwitch('autoplay-policy', 'no-user-gesture-required');
 app.commandLine.appendSwitch('disable-renderer-backgrounding');
@@ -13,19 +14,50 @@ const { createWindow, getWindow } = require('./electron/window.cjs');
 const { createTray } = require('./electron/tray.cjs');
 const { initState, getState, registerIpc } = require('./electron/ipc.cjs');
 
-app.setAsDefaultProtocolClient('tg');
+// Register as tg:// handler (replaces the official app). When packaged the plain
+// call points the registry at our exe. Unpackaged (electron .), Windows would
+// otherwise register bare electron.exe with no app path → tg:// links launch an
+// empty Electron. Pass execPath + resolved app dir so dev runs work too.
+if (app.isPackaged) {
+    app.setAsDefaultProtocolClient('tg');
+} else {
+    app.setAsDefaultProtocolClient('tg', process.execPath, [path.resolve(process.argv[1])]);
+}
 
 function handleTgUrl(tgUrl) {
     const win = getWindow();
     if (!win) return;
     win.show();
     win.focus();
-    const internalUrl = 'https://web.telegram.org/a/#?tgaddr=' + encodeURIComponent(tgUrl);
+    // webZ reads tgaddr from the hash only at app startup. loadURL to a URL that
+    // differs only by hash is a same-document nav (no reload) → the effect never
+    // re-runs and the link is ignored. A unique query param forces a full load.
+    const internalUrl = 'https://web.telegram.org/a/?_tgdl=' + Date.now()
+        + '#?tgaddr=' + encodeURIComponent(tgUrl);
     win.webContents.loadURL(internalUrl);
 }
 
+// t.me/<...> https links → tg:// so webZ resolves them via the same deep-link path.
+function normalizeToTg(url) {
+    if (!url) return null;
+    if (url.startsWith('tg://')) return url;
+    var m = /^https?:\/\/(?:t\.me|telegram\.me|telegram\.dog)\/(.+)$/i.exec(url);
+    if (!m) return null;
+    var rest = m[1];
+    if (rest.charAt(0) === '+' || /^joinchat\//i.test(rest)) {
+        return 'tg://join?invite=' + encodeURIComponent(rest.replace(/^joinchat\//i, '').replace(/^\+/, ''));
+    }
+    var parts = rest.split(/[?#]/)[0].split('/');
+    var domain = parts[0];
+    if (!domain) return null;
+    var tg = 'tg://resolve?domain=' + encodeURIComponent(domain);
+    if (parts[1] && /^\d+$/.test(parts[1])) tg += '&post=' + parts[1];
+    return tg;
+}
+
 function getTgUrlFromArgs(argv) {
-    return argv.find(arg => arg.startsWith('tg://')) || null;
+    var raw = argv.find(arg => arg.startsWith('tg://') || /^https?:\/\/(t\.me|telegram\.me|telegram\.dog)\//i.test(arg));
+    return normalizeToTg(raw);
 }
 
 const gotLock = app.requestSingleInstanceLock();
