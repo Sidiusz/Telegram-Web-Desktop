@@ -17,7 +17,8 @@
 
             /* Footer input panel at full width (not virtualized, safe to resize). */
             #MiddleColumn .middle-column-footer { width: 100% !important; max-width: 100% !important; }
-            #MiddleColumn .middle-column-footer .composer-wrapper { width: 100% !important; max-width: 100% !important; margin-left: 0 !important; }
+            /* New TG Composer is a flex row (input + send/mic button). Flex the wrapper, don't force width:100% — that pushed the send button onto a second row. */
+            #MiddleColumn .middle-column-footer .composer-wrapper { flex: 1 1 auto !important; width: auto !important; max-width: none !important; min-width: 0 !important; margin-left: 0 !important; }
 
             /* New TG header is a centered island — left-align it like the messages; keep TG's rounding + top gap. */
             #MiddleColumn .MiddleHeader { margin-left: 0 !important; margin-right: auto !important; }
@@ -200,7 +201,48 @@
         var mc = document.getElementById('MiddleColumn');
         if (mc) mc.classList.toggle('tgdl-private', hashIsPrivate());
     }
-    function tick() { ensureStyles(); applyPrivateClass(); injectAvatars(); }
+
+    // Real displayed bottom-LEFT corner color of the media (object-fit aware).
+    function _blCornerColor(img) {
+        try {
+            var nw = img.naturalWidth, nh = img.naturalHeight;
+            var r = img.getBoundingClientRect(), dw = r.width, dh = r.height;
+            if (!nw || !nh || !dw || !dh) return null;
+            var fit = getComputedStyle(img).objectFit;
+            var sc = fit === 'contain' ? Math.min(dw / nw, dh / nh) : Math.max(dw / nw, dh / nh);
+            var sw = dw / sc, sh = dh / sc, sx = (nw - sw) / 2, sy = (nh - sh) / 2;
+            var px = Math.min(nw - 1, Math.max(0, Math.round(sx)));
+            var py = Math.min(nh - 1, Math.max(0, Math.round(sy + sh) - 1));
+            var c = document.createElement('canvas'); c.width = 1; c.height = 1;
+            var x = c.getContext('2d'); x.drawImage(img, px, py, 1, 1, 0, 0, 1, 1);
+            var d = x.getImageData(0, 0, 1, 1).data;
+            return 'rgb(' + d[0] + ',' + d[1] + ',' + d[2] + ')';
+        } catch (e) { return null; }
+    }
+    // Own tail is flipped left, but TG sampled its color from the bubble's bottom-RIGHT
+    // pixel. Recolor from the true bottom-LEFT corner (matches black letterbox bars, not
+    // the gray photo). Cached per src; reasserted when TG re-renders the appendix.
+    function recolorAppendixes() {
+        document.querySelectorAll('#MiddleColumn .Message.own .message-content.media[data-has-custom-appendix]').forEach(function (mc) {
+            var app = mc.querySelector('.svg-appendix');
+            var corner = app && app.querySelector('.corner');
+            var img = mc.querySelector('.full-media, .media-inner img');
+            if (!corner || !img) return;
+            if (!/^matrix\(-1[,\s]/.test(getComputedStyle(app).transform)) return; // only mirrored tails
+            var key = img.currentSrc || img.src;
+            if (mc.__tgdlAppSrc !== key) {
+                if (!img.complete || !img.naturalWidth) return;
+                var col = _blCornerColor(img);
+                if (!col) return;
+                corner.style.fill = col;
+                mc.__tgdlAppSrc = key;
+                mc.__tgdlAppColor = corner.style.fill;
+            } else if (mc.__tgdlAppColor && corner.style.fill !== mc.__tgdlAppColor) {
+                corner.style.fill = mc.__tgdlAppColor;
+            }
+        });
+    }
+    function tick() { ensureStyles(); applyPrivateClass(); injectAvatars(); recolorAppendixes(); }
     setInterval(tick, 1000);
     tick();
 
@@ -210,7 +252,7 @@
         if (_avT) clearInterval(_avT);
         var n = 0;
         _avT = setInterval(function () {
-            injectAvatars();
+            injectAvatars(); recolorAppendixes();
             if (++n >= 14) { clearInterval(_avT); _avT = null; }
         }, 150);
     }
