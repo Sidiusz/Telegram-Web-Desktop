@@ -148,6 +148,41 @@ waitBody(()=>{
     document.addEventListener('dragover',attach,true);
     document.addEventListener('drop',detach,true);
     document.addEventListener('dragend',detach,true);
+
+    // Block the drag events themselves over the chat list — TG's drop handlers must not fire there.
+    function overChatList(e){
+        try{
+            var p=e.composedPath?e.composedPath():[];
+            for(var i=0;i<p.length;i++){ var n=p[i]; if(n&&n.nodeType===1&&n.classList&&n.classList.contains('chat-list')) return true; }
+            var t=e.target; return !!(t&&t.closest&&t.closest('.chat-list'));
+        }catch(_){ return false; }
+    }
+    function isFileDrag(e){
+        try{
+            var t=e.dataTransfer&&e.dataTransfer.types;
+            if(!t||!t.length) return true;               // types unavailable on external drags — assume files
+            return [].indexOf.call(t,'Files')>=0;
+        }catch(_){ return true; }
+    }
+    function blockDrag(e){
+        if(!overChatList(e)||!isFileDrag(e)) return;
+        e.stopImmediatePropagation();
+        if(e.type==='drop') e.preventDefault();        // dragover stays non-default so dropping here is forbidden
+    }
+    ['dragenter','dragover','drop'].forEach(function(ty){ document.addEventListener(ty,blockDrag,true); });
+})();
+// ─────────────────────────────────────────────────────────────────────────────
+
+// Kill the pull-down stories reveal: wheel-up at the top of the chat list never reaches TG,
+// so its (broken/phantom) stories strip can't expand and swallow the first scroll-downs.
+(function(){
+    document.addEventListener('wheel',function(e){
+        if(e.deltaY>=0)return;
+        var t=e.target; if(!t||!t.closest)return;
+        var cl=t.closest('.chat-list'); if(!cl||cl.scrollTop>0)return;
+        e.stopImmediatePropagation();
+        e.preventDefault();
+    },true);
 })();
 // ─────────────────────────────────────────────────────────────────────────────
 
