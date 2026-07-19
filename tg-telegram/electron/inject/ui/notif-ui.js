@@ -113,7 +113,12 @@ function showDownloadIndicator(data){
         var cls=document.createElement('button'); cls.className='_cnotif_close_'; cls.textContent='✕';
         el.appendChild(av); el.appendChild(body); el.appendChild(cls);
         w.appendChild(el);
-        cls.addEventListener('click',function(e){ e.stopPropagation(); _dlRemoveCard(id); });
+        // ✕ on a live download cancels it in main, not just hides the card.
+        cls.addEventListener('click',function(e){
+            e.stopPropagation();
+            INV('cancel_download',{id:id}).catch(function(){});
+            _dlRemoveCard(id);
+        });
         _dlCards[id]={el:el, av:av, title:title, text:text, span:barInner.querySelector('span'), timer:null};
     } else if(data.type==='progress'){
         var c=_dlCards[id]; if(!c) return;
@@ -124,6 +129,7 @@ function showDownloadIndicator(data){
         if(!_dlCards[id]) showDownloadIndicator({type:'start', id:id, filename:data.filename, origName:data.origName});
         var c2=_dlCards[id]; if(!c2) return;
         var ok=data.status==='completed';
+        var cancelled=data.status==='cancelled';
         if(c2.timer) clearTimeout(c2.timer);
         if(ok){
             c2.text.textContent=T('dl_card_saved')+' · '+T('dl_card_open');
@@ -131,6 +137,9 @@ function showDownloadIndicator(data){
             c2.av.innerHTML='<i class="icon icon-check" style="color:#4caf50;font-size:18px"></i>';
             c2.el.style.cursor='pointer'; c2.el.title=T('dl_card_open');
             c2.el.addEventListener('click',function(){ INV('open_download_file',{id:id}).catch(function(){}); });
+        } else if(cancelled){
+            c2.text.textContent=T('dl_st_cancelled');
+            c2.av.innerHTML='<i class="icon icon-close" style="color:#7e8794;font-size:18px"></i>';
         } else {
             c2.text.textContent=T('dl_card_failed');
             c2.av.innerHTML='<i class="icon icon-close" style="color:#e53935;font-size:18px"></i>';

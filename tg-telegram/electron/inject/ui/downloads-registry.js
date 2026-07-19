@@ -122,9 +122,9 @@ const DL = window.__tgdl = (function(){
         } else if(data.type==='done'){
             const mid = byId[data.id]; if(!mid)return;
             const r = registry[mid]; if(!r)return;
-            r.status = data.status==='completed' ? 'completed' : 'failed';
+            r.status = data.status==='completed' ? 'completed' : (data.status==='cancelled' ? 'cancelled' : 'failed');
             applyToMessage(mid);
-            doneFn[mid] = r.origName || r.filename;   // по имени из сообщения (для перекачки)
+            if(data.status!=='cancelled') doneFn[mid] = r.origName || r.filename;   // cancelled ≠ downloaded
             refreshSaved();   // обновим кэш сохранённых загрузок (для восстановления)
         }
         // нативная панель «Загрузки», если открыта — обновим список

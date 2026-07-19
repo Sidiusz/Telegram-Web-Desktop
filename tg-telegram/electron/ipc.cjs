@@ -3,7 +3,7 @@ const { ipcMain, shell, dialog, app, Menu, MenuItem } = require('electron');
 const { pathToFileURL } = require('url');
 const { init: initNotifications, queueNotification } = require('./notification.cjs');
 const { loadSettings, saveSettings } = require('./settings.cjs');
-const { loadDownloads, saveDownloads, deleteDownload } = require('./downloads.cjs');
+const { loadDownloads, saveDownloads, deleteDownload, cancelActive } = require('./downloads.cjs');
 const { getAddons, deleteAddon, openAddonsFolder, toggleAddon } = require('./addons.cjs');
 const path = require('path');
 const fs = require('fs');
@@ -138,6 +138,8 @@ function registerIpc(getWindow) {
     ipcMain.handle('delete_download', (e, { id }) => {
         state.downloads = deleteDownload(state.downloads, id);
     });
+
+    ipcMain.handle('cancel_download', (e, { id }) => ({ ok: cancelActive(id) }));
 
     ipcMain.handle('open_download_folder', (e, { id }) => {
         const item = state.downloads.find(d => d.id === id);
