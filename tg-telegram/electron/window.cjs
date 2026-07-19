@@ -17,7 +17,7 @@ function uniquePath(p) {
 }
 const { getScripts } = require('./scripts.cjs');
 const { loadAddonScripts } = require('./addons.cjs');
-const { saveDownloads } = require('./downloads.cjs');
+const { saveDownloads, trackActive, untrackActive } = require('./downloads.cjs');
 const { loadSettings } = require('./settings.cjs');
 
 const TG_URL = 'https://web.telegram.org/a/';
@@ -183,6 +183,7 @@ function createWindow(state) {
 
         state.downloads.push({ id, url: item.getURL(), filename, path: savePath, status: 'downloading' });
         saveDownloads(state.downloads);
+        trackActive(id, item);
 
         // origName is the name as sent in the message (renderer matches mid by it); filename is the actual saved name (for the manager).
         mainWindow.webContents.send('download-event', { type: 'start', id, filename, origName: originalFilename });
@@ -203,17 +204,17 @@ function createWindow(state) {
         });
 
         item.once('done', (event, dlState) => {
+            untrackActive(id);
+            const status = dlState === 'completed' ? 'completed' : (dlState === 'cancelled' ? 'cancelled' : 'failed');
+            // User-cancelled: drop the partial file.
+            if (status === 'cancelled' && savePath) { try { fs.unlinkSync(savePath); } catch (e) {} }
             const dl = state.downloads.find(d => d.id === id);
             if (dl) {
-                dl.status = dlState === 'completed' ? 'completed' : 'failed';
+                dl.status = status;
                 dl.path = item.getSavePath();
                 saveDownloads(state.downloads);
             }
-            mainWindow.webContents.send('download-event', {
-                type: 'done',
-                id,
-                status: dlState === 'completed' ? 'completed' : 'failed',
-            });
+            mainWindow.webContents.send('download-event', { type: 'done', id, status });
         });
     });
 
