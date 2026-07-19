@@ -265,11 +265,31 @@ const DL = window.__tgdl = (function(){
         if(e.type==='mousedown'){
             const msg = file.closest('[data-message-id]'); if(!msg) return;
             const mid = msg.getAttribute('data-message-id');
+            const cur = registry[mid];
+            if(cur && (cur.status==='pending'||cur.status==='downloading')) return;   // это mousedown отмены, не новый старт
             const t = file.querySelector('.file-title');
             const filename = t ? (t.getAttribute('title')||t.textContent||'').trim() : '';
-            if(filename) expectDownload(mid, filename);
+            if(filename){ expectDownload(mid, filename); _lastStartMark={mid:mid, ts:Date.now()}; }
+            return;
+        }
+        // TG's own X cancels its download before will-download exists — mirror it with a cancelled card.
+        if(e.type==='click' && e.target.closest('.file-icon-container')){
+            const msg = file.closest('[data-message-id]'); if(!msg) return;
+            const mid = msg.getAttribute('data-message-id');
+            const r = registry[mid];
+            if(!r || r.status!=='pending') return;
+            if(_lastStartMark.mid===mid && Date.now()-_lastStartMark.ts<500) return;   // это клик-старт, не отмена
+            r.status='cancelled';
+            applyToMessage(mid);
+            const sid=--_synthCancelId;
+            try{
+                showDownloadIndicator({type:'start', id:sid, filename:r.filename});
+                showDownloadIndicator({type:'done', id:sid, status:'cancelled'});
+            }catch(_){}
         }
     }
+    let _synthCancelId = 0;
+    let _lastStartMark = {mid:null, ts:0};
     ['pointerdown','mousedown','click'].forEach(function(t){ document.addEventListener(t, onFilePointer, true); });
 
     // ПКМ по .File: (1) запоминаем кандидата для матчинга, если из РОДНОГО меню
