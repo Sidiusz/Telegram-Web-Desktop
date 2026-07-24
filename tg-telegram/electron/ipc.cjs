@@ -239,19 +239,33 @@ function registerIpc(getWindow) {
         if (win) win.webContents.reload();
     });
 
-    ipcMain.handle('show_image_context_menu', (e, { srcURL, x, y }) => {
+    ipcMain.handle('show_image_context_menu', (e, { srcURL, x, y, downloadId }) => {
         const win = getWindow();
         if (!win) return;
         const menu = new Menu();
-        menu.append(new MenuItem({
-            label: 'Сохранить изображение',
-            click: () => win.webContents.downloadURL(srcURL),
-        }));
-        menu.append(new MenuItem({
-            label: 'Копировать изображение',
-            click: () => win.webContents.copyImageAt(x, y),
-        }));
-        menu.popup({ window: win });
+        const ru = _uiLang === 'ru';
+        if (srcURL) {
+            menu.append(new MenuItem({
+                label: ru ? 'Сохранить изображение' : 'Save image',
+                click: () => win.webContents.downloadURL(srcURL),
+            }));
+            menu.append(new MenuItem({
+                label: ru ? 'Копировать изображение' : 'Copy image',
+                click: () => win.webContents.copyImageAt(x, y),
+            }));
+        }
+        // "Open folder" for already-downloaded media — same as .File documents.
+        if (downloadId != null) {
+            const item = state.downloads.find(d => d.id === downloadId);
+            if (item && item.path && fs.existsSync(item.path)) {
+                if (menu.items.length) menu.append(new MenuItem({ type: 'separator' }));
+                menu.append(new MenuItem({
+                    label: ru ? 'Открыть папку' : 'Open folder',
+                    click: () => shell.showItemInFolder(item.path),
+                }));
+            }
+        }
+        if (menu.items.length) menu.popup({ window: win });
     });
 
     // webContents.downloadURL(blob:) doesn't work in Electron (blob lives in the renderer,

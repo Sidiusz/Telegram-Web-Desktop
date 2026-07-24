@@ -197,15 +197,20 @@ document.addEventListener('contextmenu', function(e) {
     const img = activeSlide.querySelector(
         'img:not([class*="sticker"]):not(.Avatar__media):not(.a8dMNkh3)'
     );
-    if (!img || !img.src) return;
+    const hasVideo = !!activeSlide.querySelector('video');
+    const dlId = (window.__tgdl && window.__tgdl.viewerDownloadId) ? window.__tgdl.viewerDownloadId() : null;
+    // Меню нужно, если есть картинка (сохранить/копировать) ИЛИ медиа уже скачано
+    // (пункт «Открыть папку» для видео/фото — как в обычных файлах).
+    if ((!img || !img.src) && dlId == null) return;
 
     e.preventDefault();
     e.stopImmediatePropagation();
 
     INV('show_image_context_menu', {
-        srcURL: img.src,
+        srcURL: (img && img.src) ? img.src : '',
         x: e.clientX,
         y: e.clientY,
+        downloadId: dlId,
     }).catch(() => {});
 }, true);
 // ──────────────────────────────────────────────────────────────────────────
@@ -230,6 +235,53 @@ document.addEventListener('click', function(e){
         fr.readAsDataURL(b);
     }).catch(function(){});
 }, true);
+// ──────────────────────────────────────────────────────────────────────────
+
+// ── #4: мгновенная карточка загрузки по клику на кнопку скачивания ──────────
+// TG у видео/медиа сначала тянет файл по MTProto и только потом отдаёт blob в
+// will-download — карточка иначе всплывала бы «после» скачивания. Ловим клик по
+// любой кнопке скачивания (док/аудио/просмотрщик/контекст-меню) и показываем
+// карточку сразу; пришедший позже will-download её «усыновляет» (см. notif-ui).
+(function(){
+    function origNameFor(t){
+        var f=t.closest && t.closest('.File'); if(f){ var ft=f.querySelector('.file-title'); if(ft) return (ft.getAttribute('title')||ft.textContent||'').trim(); }
+        var a=t.closest && t.closest('.Audio'); if(a){ var at=a.querySelector('.title'); if(at) return (at.textContent||'').trim(); }
+        return '';
+    }
+    function curPeer(){
+        var el=document.querySelector('#MiddleColumn .ChatInfo .Avatar[data-peer-id], .MiddleHeader .ChatInfo .Avatar[data-peer-id]');
+        return el?el.getAttribute('data-peer-id'):'';
+    }
+    // Клик — это старт скачивания? Ловим: иконку/кнопку скачивания (действие в
+    // сообщении, кнопка «Загрузка» в просмотрщике по aria-label) И пункт «Скачать»
+    // в контекст-меню (клик по тексту пункта не попадает в саму иконку, поэтому
+    // проверяем весь .MenuItem/кнопку на наличие icon-download).
+    function isDownloadTrigger(t){
+        var el=t.closest('.icon-download,.download-button,[aria-label="Download"],[aria-label="Загрузка"],[title="Download"],[title="Загрузка"],.MenuItem,button');
+        if(!el) return false;
+        if(el.classList&&(el.classList.contains('icon-download')||el.classList.contains('download-button'))) return true;
+        var al=(el.getAttribute&&el.getAttribute('aria-label'))||'', ti=(el.getAttribute&&el.getAttribute('title'))||'';
+        if(/^(download|Загрузка|Скачать)$/i.test(al)||/^(download|Загрузка|Скачать)$/i.test(ti)) return true;
+        return !!(el.querySelector&&el.querySelector('.icon-download'));   // пункт меню/кнопка с иконкой скачивания
+    }
+    document.addEventListener('click', function(e){
+        if(e.button!==undefined && e.button!==0) return;
+        var t=e.target; if(!t||!t.closest) return;
+        if(!isDownloadTrigger(t)) return;
+        // У уже скачанного .File иконку прячем и открываем файл — там своя логика
+        // (downloads-registry), карточку не плодим.
+        if(t.closest('.File._tgdl_done_ok_')) return;
+        if(typeof startImmediateDownloadCard==='function'){
+            try{ startImmediateDownloadCard(origNameFor(t), curPeer()); }catch(_){}
+        }
+    }, true);
+    // Смена чата → пересчитать визуал карточек (в чате / фоновая).
+    var _lastP='';
+    setInterval(function(){
+        var p=curPeer(); if(p===_lastP) return; _lastP=p;
+        if(window.__tgdlReflowCards) try{ window.__tgdlReflowCards(); }catch(_){}
+    }, 500);
+})();
 // ──────────────────────────────────────────────────────────────────────────
 
 // ── Навигация из уведомлений: открыть чат / пометить прочитанным ───────────
