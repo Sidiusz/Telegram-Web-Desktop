@@ -1,1 +1,11 @@
-Fallback
+Исправлено: Более надёжный вызов уведомлений, всё ещё может сломаться с обновлениями TG
+Исправлено: Регистрация протокола tg:// во время установки приложения
+Исправлено: Отступ у сообщения слева с прикреплёнными аудио-файлами при включенных Desktop-like аддонах
+Исправлено: Хвостик у исходящих сообщений с прикреплёнными GIF изображениями
+Добавлено: Визуальное отображение скачанных медиа (пункт в контекстном меню и в шапке при открытии фото\видео)
+___
+Fixed: More reliable notification invocation, may still break with TG updates
+Fixed: Registering the tg:// protocol during app installation
+Fixed: Left indentation on messages with attached audio files when Desktop-like add-ons are enabled
+Fixed: Tail on outgoing messages with attached GIF images
+Added: Visual display of downloaded media (item in the context menu and in the header when opening photos/videos)
