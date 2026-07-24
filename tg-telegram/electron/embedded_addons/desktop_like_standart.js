@@ -82,7 +82,18 @@
             /* Own messages (flipped left in private chats) get their forward button on the right. */
             #MiddleColumn.tgdl-private .MessageList.no-avatars .Message.own .message-action-buttons-container { left: auto !important; right: -3rem !important; }
 
+            /* Stacked audio/docs (document-group) break their content out to the message's
+               left edge, ignoring our 44px avatar gutter → the bubble overlapped the avatar.
+               Shift it back by the gutter so it lines up with the other own bubbles. */
+            #MiddleColumn.tgdl-private .MessageList.no-avatars .Message.own.is-in-document-group .message-content,
+            #MiddleColumn .MessageList:not(.no-avatars) .Message.own.is-in-document-group .message-content {
+                transform: translateX(45px) !important;
+            }
+
             #MiddleColumn .Message .EmbeddedMessage .message-text .embedded-text-wrapper { white-space: pre-wrap !important; }
+
+            /* Our injected tail: TG hides .svg-appendix unless .message-content has .has-appendix. */
+            #MiddleColumn .Message.own .message-content[data-tgdl-appendix] .svg-appendix { display: block !important; }
 
             @keyframes _tgAvIn_ { from { opacity: 0; transform: scale(0.6); } to { opacity: 1; transform: scale(1); } }
             .custom-message-avatar {
@@ -202,10 +213,33 @@
         if (mc) mc.classList.toggle('tgdl-private', hashIsPrivate());
     }
 
+    // TG's buildContentClassName only adds `has-appendix` for a photo, a captioned
+    // bubble or a comment button — a bare GIF/video never gets a tail. Draw TG's own
+    // appendix SVG ourselves on own media bubbles; idempotent, re-applied after rerenders.
+    var APPENDIX_D = 'M6 17H0V0c.193 2.84.876 5.767 2.05 8.782.904 2.325 2.446 4.485 4.625 6.48A1 1 0 016 17z';
+    var APPENDIX_SVG =
+        '<svg width="9" height="20" class="svg-appendix"><defs><filter x="-50%" y="-14.7%" width="200%"'
+        + ' height="141.2%" filterUnits="objectBoundingBox" id="messageAppendix">'
+        + '<feOffset dy="1" in="SourceAlpha" result="shadowOffsetOuter1"/>'
+        + '<feGaussianBlur stdDeviation="1" in="shadowOffsetOuter1" result="shadowBlurOuter1"/>'
+        + '<feColorMatrix values="0 0 0 0 0.0621962482 0 0 0 0 0.138574144 0 0 0 0 0.185037364 0 0 0 0.15 0"'
+        + ' in="shadowBlurOuter1"/></filter></defs><g fill="none" fill-rule="evenodd">'
+        + '<path d="' + APPENDIX_D + '" fill="#000" filter="url(#messageAppendix)"/>'
+        + '<path d="' + APPENDIX_D + '" fill="#EEFFDE" class="corner"/></g></svg>';
+    function ensureOwnMediaAppendix() {
+        document.querySelectorAll('#MiddleColumn .Message.own.last-in-group:not(.is-album) .message-content.media').forEach(function (mc) {
+            if (mc.classList.contains('has-appendix')) return;   // TG drew its own
+            if (mc.querySelector('.svg-appendix')) { mc.setAttribute('data-tgdl-appendix', ''); return; }
+            mc.insertAdjacentHTML('beforeend', APPENDIX_SVG);
+            mc.setAttribute('data-tgdl-appendix', '');
+            mc.__tgdlAppSrc = null;                              // force a recolor pass
+        });
+    }
+
     // Real displayed bottom-LEFT corner color of the media (object-fit aware).
     function _blCornerColor(img) {
         try {
-            var nw = img.naturalWidth, nh = img.naturalHeight;
+            var nw = img.naturalWidth || img.videoWidth, nh = img.naturalHeight || img.videoHeight;
             var r = img.getBoundingClientRect(), dw = r.width, dh = r.height;
             if (!nw || !nh || !dw || !dh) return null;
             var fit = getComputedStyle(img).objectFit;
@@ -223,15 +257,19 @@
     // pixel. Recolor from the true bottom-LEFT corner (matches black letterbox bars, not
     // the gray photo). Cached per src; reasserted when TG re-renders the appendix.
     function recolorAppendixes() {
-        document.querySelectorAll('#MiddleColumn .Message.own .message-content.media[data-has-custom-appendix]').forEach(function (mc) {
+        document.querySelectorAll('#MiddleColumn .Message.own .message-content.media[data-has-custom-appendix],'
+            + '#MiddleColumn .Message.own .message-content.media[data-tgdl-appendix]').forEach(function (mc) {
             var app = mc.querySelector('.svg-appendix');
             var corner = app && app.querySelector('.corner');
             var img = mc.querySelector('.full-media, .media-inner img');
+            var ours = mc.hasAttribute('data-tgdl-appendix');
             if (!corner || !img) return;
-            if (!/^matrix\(-1[,\s]/.test(getComputedStyle(app).transform)) return; // only mirrored tails
+            // Ours is always media-colored; TG's own tail only when mirrored to the left.
+            if (!ours && !/^matrix\(-1[,\s]/.test(getComputedStyle(app).transform)) return;
             var key = img.currentSrc || img.src;
             if (mc.__tgdlAppSrc !== key) {
-                if (!img.complete || !img.naturalWidth) return;
+                var ready = img.tagName === 'VIDEO' ? (img.readyState >= 2 && img.videoWidth) : (img.complete && img.naturalWidth);
+                if (!ready) return;
                 var col = _blCornerColor(img);
                 if (!col) return;
                 corner.style.fill = col;
@@ -242,7 +280,7 @@
             }
         });
     }
-    function tick() { ensureStyles(); applyPrivateClass(); injectAvatars(); recolorAppendixes(); }
+    function tick() { ensureStyles(); applyPrivateClass(); injectAvatars(); ensureOwnMediaAppendix(); recolorAppendixes(); }
     setInterval(tick, 1000);
     tick();
 
@@ -252,7 +290,7 @@
         if (_avT) clearInterval(_avT);
         var n = 0;
         _avT = setInterval(function () {
-            injectAvatars(); recolorAppendixes();
+            injectAvatars(); ensureOwnMediaAppendix(); recolorAppendixes();
             if (++n >= 14) { clearInterval(_avT); _avT = null; }
         }, 150);
     }
