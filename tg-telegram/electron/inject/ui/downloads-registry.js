@@ -99,6 +99,11 @@ const DL = window.__tgdl = (function(){
                     if(!registry[cand] || registry[cand].status!=='completed'){ mid=cand; break; }
                 }
             }
+            if(!mid && _pendingViewerDl.mid && Date.now()-_pendingViewerDl.ts<8000){
+                // Скачали медиа (видео/фото) из просмотрщика — у него нет .File, но mid
+                // мы запомнили при клике по кнопке «Загрузка». Привязываем сюда.
+                mid = _pendingViewerDl.mid; _pendingViewerDl.mid = null;
+            }
             if(!mid){
                 // совсем не наше (инициировано не из чата) — покажется только в модалке
                 mid = '__noid__'+data.id;
@@ -209,6 +214,34 @@ const DL = window.__tgdl = (function(){
     // Переприменяем состояние ко всем сообщениям из реестра (идемпотентно).
     function scanMessages(){
         for(const mid in registry){ applyToMessage(mid); }
+        applyLongExt();
+    }
+
+    // ── Длинные расширения на превью файла ───────────────────────────────
+    // TG вставляет .file-ext только если расширение ≤4 символов (File.tsx),
+    // поэтому у .unitypackage/.blend1 иконка пустая. Рисуем свой лейбл,
+    // подбирая размер шрифта под ширину иконки (54px). Идемпотентно.
+    function extFontSize(len){
+        return Math.max(7, Math.min(16, Math.round(50/(0.52*len))));
+    }
+    function applyLongExt(){
+        document.querySelectorAll('#MiddleColumn .File .file-icon').forEach(function(icon){
+            const mine = icon.querySelector('._tgdl_ext_');
+            if(icon.querySelector('.file-ext:not(._tgdl_ext_)')){ if(mine) mine.remove(); return; }
+            const file = icon.closest('.File'); if(!file) return;
+            const t = file.querySelector('.file-title');
+            const name = t ? (t.getAttribute('title')||t.textContent||'').trim() : '';
+            const m = name.match(/\.([^.\s]{5,})$/);
+            if(!m){ if(mine) mine.remove(); return; }
+            const ext = m[1].toLowerCase();
+            if(mine && mine.textContent===ext) return;
+            const sp = mine || document.createElement('span');
+            sp.className = 'file-ext _tgdl_ext_';
+            sp.setAttribute('dir','auto');
+            sp.textContent = ext;
+            sp.style.setProperty('--tgdl-ext-fs', extFontSize(ext.length)+'px');
+            if(!mine) icon.appendChild(sp);
+        });
     }
     // Файлы могли удалить/переместить из Проводника — проверяем их существование
     // (exists из get_downloads) на каждом свежем запросе, а не верим сохранённому
@@ -300,14 +333,25 @@ const DL = window.__tgdl = (function(){
     document.addEventListener('contextmenu', function(e){
         lastCtx = {id:0, ts:0};                    // сброс: вдруг ПКМ не по скачанному
         const file = e.target.closest && e.target.closest('.File');
-        if(!file)return;
-        const msg = file.closest('[data-message-id]'); if(!msg)return;
-        const mid = msg.getAttribute('data-message-id');
-        const t = file.querySelector('.file-title');
-        const filename = t ? (t.getAttribute('title')||t.textContent||'').trim() : '';
-        if(filename) (pending[filename] = pending[filename] || []).push(mid);
-        if(file.dataset.tgdlDone==='1' && file.dataset.tgdlId){
-            lastCtx = {id:parseInt(file.dataset.tgdlId,10), ts:Date.now()};
+        if(file){
+            const msg = file.closest('[data-message-id]'); if(!msg)return;
+            const mid = msg.getAttribute('data-message-id');
+            const t = file.querySelector('.file-title');
+            const filename = t ? (t.getAttribute('title')||t.textContent||'').trim() : '';
+            if(filename) (pending[filename] = pending[filename] || []).push(mid);
+            if(file.dataset.tgdlDone==='1' && file.dataset.tgdlId){
+                lastCtx = {id:parseInt(file.dataset.tgdlId,10), ts:Date.now()};
+            }
+            return;
+        }
+        // Медиа (видео/фото) — «Открыть папку» в меню сообщения, если оно скачано.
+        const mmsg = e.target.closest && e.target.closest('#MiddleColumn .Message');
+        if(mmsg){
+            const mc = mmsg.querySelector('.message-content');
+            if(mc && /(^| )(media|video)( |$)/.test(mc.className)){
+                const dl = midDownload(mmsg.getAttribute('data-message-id'));
+                if(dl) lastCtx = {id:dl.id, ts:Date.now()};
+            }
         }
     }, true);
 
@@ -334,10 +378,91 @@ const DL = window.__tgdl = (function(){
         else items.appendChild(it);
     }
 
+    // ── Просмотрщик медиа: индикатор «скачано» + «Открыть папку» ──────────
+    // У видео/фото нет .File, поэтому статус привязываем к mid сообщения: находим
+    // его сопоставлением src открытого медиа со src сообщения в списке. По mid
+    // берём завершённую загрузку (registry/savedDl) → рисуем галочку на кнопке
+    // «Загрузка» и значок в углу; запоминаем id для «Открыть папку» из ПКМ-меню.
+    var _pendingViewerDl = {mid:null, ts:0};
+    function viewerMediaMid(){
+        var v = document.getElementById('MediaViewer'); if(!v) return null;
+        var vid = v.querySelector('#media-viewer-video, video');
+        if(vid && vid.src){
+            var d = (vid.src.match(/document(\d+)/)||[])[1];
+            if(d){
+                var vids = document.querySelectorAll('#MiddleColumn .Message video');
+                for(var i=0;i<vids.length;i++){ if((vids[i].src||'').indexOf(d)>=0){ var m=vids[i].closest('[data-message-id]'); if(m) return m.getAttribute('data-message-id'); } }
+            }
+        }
+        var img = v.querySelector('.MediaViewerSlide--active img.full-media, .MediaViewerContent img:not(.thumbnail)');
+        if(img && img.src){
+            var imgs = document.querySelectorAll('#MiddleColumn .Message .media-inner img, #MiddleColumn .Message img.full-media');
+            for(var j=0;j<imgs.length;j++){ if(imgs[j].src===img.src){ var mm=imgs[j].closest('[data-message-id]'); if(mm) return mm.getAttribute('data-message-id'); } }
+        }
+        return null;
+    }
+    // Завершённая загрузка для mid: id из registry, иначе из savedDl (пережившая рестарт).
+    function midDownload(mid){
+        if(!mid || forgotten[mid]) return null;
+        var r = registry[mid];
+        if(r && r.status==='completed' && r.id!=null) return {id:r.id};
+        for(var i=0;i<savedDl.length;i++){
+            var s=savedDl[i];
+            if(s.status==='completed' && String(s.mid)===String(mid) && s.exists!==false) return {id:s.id};
+        }
+        return null;
+    }
+    var _tickBtn='<svg viewBox="0 0 24 24" fill="none"><path d="M5 12l4 4 10-10" stroke="#fff" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/></svg>';
+    function viewerDlBtn(){
+        var acts=document.querySelector('#MediaViewer .MediaViewerActions'); if(!acts) return null;
+        var btns=acts.querySelectorAll('button');
+        for(var i=0;i<btns.length;i++){ if(btns[i].querySelector('.icon-download')) return btns[i]; }
+        return null;
+    }
+    var _viewerDlId=null;   // id завершённой загрузки текущего медиа (для «Открыть папку»)
+    function refreshViewer(){
+        var v=document.getElementById('MediaViewer');
+        if(!v){ _viewerDlId=null; return; }
+        var mid=viewerMediaMid();
+        var dl=mid?midDownload(mid):null;
+        _viewerDlId = dl?dl.id:null;
+        // Галочка на кнопке «Загрузка».
+        var btn=viewerDlBtn();
+        if(btn){
+            var ok=btn.querySelector('._tgdl_vbtn_ok_');
+            if(dl && !ok){ var b=document.createElement('div'); b.className='_tgdl_vbtn_ok_'; b.innerHTML=_tickBtn; btn.appendChild(b); }
+            else if(!dl && ok){ ok.remove(); }
+        }
+        // Значок в углу медиа.
+        var content=v.querySelector('.MediaViewerSlide--active .MediaViewerContent') || v.querySelector('.MediaViewerContent');
+        if(content){
+            if(getComputedStyle(content).position==='static') content.style.position='relative';
+            var corner=content.querySelector('._tgdl_vcorner_');
+            if(dl && !corner){
+                var c=document.createElement('div'); c.className='_tgdl_vcorner_';
+                c.title=T('dl_done'); c.innerHTML=_tickBtn;
+                content.appendChild(c);
+            } else if(!dl && corner){ corner.remove(); }
+        }
+    }
+    setInterval(refreshViewer, 500);
+    // Клик по кнопке «Загрузка» в просмотрщике — запоминаем mid, чтобы привязать
+    // будущий will-download к сообщению (иначе медиа-загрузка уходит в «несвязанное»).
+    document.addEventListener('click', function(e){
+        var t=e.target; if(!t||!t.closest) return;
+        var btn=viewerDlBtn();
+        if(btn && (t===btn || btn.contains(t))){
+            var mid=viewerMediaMid();
+            if(mid) _pendingViewerDl={mid:mid, ts:Date.now()};
+        }
+    }, true);
     window.tgBridge.onDownloadEvent(onEvent);
     refreshSaved();   // подтянуть сохранённые загрузки и восстановить статус в чате
 
-    return { registry, byId, fmtBytes, fmtProgress, expectDownload, refreshSaved };
+    // viewerDownloadId — id завершённой загрузки текущего медиа для «Открыть папку»
+    // в ПКМ-меню просмотрщика (core.js строит меню и берёт id отсюда).
+    return { registry, byId, fmtBytes, fmtProgress, expectDownload, refreshSaved,
+             viewerDownloadId:function(){ return _viewerDlId; } };
 })();
 } // end if(window.tgBridge) — блок реестра загрузок
 

@@ -87,10 +87,90 @@ setupUpdateListeners();
 // попадают и blob-сохранения из медиа-просмотрщика (save_blob шлёт start+done).
 // Для blob это «мгновенно»: карточка вспыхивает и сразу показывает «Сохранено».
 var _dlCards = {};
+// #4: карточки, созданные капча-кликом по кнопке скачивания ДО того, как main
+// пришлёт will-download (у видео TG сначала тянет по MTProto, will-download
+// приходит поздно). Такой pending-карточкой «усыновляет» следующий start.
+var _dlClaimable = [];
+var _tmpDlId = 0;
 function _dlRemoveCard(id){
     var c=_dlCards[id]; if(!c)return;
     delete _dlCards[id];
+    _dlClaimable=_dlClaimable.filter(function(x){return x.id!==id;});
     c.el.classList.add('out'); setTimeout(function(){ if(c.el.parentNode)c.el.remove(); },220);
+}
+// Текущий открытый чат (peerId) — для выбора визуала карточки (в чате / фоновая).
+function _dlCurrentPeer(){
+    var el=document.querySelector('#MiddleColumn .ChatInfo .Avatar[data-peer-id], .MiddleHeader .ChatInfo .Avatar[data-peer-id]');
+    return el?el.getAttribute('data-peer-id'):'';
+}
+// Компакт-режим карточки, если её загрузка из другого чата (или чат неизвестен-фоновый).
+function _dlApplyStyle(c){
+    if(!c||!c.el)return;
+    var bg = c.peerId && String(c.peerId)!==String(_dlCurrentPeer());
+    c.el.classList.toggle('dl_compact', !!bg);
+}
+// Пересчитать визуал всех карточек при смене чата.
+function _dlReflow(){ for(var id in _dlCards) _dlApplyStyle(_dlCards[id]); }
+window.__tgdlReflowCards=_dlReflow;
+
+// #4: мгновенная карточка по клику на кнопку скачивания. Возвращает temp-id.
+// origName/peerId — best-effort из кликнутого сообщения; peerId пуст → фоновая.
+function startImmediateDownloadCard(origName, peerId){
+    var id='__tmp'+(--_tmpDlId);
+    _makeDlCard(id, origName, peerId, true);
+    return id;
+}
+function _makeDlCard(id, origName, peerId, claimable){
+    ensureCornerWrap();
+    var w=document.getElementById('_cnw_'); if(!w) return null;
+    if(_dlCards[id]) return _dlCards[id];
+    var el=document.createElement('div'); el.className='_cnotif_ dl_card'; el.style.minWidth='280px';
+    var av=document.createElement('div'); av.className='_cnotif_av_';
+    av.innerHTML='<i class="icon icon-download" style="font-size:18px;color:#5288c1"></i>';
+    var body=document.createElement('div'); body.className='_cnotif_body_';
+    var title=document.createElement('div'); title.className='_cnotif_title_';
+    title.textContent=origName||T('dl_card_file');
+    var text=document.createElement('div'); text.className='_cnotif_text_'; text.textContent=T('dl_card_downloading');
+    var bar=document.createElement('div'); bar.className='_upd_bar_';
+    var barInner=document.createElement('div'); barInner.className='_upd_prog_'; barInner.innerHTML='<span></span>';
+    bar.appendChild(barInner);
+    body.appendChild(title); body.appendChild(text); body.appendChild(bar);
+    var cls=document.createElement('button'); cls.className='_cnotif_close_'; cls.textContent='✕';
+    el.appendChild(av); el.appendChild(body); el.appendChild(cls);
+    w.appendChild(el);
+    var c={el:el, av:av, title:title, text:text, span:barInner.querySelector('span'), timer:null, peerId:peerId||'', origName:origName||''};
+    // ✕ на живой загрузке отменяет её в main (для temp-id отменять нечего — просто скрыть).
+    cls.addEventListener('click',function(e){
+        e.stopPropagation();
+        if(String(id).indexOf('__tmp')!==0) INV('cancel_download',{id:id}).catch(function(){});
+        _dlRemoveCard(id);
+    });
+    _dlCards[id]=c;
+    _dlApplyStyle(c);
+    // Страховка: осиротевшую temp-карточку (will-download так и не пришёл — клик был
+    // не по загрузке, либо файл уже скачан) убираем через 60с. Большой запас, чтобы
+    // «Скачивание…» жило пока TG тянет крупное видео по MTProto до will-download.
+    if(claimable){ _dlClaimable.push({id:id, ts:Date.now(), origName:origName||''});
+        c.timer=setTimeout(function(){ _dlRemoveCard(id); }, 60000); }
+    return c;
+}
+// start пришёл из main — усыновляем самую свежую temp-карточку (по имени, иначе старейшую).
+function _claimCard(realId, data){
+    var idx=-1, now=Date.now();
+    for(var i=0;i<_dlClaimable.length;i++){
+        var e=_dlClaimable[i];
+        if(now-e.ts>60000) continue;
+        if((data.origName||data.filename) && e.origName && e.origName===(data.origName||data.filename)){ idx=i; break; }
+        if(idx<0) idx=i;   // fallback: старейшая живая
+    }
+    if(idx<0) return null;
+    var claim=_dlClaimable.splice(idx,1)[0];
+    var c=_dlCards[claim.id]; if(!c) return null;
+    delete _dlCards[claim.id];
+    if(c.timer){ clearTimeout(c.timer); c.timer=null; }
+    _dlCards[realId]=c;
+    if(data.origName||data.filename) c.title.textContent=data.origName||data.filename;
+    return c;
 }
 function showDownloadIndicator(data){
     if(!data||!data.id||!window.tgBridge) return;
@@ -99,34 +179,15 @@ function showDownloadIndicator(data){
     var id=data.id;
     if(data.type==='start'){
         if(_dlCards[id]) return;
-        var el=document.createElement('div'); el.className='_cnotif_'; el.style.minWidth='280px';
-        var av=document.createElement('div'); av.className='_cnotif_av_';
-        av.innerHTML='<i class="icon icon-download" style="font-size:18px;color:#5288c1"></i>';
-        var body=document.createElement('div'); body.className='_cnotif_body_';
-        var title=document.createElement('div'); title.className='_cnotif_title_';
-        title.textContent=data.origName||data.filename||T('dl_card_file');
-        var text=document.createElement('div'); text.className='_cnotif_text_'; text.textContent=T('dl_card_downloading');
-        var bar=document.createElement('div'); bar.className='_upd_bar_';
-        var barInner=document.createElement('div'); barInner.className='_upd_prog_'; barInner.innerHTML='<span></span>';
-        bar.appendChild(barInner);
-        body.appendChild(title); body.appendChild(text); body.appendChild(bar);
-        var cls=document.createElement('button'); cls.className='_cnotif_close_'; cls.textContent='✕';
-        el.appendChild(av); el.appendChild(body); el.appendChild(cls);
-        w.appendChild(el);
-        // ✕ on a live download cancels it in main, not just hides the card.
-        cls.addEventListener('click',function(e){
-            e.stopPropagation();
-            INV('cancel_download',{id:id}).catch(function(){});
-            _dlRemoveCard(id);
-        });
-        _dlCards[id]={el:el, av:av, title:title, text:text, span:barInner.querySelector('span'), timer:null};
+        if(_claimCard(id, data)) return;   // усыновили мгновенную карточку — новую не плодим
+        _makeDlCard(id, data.origName||data.filename, '', false);
     } else if(data.type==='progress'){
         var c=_dlCards[id]; if(!c) return;
         var r=data.received||0, t=data.total||0;
         c.text.textContent=_fmtBytes_dl(r)+(t?' / '+_fmtBytes_dl(t):'');
         if(c.span&&t) c.span.style.width=Math.round(r/t*100)+'%';
     } else if(data.type==='done'){
-        if(!_dlCards[id]) showDownloadIndicator({type:'start', id:id, filename:data.filename, origName:data.origName});
+        if(!_dlCards[id]) _makeDlCard(id, data.origName||data.filename, '', false);
         var c2=_dlCards[id]; if(!c2) return;
         var ok=data.status==='completed';
         var cancelled=data.status==='cancelled';

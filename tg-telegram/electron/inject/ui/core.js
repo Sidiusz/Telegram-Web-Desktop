@@ -108,6 +108,14 @@ html._tgreading_ .bubble.menu-container.shown{opacity:0 !important;pointer-event
 ._dlb_status_{color:#aaa;font-size:11px;margin-top:2px;}
 ._dlb_prog_{height:2px;background:rgba(255,255,255,.1);border-radius:2px;margin-top:6px;overflow:hidden;}
 ._dlb_prog_ span{display:block;height:100%;background:#5288c1;border-radius:2px;transition:width .3s;}
+/* #4: карточка загрузки из ДРУГОГО чата (фоновая) — компактнее и уже, чтобы не мешать. */
+._cnotif_.dl_card{transition:width .2s,max-width .2s,padding .2s;}
+._cnotif_.dl_compact{width:auto;max-width:15rem;padding:8px 12px;gap:9px;}
+._cnotif_.dl_compact ._cnotif_av_{width:28px;height:28px;font-size:13px;}
+._cnotif_.dl_compact ._cnotif_av_ i{font-size:14px!important;}
+._cnotif_.dl_compact ._cnotif_title_{font-size:13px;}
+._cnotif_.dl_compact ._cnotif_text_{font-size:11px;}
+._cnotif_.dl_compact ._upd_bar_{margin-top:5px;}
 /* #5: скачанный файл. Родные ноды НЕ трогаем — прячем стрелку скачивания через CSS
    (обратимо) и кладём свои оверлеи: зелёная галочка (открыть файл) + папка. */
 /* стрелку скачивания прячем ТОЛЬКО когда наша галочка реально стоит (класс
@@ -129,6 +137,26 @@ html._tgreading_ .bubble.menu-container.shown{opacity:0 !important;pointer-event
 /* у скачанного файла формат («zip»/«exe») делаем мельче и сдвигаем под иконку
    папки, чтобы не перекрывался центральной иконкой «открыть». */
 .File._tgdl_done_ok_ .file-ext{font-size:.8em;transform:translateY(8px);}
+/* Просмотрщик медиа: зелёная галочка «скачано» на кнопке загрузки (как в чатах).
+   У кнопки круглая маска (overflow:hidden под ripple) — она резала бейдж; снимаем
+   обрезку только у кнопки с нашим бейджем, чтобы галочка была видна целиком. */
+.MediaViewerActions button{position:relative;}
+.MediaViewerActions button:has(._tgdl_vbtn_ok_){overflow:visible !important;}
+._tgdl_vbtn_ok_{position:absolute;right:0;bottom:0;width:15px;height:15px;border-radius:50%;
+    background:#4caf50;display:flex;align-items:center;justify-content:center;
+    box-shadow:0 1px 3px rgba(0,0,0,.6);border:1.5px solid #232323;pointer-events:none;z-index:3;}
+._tgdl_vbtn_ok_ svg{width:10px;height:10px;}
+/* Зелёный значок «скачано» в углу медиа — ниже шапки, чтобы не налезал на имя. */
+._tgdl_vcorner_{position:absolute;z-index:6;top:64px;left:16px;width:30px;height:30px;border-radius:50%;
+    background:#4caf50;display:flex;align-items:center;justify-content:center;
+    box-shadow:0 2px 6px rgba(0,0,0,.55);pointer-events:none;animation:_cnIn_ .2s ease;}
+._tgdl_vcorner_ svg{width:19px;height:19px;}
+/* TG рисует .file-ext только для расширений ≤4 символов (File.tsx) — у длинных
+   (.unitypackage) иконка пустая. Свой лейбл: размер шрифта подбираем по длине. */
+/* margin съедает 12px padding у .file-icon — иначе на текст остаётся 30px из 54. */
+.File .file-icon ._tgdl_ext_{font-size:var(--tgdl-ext-fs,10px);line-height:24px;max-width:52px;
+    margin:0 -11px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+.File._tgdl_done_ok_ .file-icon ._tgdl_ext_{transform:translateY(8px);}
 // ── Наш блок настроек уведомлений (вшит в нативные Настройки→Уведомления) ────
 ._tgnf_{margin:0 0 8px;padding:0 16px;}
 ._tgnf_ ._hdr_{font-size:13px;font-weight:600;color:#fff;margin:12px 0 4px;display:flex;align-items:center;gap:6px;}
