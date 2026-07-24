@@ -180,12 +180,17 @@
             }
             wrap(sw.controller);
             sw.addEventListener('controllerchange', function() { wrap(sw.controller); });
-            // Контроллер появляется не сразу (SW активируется после загрузки) — добиваем.
-            var tries = 0;
-            var iv = setInterval(function() {
-                if (sw.controller) wrap(sw.controller);
-                if (++tries > 60) clearInterval(iv);
-            }, 1000);
+            // TG re-registers/updates its service worker over a long session; when the
+            // controller swaps, background notifications route through a fresh (unhooked)
+            // controller and popups silently stop. wrap() is idempotent (__tgNotifHooked
+            // guard), so keep re-checking forever instead of giving up after 60s.
+            setInterval(function() { if (sw.controller) wrap(sw.controller); }, 2000);
+            // Also re-hook whatever the active registration exposes (controller can lag).
+            try {
+                sw.ready.then(function(reg) {
+                    if (reg && reg.active) wrap(reg.active);
+                }).catch(function() {});
+            } catch (e) {}
         } catch (e) {}
     }
     hookServiceWorker();

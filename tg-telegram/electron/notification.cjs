@@ -235,6 +235,11 @@ function ensureWin() {
     const html = buildHtml();
     _win.loadURL('data:text/html;charset=utf-8,' + encodeURIComponent(html)).catch(() => {});
     _win.on('closed', () => { _win = null; _ready = false; });
+    // Renderer crash/hang leaves _win alive but blank — notifications would silently stop
+    // forever. Drop the handle so the next queueNotification rebuilds a fresh window.
+    const drop = () => { try { if (_win && !_win.isDestroyed()) _win.destroy(); } catch (e) {} _win = null; _ready = false; };
+    _win.webContents.on('render-process-gone', drop);
+    _win.webContents.on('unresponsive', drop);
     return _win;
 }
 
