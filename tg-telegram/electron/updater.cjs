@@ -6,15 +6,19 @@ const { execSync } = require('child_process');
 const { loadSettings, saveSettings } = require('./settings.cjs');
 
 // Releases repo (installer uploads here + release notes)
-const RELEASE_REPO    = 'Sidiusz/tg-web-releases';
+const RELEASE_REPO    = 'Sidiusz/Telegram-Web-Desktop';
 // Primary path: GitHub Releases API — version from tag, changelog from body,
 // link from the .exe asset. No manual update.json editing needed anymore.
 const RELEASES_API_URL = 'https://api.github.com/repos/' + RELEASE_REPO + '/releases/latest';
 const RELEASES_LIST_URL = 'https://api.github.com/repos/' + RELEASE_REPO + '/releases';
-// Fallback (when api.github.com is unreachable, e.g. from RU): the old manual
-// update.json + changelog.txt over raw. Old clients still read these.
-const UPDATE_INFO_URL = 'https://raw.githubusercontent.com/Sidiusz/tg-web-releases/main/update.json';
-const CHANGELOG_URL   = 'https://raw.githubusercontent.com/Sidiusz/tg-web-releases/main/changelog.txt';
+// Secondary path: github.com HTML endpoints (atom feed + expanded_assets). No
+// auth, no 60/hr rate limit — survives the API being throttled (which silently
+// fell back to a stale update.json and reported "up to date").
+const RELEASES_ATOM_URL = 'https://github.com/' + RELEASE_REPO + '/releases.atom';
+const assetsUrl = (tag) => 'https://github.com/' + RELEASE_REPO + '/releases/expanded_assets/' + encodeURIComponent(tag);
+// Last-resort fallback: the old manual update.json + changelog.txt over raw.
+const UPDATE_INFO_URL = 'https://raw.githubusercontent.com/' + RELEASE_REPO + '/main/update.json';
+const CHANGELOG_URL   = 'https://raw.githubusercontent.com/' + RELEASE_REPO + '/main/changelog.txt';
 
 let _getWindow = null;
 let _checkTimer = null;
@@ -98,13 +102,43 @@ async function fetchLatestRelease() {
     return { version, url: exe.browser_download_url, filename: exe.name, notes: rel.body || '' };
 }
 
-// Reconcile sources: API first (auto), then fallback to update.json (RU/offline).
+// Minimal HTML → text for atom <content> (release body arrives HTML-escaped).
+function htmlToText(h) {
+    let s = String(h == null ? '' : h)
+        .replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"').replace(/&#39;/g, "'").replace(/&amp;/g, '&');
+    s = s.replace(/<li[^>]*>/gi, '• ').replace(/<br\s*\/?>/gi, '\n')
+         .replace(/<\/(p|div|li|h\d|ul|ol|tr)>/gi, '\n').replace(/<[^>]+>/g, '');
+    return s.replace(/[ \t]+\n/g, '\n').replace(/\n{3,}/g, '\n\n').trim();
+}
+
+// Secondary path — github.com atom feed + expanded_assets page (no API, no rate
+// limit). Returns {version,url,filename,notes} or throws.
+async function fetchLatestReleaseWeb() {
+    const atom = await fetchText(RELEASES_ATOM_URL);
+    const tagM = atom.match(/releases\/tag\/([^"<\s]+)/);
+    if (!tagM) throw new Error('no tag in atom feed');
+    const rawTag = tagM[1];
+    const version = normVer(decodeURIComponent(rawTag));
+    const html = await fetchText(assetsUrl(rawTag));
+    const exeM = html.match(/href="([^"]*releases\/download\/[^"]*\.exe)"/i);
+    if (!exeM) throw new Error('no .exe asset on release page');
+    const url = 'https://github.com' + exeM[1].replace(/&amp;/g, '&');
+    const filename = decodeURIComponent(url.split('/').pop());
+    const cM = atom.match(/<content[^>]*>([\s\S]*?)<\/content>/);
+    return { version, url, filename, notes: cM ? htmlToText(cM[1]) : null };
+}
+
+// Reconcile sources: API → github.com HTML → update.json (last resort).
 async function resolveUpdateInfo() {
     try {
-        const rel = await fetchLatestRelease();
-        return Object.assign({ source: 'api' }, rel);
+        return Object.assign({ source: 'api' }, await fetchLatestRelease());
     } catch (e) {
-        console.log(`[Updater] GitHub API unavailable (${e.message}), trying update.json…`);
+        console.log(`[Updater] GitHub API unavailable (${e.message}), trying github.com…`);
+    }
+    try {
+        return Object.assign({ source: 'web' }, await fetchLatestReleaseWeb());
+    } catch (e) {
+        console.log(`[Updater] github.com releases unavailable (${e.message}), trying update.json…`);
     }
     const info = await fetchJSON(UPDATE_INFO_URL);
     if (!info || !info.version || !info.url) return null;
@@ -210,19 +244,38 @@ function compareVersions(a, b) {
     return 0;
 }
 
-// All releases as a list. For the block "Changelog" screen. Throws when the API is down
-async function fetchReleases() {
-    const arr = await fetchJSON(RELEASES_LIST_URL, { 'Accept': 'application/vnd.github+json' });
-    if (!Array.isArray(arr)) return [];
-    return arr.filter(r => r && r.tag_name).map(r => ({ version: normVer(r.tag_name), notes: r.body || '' }));
+// All releases (for the block "Changelog" screen), from the atom feed — no API.
+async function fetchReleasesWeb() {
+    const atom = await fetchText(RELEASES_ATOM_URL);
+    return atom.split(/<entry>/).slice(1).map(e => {
+        const t = e.match(/releases\/tag\/([^"<\s]+)/);
+        if (!t) return null;
+        const c = e.match(/<content[^>]*>([\s\S]*?)<\/content>/);
+        return { version: normVer(decodeURIComponent(t[1])), notes: c ? htmlToText(c[1]) : '' };
+    }).filter(Boolean);
 }
 
-// Changelog: latest release notes first (API), then changelog.txt when unavailable.
+// All releases as a list. For the block "Changelog" screen. API first, then atom feed.
+async function fetchReleases() {
+    try {
+        const arr = await fetchJSON(RELEASES_LIST_URL, { 'Accept': 'application/vnd.github+json' });
+        if (Array.isArray(arr) && arr.length) {
+            return arr.filter(r => r && r.tag_name).map(r => ({ version: normVer(r.tag_name), notes: r.body || '' }));
+        }
+    } catch (e) { /* API down/throttled — fall back to atom */ }
+    return fetchReleasesWeb();
+}
+
+// Changelog: latest release notes — API, then github.com, then changelog.txt.
 async function fetchChangelog() {
     try {
         const rel = await fetchLatestRelease();
         if (rel && rel.notes && rel.notes.trim()) return rel.notes;
-    } catch (e) { /* API down — fall back to raw */ }
+    } catch (e) { /* API down */ }
+    try {
+        const rel = await fetchLatestReleaseWeb();
+        if (rel && rel.notes && rel.notes.trim()) return rel.notes;
+    } catch (e) { /* github.com down */ }
     return fetchText(CHANGELOG_URL);
 }
 

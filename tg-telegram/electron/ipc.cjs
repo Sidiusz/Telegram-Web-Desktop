@@ -83,10 +83,16 @@ function registerIpc(getWindow) {
     });
 
     ipcMain.handle('save_settings', (e, { settings }) => {
+        const prev = state.settings || loadSettings();
         saveSettings(settings);
         state.settings = loadSettings();
         // Auto-check interval may have changed — reschedule now so it applies without a restart.
         scheduleChecks();
+        // host-resolver-rules only take effect on process start.
+        if (prev.bypass_hosts !== settings.bypass_hosts) {
+            app.relaunch();
+            app.quit();
+        }
     });
 
     // Open/close DevTools instantly without a reload

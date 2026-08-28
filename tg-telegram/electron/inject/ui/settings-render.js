@@ -9,6 +9,7 @@ function scheduleSave(){
             save_path:sp.value||null,
             minimize_to_tray:chk('_tr_'),
             devtools_enabled:chk('_dv_'),
+            bypass_hosts:chk('_bp_'),
         };
         try{await INV('save_settings',{settings});toast(T('st_saved'),'icon-check');}catch(e){toast(T('st_save_err'),'icon-close');}
     },600);
@@ -50,6 +51,11 @@ function buildSettingsSections(c, s){
     const c3=card();
     toggleRow(c3,T('st_tray'),null,'_tr_',s.minimize_to_tray);
     toggleRow(c3,T('st_devtools'),'Ctrl+Shift+I / F12','_dv_',s.devtools_enabled);
+
+    // ── Сеть ──
+    lbl(T('sec_network'));
+    const cNet=card();
+    toggleRow(cNet,T('st_bypass'),T('st_bypass_sub'),'_bp_',s.bypass_hosts);
 
     // ── Обновления ──
     lbl(T('sec_updates'));

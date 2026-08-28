@@ -1,12 +1,17 @@
 'use strict';
 const { app, Menu } = require('electron');
 const path = require('path');
+const { loadSettings, getBypassRules } = require('./electron/settings.cjs');
 
 app.commandLine.appendSwitch('autoplay-policy', 'no-user-gesture-required');
 app.commandLine.appendSwitch('disable-renderer-backgrounding');
 // Keep timers alive (our incoming-message interceptor) when window is backgrounded/hidden
 app.commandLine.appendSwitch('disable-background-timer-throttling');
 app.commandLine.appendSwitch('disable-backgrounding-occluded-windows');
+// Built-in workaround for regions where Telegram domains are blocked.
+// Maps known Telegram hosts to a working IP so the app doesn't rely on system hosts.
+const settings = loadSettings();
+if (settings.bypass_hosts) app.commandLine.appendSwitch('host-resolver-rules', getBypassRules());
 // Dev only (unpackaged): expose CDP for local UI testing. Never in shipped builds.
 if (!app.isPackaged) app.commandLine.appendSwitch('remote-debugging-port', '9222');
 

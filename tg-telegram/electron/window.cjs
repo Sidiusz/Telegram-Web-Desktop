@@ -48,9 +48,19 @@ function createWindow(state) {
             contextIsolation: true,
             nodeIntegration: false,
             spellcheck: false,
-            bypassCSP: true,
             backgroundThrottling: false,
         },
+    });
+
+    // Electron removed webPreferences.bypassCSP; strip CSP headers so TG's inline
+    // bootstrap scripts can execute and the app doesn't hang on a white screen.
+    session.defaultSession.webRequest.onHeadersReceived((details, callback) => {
+        const headers = details.responseHeaders || {};
+        delete headers['content-security-policy'];
+        delete headers['Content-Security-Policy'];
+        delete headers['content-security-policy-report-only'];
+        delete headers['Content-Security-Policy-Report-Only'];
+        callback({ responseHeaders: headers });
     });
 
     mainWindow.webContents.on('console-message', (e, level, message) => {
