@@ -107,22 +107,36 @@ function injectSettingsRows(){
     if(!list) return;
     if(list.querySelector('#_tgst_ad_')) return;   // уже вставлено
 
-    // Клонируем живую нативную строку → собираем свою по тому же шаблону.
+    // Clone live native row — keep exact card styling.
     const tmpl = anchorEl.closest('.ListItem.narrow') || anchorEl;
     function makeRow(id, iconName, label){
         const row = tmpl.cloneNode(true);
         row.removeAttribute('id'); row.id = id;
         const btn = row.querySelector('.ListItem-button');
-        // выкидываем текст/значение, оставляем только иконку
-        Array.from(btn.childNodes).forEach(n=>{
-            if(n.nodeType===3 || (n.nodeType===1 && /settings-item__current-value/.test(n.className||''))) btn.removeChild(n);
-        });
+        // New design: title/subtitle inside .multiline-item, not direct text nodes.
+        const multi = btn.querySelector('.multiline-item');
+        if(multi){
+            const titleEl = multi.querySelector('.title');
+            if(titleEl) titleEl.textContent = label;
+            const subEl = multi.querySelector('.subtitle');
+            if(subEl) subEl.remove();
+            // remove stray value badges if any
+            multi.querySelectorAll('.settings-item__current-value').forEach(el=>el.remove());
+            Array.from(btn.childNodes).forEach(n=>{
+                if(n.nodeType===3) btn.removeChild(n);
+            });
+        } else {
+            Array.from(btn.childNodes).forEach(n=>{
+                if(n.nodeType===3 || (n.nodeType===1 && /settings-item__current-value/.test(n.className||''))) btn.removeChild(n);
+            });
+            btn.appendChild(document.createTextNode(label));
+        }
         const ico = btn.querySelector('i.icon');
         if(ico){
-            ico.className = 'icon icon-'+iconName+' ListItem-main-icon';
+            // keep hash classes (v0eXS-8f etc), only swap icon name
+            ico.className = ico.className.replace(/icon-[^\s]+/, 'icon-'+iconName);
             ico.setAttribute('aria-hidden','true');
         }
-        btn.appendChild(document.createTextNode(label));
         return row;
     }
 

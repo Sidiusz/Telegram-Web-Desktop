@@ -185,14 +185,14 @@
             // controller swaps, background notifications route through a fresh (unhooked)
             // controller and popups silently stop. wrap() is idempotent (__tgNotifHooked
             // guard), so keep re-checking forever instead of giving up after 60s.
-            setInterval(function() { if (sw.controller) wrap(sw.controller); }, 2000);
+            setInterval(function() { if (sw.controller) wrap(sw.controller); }, 5000);
             // Also re-hook whatever the active registration exposes (controller can lag).
             try {
                 sw.ready.then(function(reg) {
                     if (reg && reg.active) wrap(reg.active);
                 }).catch(function() {});
             } catch (e) {}
-            // Poll all registrations (covers waiting/installing after SW update without controllerchange)
+            // Poll all registrations (covers waiting/installing after SW update without controllerchange) — 8s is enough.
             setInterval(function(){
                 try{
                     if(!sw.getRegistrations) return;
@@ -204,7 +204,7 @@
                         });
                     }).catch(function(){});
                 }catch(e){}
-            }, 4000);
+            }, 8000);
         } catch (e) {}
     }
     hookServiceWorker();
