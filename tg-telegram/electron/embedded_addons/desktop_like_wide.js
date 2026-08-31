@@ -104,12 +104,9 @@
                 width: calc(100% - 7rem) !important; max-width: calc(100% - 7rem) !important;
                 margin-left: auto !important; margin-right: auto !important;
             }
-            /* Right column overlay: shrink MiddleColumn content so header/footer stay visible. */
-            #Main.right-column-open #MiddleColumn {
-                padding-right: 424px !important;
-                box-sizing: border-box !important;
-            }
-            /* Keep send button on right for long text (was wrapping to bottom). */
+            /* Right column overlay: keep header/composer above it. Composer should not wrap. */
+            #Main.right-column-open #MiddleColumn .MiddleHeader,
+            #Main.right-column-open #MiddleColumn .Composer { position: relative !important; z-index: 10 !important; }
             #MiddleColumn .Composer { flex-wrap: nowrap !important; align-items: flex-end !important; }
 
             /* Our injected tail: TG hides .svg-appendix unless .message-content has .has-appendix. */
