@@ -191,39 +191,32 @@ function _genButton(text, onClick){
     b.style.marginTop='12px';
     return b;
 }
-// Нативная строка-значение (как «Язык — Русский»): клон .ListItem.narrow с цветной иконкой.
+// Native value row (like “Language — Russian”): single line with colored icon.
 function _genRow(liEl, icon, title, value, onClick, danger){
     var r=liEl.cloneNode(true); r.removeAttribute('id'); r.removeAttribute('style'); r.className='ListItem narrow';
     var btn=r.querySelector('.ListItem-button'); if(!btn){ btn=document.createElement('div'); btn.className='ListItem-button'; r.appendChild(btn); }
     btn.innerHTML=''; btn.setAttribute('role','button'); btn.setAttribute('tabindex','0');
+    btn.style.display='flex'; btn.style.alignItems='center'; btn.style.gap='12px';
     if(icon){
-        // Клонируем цветной враппер иконки из живого образца, чтобы цвет/фон совпал с нативными
-        var srcWrap = liEl.querySelector('.ListItem-main-icon');
-        var wrap;
-        if(srcWrap){
-            wrap = srcWrap.cloneNode(true);
-            var ic = wrap.querySelector('i.icon');
-            if(ic){
-                ic.className = ic.className.replace(/icon-[^\s]+/, 'icon-'+icon);
-                ic.setAttribute('aria-hidden','true');
-                if(danger) ic.style.color = '#ff5c5c';
-            } else {
-                ic = document.createElement('i');
-                ic.className = 'icon icon-'+icon;
-                ic.setAttribute('aria-hidden','true');
-                wrap.appendChild(ic);
-            }
-            if(danger) wrap.style.color = '#ff5c5c';
-            btn.appendChild(wrap);
-        } else {
-            var ic2=document.createElement('i'); ic2.className='icon icon-'+icon+' ListItem-main-icon'; ic2.setAttribute('aria-hidden','true'); if(danger)ic2.style.color='#ff5c5c'; btn.appendChild(ic2);
-        }
+        var wrap=document.createElement('div');
+        wrap.className='ListItem-main-icon';
+        wrap.style.width='32px'; wrap.style.height='32px'; wrap.style.borderRadius='8px';
+        wrap.style.display='flex'; wrap.style.alignItems='center'; wrap.style.justifyContent='center';
+        wrap.style.flexShrink='0';
+        var bg={info:'#5288c1', 'info-filled':'#5288c1', user:'#f5a623', 'user-filled':'#f5a623', mention:'#8774e1', 'mention-filled':'#8774e1', reload:'#4caf50', 'reload-filled':'#4caf50', delete:'#ff5c5c'}[icon] || '#5288c1';
+        if(danger) bg='#ff5c5c';
+        wrap.style.background=bg;
+        var ic=document.createElement('i');
+        ic.className='icon icon-'+icon;
+        ic.style.fontSize='18px'; ic.style.color='#fff';
+        ic.setAttribute('aria-hidden','true');
+        wrap.appendChild(ic);
+        btn.appendChild(wrap);
     }
-    // Title/subtitle handling: use multiline-item if present, else plain text
-    var multi = document.createElement('div'); multi.className='multiline-item';
-    var tEl = document.createElement('span'); tEl.className='title'; tEl.textContent=title; multi.appendChild(tEl);
-    btn.appendChild(multi);
-    var v=document.createElement('span'); v.className='settings-item__current-value'; v.textContent=value==null?'':value; multi.appendChild(v);
+    var titleEl=document.createElement('span'); titleEl.textContent=title; titleEl.style.flex='1'; titleEl.style.fontSize='15px';
+    btn.appendChild(titleEl);
+    var v=document.createElement('span'); v.className='settings-item__current-value'; v.textContent=value==null?'':value; v.style.marginLeft='auto';
+    btn.appendChild(v);
     if(danger) btn.style.color='#ff5c5c';
     if(onClick){ btn.addEventListener('click',function(e){ e.stopPropagation(); onClick(v); }); }
     r._v=v;
