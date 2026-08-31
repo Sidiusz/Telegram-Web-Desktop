@@ -171,6 +171,28 @@ waitBody(()=>{
     }
     ['dragenter','dragover','drop'].forEach(function(ty){ document.addEventListener(ty,blockDrag,true); });
 })();
+// Fast path for large/multiple files: avoid 10-60s freeze while generating previews.
+// Telegram reads each dropped file via FileReader to make thumbnails; for >10MB files
+// that blocks the UI. Stub readAsDataURL for large blobs so the send dialog appears instantly.
+document.addEventListener('drop', function(e){
+    try{
+        const dt = e.dataTransfer;
+        if(!dt || !dt.files || dt.files.length===0) return;
+        const files = Array.from(dt.files);
+        const total = files.reduce((s,f)=>s+f.size,0);
+        if(files.length>5 || total>30*1024*1024){
+            const orig = FileReader.prototype.readAsDataURL;
+            FileReader.prototype.readAsDataURL = function(blob){
+                if(blob && blob.size>10*1024*1024){
+                    setTimeout(()=>{ try{ this.result=''; if(this.onload) this.onload({target:this}); if(this.onloadend) this.onloadend({target:this}); }catch(_){} },0);
+                    return;
+                }
+                return orig.call(this, blob);
+            };
+            setTimeout(()=>{ try{ FileReader.prototype.readAsDataURL = orig; }catch(_){} }, 8000);
+        }
+    }catch(_){}
+}, true);
 // ─────────────────────────────────────────────────────────────────────────────
 
 // Kill the pull-down stories reveal: wheel-up at the top of the chat list never reaches TG,
