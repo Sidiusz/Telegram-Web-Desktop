@@ -10,20 +10,55 @@
         var s = document.createElement('style');
         s.id = 'addon-desktop-wide';
         s.textContent = `
-            /* Widen + left-align in ALL chats, set at load (not live) so virtualization counts it from the start; ~3.5rem gutter clears the scrollbar. */
+            /* --tgdl-rc = width the open right column steals from the middle column (measured in JS). */
+            :root { --tgdl-rc: 0px; }
+            /* Shrink the list itself so bubbles never slide under the right column overlay. */
+            #MiddleColumn .MessageList {
+                width: calc(100% - var(--tgdl-rc, 0px)) !important;
+                max-width: calc(100% - var(--tgdl-rc, 0px)) !important;
+                align-self: flex-start !important; margin-left: 0 !important; margin-right: auto !important;
+            }
+            /* TG centers the shrunk list and slides it back with a transform; we anchor it left instead. */
+            ._tg_right_open #MiddleColumn .MessageList { transform: none !important; }
+            /* Widen + left-align in ALL chats, set at load (not live) so virtualization counts it from the start; 7rem gutter clears scrollbar + down-arrow. */
+            html #MiddleColumn .MessageList .messages-container,
+            body #MiddleColumn .MessageList .messages-container,
             #MiddleColumn .MessageList .messages-container {
-                max-width: calc(100% - 3.5rem) !important; width: calc(100% - 3.5rem) !important;
+                max-width: calc(100% - 7rem) !important; width: calc(100% - 7rem) !important;
                 margin-left: 0 !important; margin-right: auto !important;
                 box-sizing: border-box !important;
+                align-self: flex-start !important;
+            }
+            html #MiddleColumn .MessageList,
+            body #MiddleColumn .MessageList {
+                justify-content: flex-start !important;
+                align-items: flex-start !important;
+            }
+            /* Remove top fade that becomes visible under header when right panel opens, keep bottom */
+            #MiddleColumn .MessageList {
+                -webkit-mask-image: linear-gradient(to bottom, rgb(0,0,0) 0px, rgb(0,0,0) calc(100% - 64px), rgba(0,0,0,0.24) 100%) !important;
+                mask-image: linear-gradient(to bottom, rgb(0,0,0) 0px, rgb(0,0,0) calc(100% - 64px), rgba(0,0,0,0.24) 100%) !important;
             }
 
-            /* Use width, not just max-width, or the footer shrinks to fit content; not virtualized, safe to resize. */
-            #MiddleColumn .middle-column-footer { width: 100% !important; max-width: 100% !important; }
-            /* New TG Composer is a flex row (input + send/mic button). Flex the wrapper, don't force width:100% — that pushed the send button onto a second row. */
-            #MiddleColumn .middle-column-footer .composer-wrapper { flex: 1 1 auto !important; width: auto !important; max-width: none !important; min-width: 0 !important; margin-left: 0 !important; }
+            /* Footer + Composer: robust flex so send button never wraps on long text */
+            #MiddleColumn .middle-column-footer { width: 100% !important; max-width: 100% !important; box-sizing:border-box !important; margin-left: 0 !important; }
+            /* Keep TG's own composer spacing (send button sits 4px from the edge); only stop it wrapping. */
+            #MiddleColumn .Composer { flex-wrap: nowrap !important; box-sizing:border-box !important; }
+            #MiddleColumn .Composer .composer-wrapper { min-width:0 !important; }
+            #MiddleColumn .Composer #editable-message-text { min-width:0 !important; }
+            /* Footer keeps clear of the right column; TG shifts it by half its width instead, so drop that transform. */
+            #MiddleColumn .middle-column-footer {
+                width: calc(100% - var(--tgdl-rc, 0px)) !important; max-width: calc(100% - var(--tgdl-rc, 0px)) !important;
+            }
+            ._tg_right_open #MiddleColumn .middle-column-footer { transform: none !important; }
 
             /* Widen bubbles to match the input field width. */
             #MiddleColumn .Message { --max-width: 70rem !important; }
+            /* Never let a bubble outgrow its row — the list shrinks when the right column opens.
+               Rows shrink-wrap, so a % cap is circular; --tgdl-avail is the row width in px, set from JS. */
+            #MiddleColumn .Message .message-content { max-width: min(var(--max-width, 30rem), var(--tgdl-avail, 100vw)) !important; }
+            #MiddleColumn .Message .message-content-wrapper { max-width: var(--tgdl-avail, none) !important; }
+
 
             /* Flip own messages left only in private 1:1 chats (.tgdl-private); skip channels/groups (broken tail otherwise). */
             #MiddleColumn.tgdl-private .MessageList.no-avatars .Message { padding-left: 44px !important; position: relative !important; }
@@ -99,15 +134,19 @@
             .MiddleHeader .HeaderActions { position: relative !important; z-index: 200 !important; }
             .MiddleHeader .HeaderActions, .MiddleHeader .HeaderActions .Button { pointer-events: all !important; }
 
-            /* New TG header island — stretch wide with equal side gaps (centered); keep TG's rounding + top gap. */
+            /* New TG header island — stretch wide with equal side gaps; keep TG's rounding + top gap. */
             #MiddleColumn .MiddleHeader {
-                width: calc(100% - 7rem) !important; max-width: calc(100% - 7rem) !important;
-                margin-left: auto !important; margin-right: auto !important;
+                width: calc(100% - 7rem - var(--tgdl-rc, 0px)) !important;
+                max-width: calc(100% - 7rem - var(--tgdl-rc, 0px)) !important;
+                margin-left: 3.5rem !important; margin-right: auto !important;
+                box-sizing:border-box !important;
             }
-            /* Right column overlay: keep header/composer above it. Composer should not wrap. */
+            ._tg_right_open #MiddleColumn .MiddleHeader { transform: none !important; }
+            /* Right column overlay: keep header/composer above it. */
             #Main.right-column-open #MiddleColumn .MiddleHeader,
-            #Main.right-column-open #MiddleColumn .Composer { position: relative !important; z-index: 10 !important; }
-            #MiddleColumn .Composer { flex-wrap: nowrap !important; align-items: flex-end !important; }
+            #Main.right-column-open #MiddleColumn .Composer,
+            ._tg_right_open #MiddleColumn .MiddleHeader,
+            ._tg_right_open #MiddleColumn .Composer { position: relative !important; z-index: 10 !important; }
 
             /* Our injected tail: TG hides .svg-appendix unless .message-content has .has-appendix. */
             #MiddleColumn .Message.own .message-content[data-tgdl-appendix] .svg-appendix { display: block !important; }
@@ -297,7 +336,49 @@
             }
         });
     }
-    function tick() { ensureStyles(); applyPrivateClass(); injectAvatars(); ensureOwnMediaAppendix(); recolorAppendixes(); }
+    // Right column width varies (25vw / 26.5rem) and it overlays or pushes the middle
+    // column depending on window width — measure the real overlap instead of guessing.
+    function measureRc(){
+        var mid = document.getElementById('MiddleColumn');
+        var col = document.getElementById('RightColumn');
+        var v = 0;
+        if (mid && col) {
+            var m = mid.getBoundingClientRect(), r = col.getBoundingClientRect();
+            if (r.width) v = Math.max(0, Math.round(m.right - r.left));
+            if (v > m.width - 200) v = 0;   // full-screen overlay (narrow layout): leave TG alone
+        }
+        document.documentElement.style.setProperty('--tgdl-rc', v + 'px');
+        measureAvail();
+    }
+    // Width a bubble may occupy inside the (now possibly narrower) list.
+    function measureAvail(){
+        var cont = document.querySelector('#MiddleColumn .MessageList .messages-container');
+        if (!cont) return;
+        var cs = getComputedStyle(cont);
+        var av = cont.clientWidth - (parseFloat(cs.paddingLeft) || 0) - (parseFloat(cs.paddingRight) || 0) - 44;
+        if (av > 40) document.documentElement.style.setProperty('--tgdl-avail', Math.round(av) + 'px');
+    }
+    var _rcTicks = 0, _rcRaf = 0, _rcOpen = null;
+    // Follow the panel while it slides so widths don't snap a frame late.
+    function rcFollow(){
+        _rcTicks = 40;
+        if (_rcRaf) return;
+        _rcRaf = requestAnimationFrame(function step(){
+            measureRc();
+            _rcRaf = (--_rcTicks > 0) ? requestAnimationFrame(step) : 0;
+        });
+    }
+    function syncRightColumn(){
+        try{
+            const main = document.getElementById('Main');
+            const open = (main && main.classList.contains('right-column-open')) || document.body.classList.contains('right-column-open') || document.documentElement.classList.contains('right-column-open');
+            document.documentElement.classList.toggle('_tg_right_open', !!open);
+            if(main) main.classList.toggle('_tg_right_open', !!open);
+            if (open !== _rcOpen) { _rcOpen = open; rcFollow(); } else { measureRc(); }
+        }catch(e){}
+    }
+    window.addEventListener('resize', function(){ try{ rcFollow(); }catch(e){} });
+    function tick() { ensureStyles(); applyPrivateClass(); injectAvatars(); ensureOwnMediaAppendix(); recolorAppendixes(); syncRightColumn(); }
     setInterval(tick, 1000);
     tick();
 
