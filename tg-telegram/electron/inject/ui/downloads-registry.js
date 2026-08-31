@@ -337,7 +337,7 @@ const DL = window.__tgdl = (function(){
             // открываем только по клику на иконку (не по названию — даём его выделять)
             if(e.type==='click' && e.target.closest('.file-icon-container')){
                 const id = parseInt(file.dataset.tgdlId,10);
-                if(id) INV('open_download_file',{id}).then(function(r){ if(r&&r.error) resetDownloaded(file); }).catch(function(){});
+                if(id) INV('open_download_folder',{id}).then(function(r){ if(r&&r.error) resetDownloaded(file); }).catch(function(){});
             }
             return;
         }

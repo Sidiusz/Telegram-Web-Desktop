@@ -128,8 +128,8 @@ html._tgreading_ .bubble.menu-container.shown{opacity:0 !important;pointer-event
     width:24px;height:24px;color:#fff;pointer-events:none;z-index:2;
     display:flex;align-items:center;justify-content:center;}
 ._tgdl_open_ svg{width:100%;height:100%;display:block;}
-/* Зелёная галочка в углу — индикатор «скачано» (не кнопка). */
-._tgdl_ok_{position:absolute;right:-3px;bottom:-3px;width:18px;height:18px;border-radius:50%;
+/* Зелёная галочка в углу — индикатор «скачано» (не кнопка). Теперь слева сверху по просьбе. */
+._tgdl_ok_{position:absolute;left:-4px;top:-4px;width:18px;height:18px;border-radius:50%;
     background:#4caf50;display:flex;align-items:center;justify-content:center;
     box-shadow:0 1px 4px rgba(0,0,0,.45);pointer-events:none;z-index:3;}
 ._tgdl_ok_ svg{width:12px;height:12px;}
