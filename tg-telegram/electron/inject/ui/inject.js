@@ -86,16 +86,29 @@ function injectSettingsRows(){
     // есть строки «Уведомления»/медиа с теми же иконками — туда вставлять нельзя.
     const settings = document.getElementById('Settings');
     if(!settings) return;
-    const notif = settings.querySelector('.ListItem.narrow .ListItem-button .icon-unmute');
-    const data  = settings.querySelector('.ListItem.narrow .ListItem-button .icon-data');
-    const anchor = notif || data;
-    if(!anchor || anchor.closest('#RightColumn, .RightColumn')) return;
-    const list  = anchor.closest('.ListItem.narrow').parentElement;
+    // Telegram redesign: icons changed (icon-unmute -> icon-notifications-filled, icon-data -> icon-piechart-filled)
+    // Find anchor by text content to survive icon renames.
+    const allRows = settings.querySelectorAll('.ListItem');
+    let notif = null, data = null;
+    for(const row of allRows){
+        const txt = (row.textContent||'').trim();
+        if(!notif && /Уведомления|Notifications/i.test(txt)) notif = row;
+        if(!data && /Данные и память|Data and Storage/i.test(txt)) data = row;
+        if(notif && data) break;
+    }
+    // Fallback to old icon selectors
+    if(!notif) notif = settings.querySelector('.ListItem.narrow .ListItem-button .icon-unmute')?.closest('.ListItem.narrow');
+    else notif = notif.closest ? notif.closest('.ListItem.narrow') : notif;
+    if(!data) data = settings.querySelector('.ListItem.narrow .ListItem-button .icon-data')?.closest('.ListItem.narrow');
+    else if(data && !data.classList?.contains('ListItem')) data = data.closest('.ListItem.narrow');
+    const anchorEl = notif || data;
+    if(!anchorEl || anchorEl.closest('#RightColumn, .RightColumn')) return;
+    const list  = anchorEl.parentElement;
     if(!list) return;
     if(list.querySelector('#_tgst_ad_')) return;   // уже вставлено
 
     // Клонируем живую нативную строку → собираем свою по тому же шаблону.
-    const tmpl = anchor.closest('.ListItem.narrow');
+    const tmpl = anchorEl.closest('.ListItem.narrow') || anchorEl;
     function makeRow(id, iconName, label){
         const row = tmpl.cloneNode(true);
         row.removeAttribute('id'); row.id = id;
@@ -120,8 +133,11 @@ function injectSettingsRows(){
     // «Дополнения» — сразу под «Общие настройки» (первая строка списка), иначе в начало.
     const adRow = makeRow('_tgst_ad_', 'bots', T('addons'));
     adRow.querySelector('.ListItem-button').addEventListener('click', () => openAddonsNative());
-    const chatRow = list.querySelector('.ListItem.narrow .icon-chat, .ListItem.narrow .ListItem-main-icon');
-    const generalAnchor = chatRow && chatRow.closest('.ListItem.narrow');
+    let generalAnchor = null;
+    for(const r of list.querySelectorAll('.ListItem')){
+        if(/Общие настройки|General Settings/i.test(r.textContent||'')){ generalAnchor = r; break; }
+    }
+    if(!generalAnchor) generalAnchor = list.querySelector('.ListItem');
     if(generalAnchor && generalAnchor !== tmpl){
         generalAnchor.after(adRow);
     } else {
