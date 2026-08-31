@@ -1,7 +1,19 @@
 'use strict';
-const { app, Menu } = require('electron');
+const { app, Menu, protocol } = require('electron');
 const path = require('path');
 const { loadSettings, getBypassRules } = require('./electron/settings.cjs');
+
+// Electron 40 removed webPreferences.bypassCSP — without it Telegram's CSP
+// (now delivered via <meta http-equiv> in addition to headers) blocks our
+// inline injections and the page stays white. Register https/http as CSP-
+// bypassing so executeJavaScript / inline scripts are not subject to page CSP.
+// Must be before app ready and only once.
+try {
+    protocol.registerSchemesAsPrivileged([
+        { scheme: 'https', privileges: { standard: true, secure: true, bypassCSP: true, allowServiceWorkers: true, supportFetchAPI: true, corsEnabled: true, stream: true } },
+        { scheme: 'http',  privileges: { standard: true, secure: true, bypassCSP: true, allowServiceWorkers: true, supportFetchAPI: true, corsEnabled: true, stream: true } },
+    ]);
+} catch (e) { /* already registered (e.g. by Sentry) */ }
 
 app.commandLine.appendSwitch('autoplay-policy', 'no-user-gesture-required');
 app.commandLine.appendSwitch('disable-renderer-backgrounding');
@@ -18,6 +30,14 @@ if (!app.isPackaged) app.commandLine.appendSwitch('remote-debugging-port', '9222
 const { createWindow, getWindow } = require('./electron/window.cjs');
 const { createTray } = require('./electron/tray.cjs');
 const { initState, getState, registerIpc } = require('./electron/ipc.cjs');
+
+// TEMP DEBUG: trace who calls app.quit(); dev (unpackaged) shares the installed app's profile
+const _origQuit = app.quit.bind(app);
+app.quit = (...a) => { console.error('[DBG] app.quit() called from:\n' + new Error().stack); return _origQuit(...a); };
+if (!app.isPackaged && !process.env.TWD_DEV_PROFILE) {
+    app.setPath('userData', path.join(app.getPath('appData'), 'Telegram Web Desktop'));
+    console.error('[DBG] userData →', app.getPath('userData'));
+}
 
 // Register as tg:// handler (replaces the official app). When packaged the plain
 // call points the registry at our exe. Unpackaged (electron .), Windows would

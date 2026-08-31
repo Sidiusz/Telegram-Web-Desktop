@@ -1,5 +1,5 @@
 'use strict';
-const { BrowserWindow, session, app, Menu, MenuItem, screen } = require('electron');
+const { BrowserWindow, session, app, net, Menu, MenuItem, screen } = require('electron');
 const path = require('path');
 const fs = require('fs');
 
@@ -35,6 +35,71 @@ function createWindow(state) {
     });
     session.defaultSession.setPermissionCheckHandler(() => true);
 
+    // Telegram now delivers CSP via <meta http-equiv="Content-Security-Policy"> (see /a/ HTML)
+    // – stripping response headers alone is no longer enough and the page stays white
+    // (inline executeJavaScript / service-worker bootstraps are blocked). Intercept the
+    // HTML document and remove the meta tag. Uses session.protocol.handle + net.fetch
+    // (bypassCustomProtocolHandlers avoids recursion). Falls back to header strip only
+    // if handle is unavailable/rejected.
+    try {
+        const ses = session.defaultSession;
+        const canHandle = typeof ses.protocol.handle === 'function';
+        let already = false;
+        try { already = ses.protocol.isProtocolHandled ? ses.protocol.isProtocolHandled('https') : false; } catch (_) {}
+        if (canHandle && !already) {
+            ses.protocol.handle('https', async (request) => {
+                const url = request.url;
+                const isTgCandidate = url.startsWith('https://web.telegram.org/a');
+                if (!isTgCandidate) {
+                    return net.fetch(request, { bypassCustomProtocolHandlers: true });
+                }
+                const resp = await net.fetch(request, { bypassCustomProtocolHandlers: true });
+                const ct = (resp.headers.get('content-type') || '').toLowerCase();
+                if (!ct.includes('text/html')) return resp;
+                let body = await resp.text();
+                const before = body.length;
+                body = body.replace(/<meta[^>]*http-equiv=["']content-security-policy["'][^>]*>/gi, '');
+                body = body.replace(/<meta[^>]*http-equiv=["']content-security-policy-report-only["'][^>]*>/gi, '');
+                if (body.length === before) return resp;
+                const headers = new Headers(resp.headers);
+                headers.delete('content-security-policy');
+                headers.delete('content-security-policy-report-only');
+                headers.delete('x-frame-options');
+                headers.delete('content-length');
+                headers.delete('Content-Length');
+                return new Response(body, { status: resp.status, statusText: resp.statusText, headers });
+            });
+            // Mirror for http (TG may redirect http→https, but cover it)
+            try {
+                const httpAlready = ses.protocol.isProtocolHandled ? ses.protocol.isProtocolHandled('http') : false;
+                if (!httpAlready) {
+                    ses.protocol.handle('http', async (request) => {
+                        const url = request.url;
+                        const isTgCandidate = url.startsWith('http://web.telegram.org/a');
+                        if (!isTgCandidate) return net.fetch(request, { bypassCustomProtocolHandlers: true });
+                        const resp = await net.fetch(request, { bypassCustomProtocolHandlers: true });
+                        const ct = (resp.headers.get('content-type') || '').toLowerCase();
+                        if (!ct.includes('text/html')) return resp;
+                        let body = await resp.text();
+                        const before = body.length;
+                        body = body.replace(/<meta[^>]*http-equiv=["']content-security-policy["'][^>]*>/gi, '');
+                        body = body.replace(/<meta[^>]*http-equiv=["']content-security-policy-report-only["'][^>]*>/gi, '');
+                        if (body.length === before) return resp;
+                        const headers = new Headers(resp.headers);
+                        headers.delete('content-security-policy');
+                        headers.delete('content-security-policy-report-only');
+                        headers.delete('x-frame-options');
+                        headers.delete('content-length');
+                        headers.delete('Content-Length');
+                        return new Response(body, { status: resp.status, statusText: resp.statusText, headers });
+                    });
+                }
+            } catch (_) {}
+        }
+    } catch (e) {
+        console.error('[CSP] protocol.handle failed, fallback to header strip only:', e.message);
+    }
+
     mainWindow = new BrowserWindow({
         width: 1280,
         height: 860,
@@ -52,14 +117,17 @@ function createWindow(state) {
         },
     });
 
-    // Electron removed webPreferences.bypassCSP; strip CSP headers so TG's inline
-    // bootstrap scripts can execute and the app doesn't hang on a white screen.
+    // CSP can be delivered as HTTP header (older) or as <meta http-equiv> (current).
+    // protocol.handle above strips the meta; this strips the header variant.
+    // Keys are lower-cased by Electron but be defensive and strip case-insensitively.
     session.defaultSession.webRequest.onHeadersReceived((details, callback) => {
         const headers = details.responseHeaders || {};
-        delete headers['content-security-policy'];
-        delete headers['Content-Security-Policy'];
-        delete headers['content-security-policy-report-only'];
-        delete headers['Content-Security-Policy-Report-Only'];
+        for (const key of Object.keys(headers)) {
+            const lk = key.toLowerCase();
+            if (lk === 'content-security-policy' || lk === 'content-security-policy-report-only' || lk === 'x-frame-options') {
+                delete headers[key];
+            }
+        }
         callback({ responseHeaders: headers });
     });
 
@@ -159,23 +227,28 @@ function createWindow(state) {
         menu.popup({ window: mainWindow });
     });
 
+    // Keep document.hidden === false even when window is blurred/minimized so
+    // Telegram's upload/download/media pipelines don't throttle or pause in
+    // background (fixes upload stalling when switching chats / minimizing).
+    // Only hasFocus is toggled for notification logic (bootstrap.js checks it).
     mainWindow.on('blur', () => {
         mainWindow.webContents.executeJavaScript(`
-            Object.defineProperty(document, 'hidden', {get: () => true, configurable: true});
-            Object.defineProperty(document, 'visibilityState', {get: () => 'hidden', configurable: true});
-            Object.defineProperty(document, 'hasFocus', {value: () => false, configurable: true});
-            document.dispatchEvent(new Event('visibilitychange'));
-            window.dispatchEvent(new Event('blur'));
+            try {
+                Object.defineProperty(document, 'hasFocus', {value: () => false, configurable: true});
+                window.dispatchEvent(new Event('blur'));
+            } catch(e) {}
         `).catch(() => {});
     });
 
     mainWindow.on('focus', () => {
         mainWindow.webContents.executeJavaScript(`
-            Object.defineProperty(document, 'hidden', {get: () => false, configurable: true});
-            Object.defineProperty(document, 'visibilityState', {get: () => 'visible', configurable: true});
-            Object.defineProperty(document, 'hasFocus', {value: () => true, configurable: true});
-            document.dispatchEvent(new Event('visibilitychange'));
-            window.dispatchEvent(new Event('focus'));
+            try {
+                Object.defineProperty(document, 'hidden', {get: () => false, configurable: true});
+                Object.defineProperty(document, 'visibilityState', {get: () => 'visible', configurable: true});
+                Object.defineProperty(document, 'hasFocus', {value: () => true, configurable: true});
+                document.dispatchEvent(new Event('visibilitychange'));
+                window.dispatchEvent(new Event('focus'));
+            } catch(e) {}
         `).catch(() => {});
     });
 
