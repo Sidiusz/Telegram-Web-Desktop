@@ -280,10 +280,38 @@ const DL = window.__tgdl = (function(){
     // на mousedown её НЕ отменяет — и скачанный файл повторно качался при открытии.
     // Поэтому блокируем родную загрузку на ВСЕХ pointer-событиях (capture), а файл
     // открываем один раз — по 'click' на иконке.
+    function isUploadFile(file){
+        // Upload pending files must not be treated as downloads — their cancel
+        // must go to Telegram's MTProto abort, not our download registry.
+        try{
+            const msg = file.closest && file.closest('.Message');
+            if(!msg) return false;
+            // Heuristic 1: DOM markers specific to uploading (progress/spinner, no download icon)
+            const hasDlIcon = !!file.querySelector('.icon-download, .download-button, [aria-label="Download"], [aria-label="Загрузка"]');
+            const hasUploadMarker = !!msg.querySelector('.Message__sending, .message-upload-progress, .File__upload-progress, .progress-ring, .Spinner');
+            if(hasUploadMarker && !hasDlIcon) return true;
+            const sizeEl = file.querySelector('.file-size, .File__size, .file-subtitle');
+            if(sizeEl && /upload|загрузк|отправк/i.test(sizeEl.textContent||'')) return true;
+            // Heuristic 2: global state sendingState (most reliable)
+            const mid = msg.getAttribute('data-message-id');
+            const rt = window.__tgRuntime;
+            if(rt && rt.getGlobal && mid){
+                const g = rt.getGlobal();
+                if(g && g.messages && g.messages.byChatId){
+                    for(const cid in g.messages.byChatId){
+                        const m = g.messages.byChatId[cid].byId && g.messages.byChatId[cid].byId[mid];
+                        if(m && m.sendingState) return true;
+                    }
+                }
+            }
+        }catch(e){}
+        return false;
+    }
     function onFilePointer(e){
         if(e.button!==undefined && e.button!==0) return;   // только ЛКМ
         const file = e.target.closest && e.target.closest('.File');
         if(!file) return;
+        if(isUploadFile(file)) return; // let Telegram handle upload cancels natively
         if(file.dataset.tgdlDone==='1'){
             // скачано: TG больше НЕ должен ничего качать по клику на этом файле
             e.preventDefault(); e.stopImmediatePropagation();

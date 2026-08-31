@@ -305,6 +305,7 @@ var tgRuntime=(function(){
         getGlobal: function(){ ensure(); try{ return _getG?_getG():null; }catch(e){ return null; } },
     };
 })();
+try { window.__tgRuntime = tgRuntime; } catch(e) {}
 
 // ── Плавающий значок загрузки удалён (#5): прогресс теперь in-message + модалка
 // ── Реестр загрузок #5 ─────────────────────────────────────────────────────
