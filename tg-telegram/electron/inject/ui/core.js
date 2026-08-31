@@ -137,6 +137,10 @@ html._tgreading_ .bubble.menu-container.shown{opacity:0 !important;pointer-event
 /* у скачанного файла формат («zip»/«exe») делаем мельче и сдвигаем под иконку
    папки, чтобы не перекрывался центральной иконкой «открыть». */
 .File._tgdl_done_ok_ .file-ext{font-size:.8em;transform:translateY(8px);}
+.File._tgdl_downloading_ .action-icon{display:none!important;}
+.File._tgdl_downloading_ .file-icon-container{position:relative;}
+._tgdl_spinner_{position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);width:18px;height:18px;border:2px solid rgba(255,255,255,.25);border-top-color:#fff;border-radius:50%;animation:_tgdlSpin_ .7s linear infinite;pointer-events:none;z-index:2;}
+@keyframes _tgdlSpin_{to{transform:translate(-50%,-50%) rotate(360deg)}}
 /* Просмотрщик медиа: зелёная галочка «скачано» на кнопке загрузки (как в чатах).
    У кнопки круглая маска (overflow:hidden под ripple) — она резала бейдж; снимаем
    обрезку только у кнопки с нашим бейджем, чтобы галочка была видна целиком. */
