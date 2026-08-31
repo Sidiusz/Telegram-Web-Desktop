@@ -53,7 +53,7 @@
             ._tg_right_open #MiddleColumn .middle-column-footer { transform: none !important; }
 
             /* Widen bubbles to match the input field width. */
-            #MiddleColumn .Message { --max-width: 70rem !important; }
+            #MiddleColumn .Message:not(.is-album):not(:has(.message-content.media)) { --max-width: 70rem !important; }
             /* Never let a bubble outgrow its row — the list shrinks when the right column opens.
                Rows shrink-wrap, so a % cap is circular; --tgdl-avail is the row width in px, set from JS. */
             #MiddleColumn .Message .message-content { max-width: min(var(--max-width, 30rem), var(--tgdl-avail, 100vw)) !important; }
@@ -87,6 +87,16 @@
             #MiddleColumn.tgdl-private .MessageList.no-avatars .Message.last-in-group .message-content.media,
             #MiddleColumn.tgdl-private .MessageList.no-avatars .Message.last-in-group:not(.is-album) .message-content.media .media-inner,
             #MiddleColumn.tgdl-private .MessageList.no-avatars .Message.last-in-group:not(.is-album) .message-content.media .full-media {
+                border-bottom-left-radius: 0 !important;
+            }
+
+            /* Albums round their outer corners themselves, with the square one on TG's tail side (right). */
+            #MiddleColumn.tgdl-private .MessageList.no-avatars .Message.own .message-content .Album,
+            #MiddleColumn .MessageList:not(.no-avatars) .Message.own .message-content .Album {
+                border-bottom-right-radius: var(--border-radius-messages) !important;
+            }
+            #MiddleColumn.tgdl-private .MessageList.no-avatars .Message.own.last-in-group .message-content .Album,
+            #MiddleColumn .MessageList:not(.no-avatars) .Message.own.last-in-group .message-content .Album {
                 border-bottom-left-radius: 0 !important;
             }
 
@@ -309,6 +319,17 @@
             return 'rgb(' + d[0] + ',' + d[1] + ',' + d[2] + ')';
         } catch (e) { return null; }
     }
+    // In an album the bottom-left corner belongs to the last item, not the first.
+    function _bottomLeftMedia(mc) {
+        var list = mc.querySelectorAll('.full-media, .media-inner img, .media-inner video');
+        var r = mc.getBoundingClientRect(), best = null, bestBottom = -Infinity;
+        for (var i = 0; i < list.length; i++) {
+            var b = list[i].getBoundingClientRect();
+            if (b.left <= r.left + 4 && b.bottom >= r.bottom - 4) return list[i];
+            if (b.bottom > bestBottom) { bestBottom = b.bottom; best = list[i]; }
+        }
+        return best;
+    }
     // Own tail is flipped left, but TG sampled its color from the bubble's bottom-RIGHT
     // pixel. Recolor from the true bottom-LEFT corner (matches black letterbox bars, not
     // the gray photo). Cached per src; reasserted when TG re-renders the appendix.
@@ -317,7 +338,7 @@
             + '#MiddleColumn .Message.own .message-content.media[data-tgdl-appendix]').forEach(function (mc) {
             var app = mc.querySelector('.svg-appendix');
             var corner = app && app.querySelector('.corner');
-            var img = mc.querySelector('.full-media, .media-inner img');
+            var img = _bottomLeftMedia(mc);
             var ours = mc.hasAttribute('data-tgdl-appendix');
             if (!corner || !img) return;
             // Ours is always media-colored; TG's own tail only when mirrored to the left.
