@@ -1,5 +1,5 @@
 'use strict';
-const { app, Menu, protocol } = require('electron');
+const { app, Menu, protocol, powerSaveBlocker } = require('electron');
 const path = require('path');
 const { loadSettings, getBypassRules } = require('./electron/settings.cjs');
 
@@ -99,6 +99,7 @@ if (!gotLock) {
 }
 
 app.whenReady().then(() => {
+    try { powerSaveBlocker.start('prevent-app-suspension'); } catch(e) {}
     initState();
     const state = getState();
     registerIpc(getWindow);
