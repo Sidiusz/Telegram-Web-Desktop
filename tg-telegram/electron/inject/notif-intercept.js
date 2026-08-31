@@ -1,8 +1,9 @@
 (function(){
-    // Guard: переинъекция в том же документе — no-op (как у UI_JS). Нужен потому,
-    // что теперь notif-intercept входит в re-inject набор (watchdog), иначе после
-    // self-reload TG (service worker) перехват Notification терялся навсегда.
-    if (window.__tgNotifIntercept) return;
+    // Re-injection guard: Telegram's own self-reload (service worker) creates a fresh
+    // document, but the watchdog also re-injects this script periodically. We must
+    // re-hook the *new* serviceWorker controller each time, even if Notification
+    // was already proxied in this document's lifetime (HMR / watchdog).
+    const _alreadyProxied = !!window.__tgNotifIntercept;
     window.__tgNotifIntercept = true;
 
     function normalizeText(value, fallback) {
@@ -191,9 +192,24 @@
                     if (reg && reg.active) wrap(reg.active);
                 }).catch(function() {});
             } catch (e) {}
+            // Poll all registrations (covers waiting/installing after SW update without controllerchange)
+            setInterval(function(){
+                try{
+                    if(!sw.getRegistrations) return;
+                    sw.getRegistrations().then(function(regs){
+                        regs.forEach(function(r){
+                            if(r.active) wrap(r.active);
+                            if(r.waiting) wrap(r.waiting);
+                            if(r.installing) wrap(r.installing);
+                        });
+                    }).catch(function(){});
+                }catch(e){}
+            }, 4000);
         } catch (e) {}
     }
     hookServiceWorker();
+
+    if (_alreadyProxied) return;
 
     function makeInstance(title, opts) {
         var instance = Object.create(NotificationShim.prototype || Object.prototype);
