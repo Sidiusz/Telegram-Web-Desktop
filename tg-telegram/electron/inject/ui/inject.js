@@ -150,6 +150,12 @@ function injectSettingsRows(){
             // keep hash classes (v0eXS-8f etc), only swap icon name
             ico.className = ico.className.replace(/icon-[^\s]+/, 'icon-'+iconName);
             ico.setAttribute('aria-hidden','true');
+            // Color the wrapper to match new design (cloned row was notifications pink)
+            const wrap = ico.closest('.ListItem-main-icon');
+            if(wrap){
+                const bgMap = {bots:'#8774e1', download:'#4caf50', info:'#5288c1', reload:'#4caf50'};
+                wrap.style.background = bgMap[iconName] || '#8774e1';
+            }
         }
         return row;
     }
