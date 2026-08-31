@@ -191,15 +191,40 @@ function _genButton(text, onClick){
     b.style.marginTop='12px';
     return b;
 }
-// Нативная строка-значение (как «Язык — Русский»): клон .ListItem.narrow.
+// Нативная строка-значение (как «Язык — Русский»): клон .ListItem.narrow с цветной иконкой.
 function _genRow(liEl, icon, title, value, onClick, danger){
     var r=liEl.cloneNode(true); r.removeAttribute('id'); r.removeAttribute('style'); r.className='ListItem narrow';
     var btn=r.querySelector('.ListItem-button'); if(!btn){ btn=document.createElement('div'); btn.className='ListItem-button'; r.appendChild(btn); }
     btn.innerHTML=''; btn.setAttribute('role','button'); btn.setAttribute('tabindex','0');
-    if(icon){ var ic=document.createElement('i'); ic.className='icon icon-'+icon+' ListItem-main-icon'; ic.setAttribute('aria-hidden','true'); if(danger)ic.style.color='#ff5c5c'; btn.appendChild(ic); }
-    btn.appendChild(document.createTextNode(title));
-    var v=document.createElement('span'); v.className='settings-item__current-value'; v.textContent=value==null?'':value; btn.appendChild(v);
-    if(danger)btn.style.color='#ff5c5c';
+    if(icon){
+        // Клонируем цветной враппер иконки из живого образца, чтобы цвет/фон совпал с нативными
+        var srcWrap = liEl.querySelector('.ListItem-main-icon');
+        var wrap;
+        if(srcWrap){
+            wrap = srcWrap.cloneNode(true);
+            var ic = wrap.querySelector('i.icon');
+            if(ic){
+                ic.className = ic.className.replace(/icon-[^\s]+/, 'icon-'+icon);
+                ic.setAttribute('aria-hidden','true');
+                if(danger) ic.style.color = '#ff5c5c';
+            } else {
+                ic = document.createElement('i');
+                ic.className = 'icon icon-'+icon;
+                ic.setAttribute('aria-hidden','true');
+                wrap.appendChild(ic);
+            }
+            if(danger) wrap.style.color = '#ff5c5c';
+            btn.appendChild(wrap);
+        } else {
+            var ic2=document.createElement('i'); ic2.className='icon icon-'+icon+' ListItem-main-icon'; ic2.setAttribute('aria-hidden','true'); if(danger)ic2.style.color='#ff5c5c'; btn.appendChild(ic2);
+        }
+    }
+    // Title/subtitle handling: use multiline-item if present, else plain text
+    var multi = document.createElement('div'); multi.className='multiline-item';
+    var tEl = document.createElement('span'); tEl.className='title'; tEl.textContent=title; multi.appendChild(tEl);
+    btn.appendChild(multi);
+    var v=document.createElement('span'); v.className='settings-item__current-value'; v.textContent=value==null?'':value; multi.appendChild(v);
+    if(danger) btn.style.color='#ff5c5c';
     if(onClick){ btn.addEventListener('click',function(e){ e.stopPropagation(); onClick(v); }); }
     r._v=v;
     return r;
