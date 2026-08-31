@@ -154,11 +154,18 @@ const DL = window.__tgdl = (function(){
             file.dataset.tgdlDone='1';
             file.dataset.tgdlId = r.id!=null ? String(r.id) : (file.dataset.tgdlId||'');
             file.dataset.tgdlMid = r.mid;
+            file.classList.remove('_tgdl_downloading_');
             ensureBadges(file);
-        } else {
-            // pending/downloading/failed — никаких оверлеев, нативный прогресс TG сам
+        } else if(r.status==='downloading' || r.status==='pending'){
             file.removeAttribute('data-tgdl-done');
             clearBadges(file);
+            file.classList.add('_tgdl_downloading_');
+            ensureDownloadingBadge(file);
+        } else {
+            file.removeAttribute('data-tgdl-done');
+            file.classList.remove('_tgdl_downloading_');
+            clearBadges(file);
+            clearDownloadingBadge(file);
         }
     }
 
@@ -186,6 +193,16 @@ const DL = window.__tgdl = (function(){
         const cont = file.querySelector('.file-icon-container'); if(!cont)return;
         ['._tgdl_open_','._tgdl_ok_'].forEach(function(s){const el=cont.querySelector(s); if(el)el.remove();});
     }
+    function ensureDownloadingBadge(file){
+        const cont=file.querySelector('.file-icon-container'); if(!cont) return;
+        if(!cont.querySelector('._tgdl_spinner_')){
+            const sp=document.createElement('div'); sp.className='_tgdl_spinner_'; sp.setAttribute('aria-hidden','true'); cont.appendChild(sp);
+        }
+    }
+    function clearDownloadingBadge(file){
+        const cont=file.querySelector('.file-icon-container'); if(!cont) return;
+        const sp=cont.querySelector('._tgdl_spinner_'); if(sp) sp.remove();
+    }
 
     // Перекачка: снимаем оверлей, возвращаем родную стрелку (CSS), не трогаем ПКМ-меню.
     function unpaint(mid){
@@ -195,7 +212,9 @@ const DL = window.__tgdl = (function(){
         file.removeAttribute('data-tgdl-done');
         file.removeAttribute('data-tgdl-id');
         file.removeAttribute('data-tgdl-mid');
+        file.classList.remove('_tgdl_downloading_');
         clearBadges(file);
+        clearDownloadingBadge(file);
     }
 
     // Файл пропал с диска: молча сбрасываем «скачано» → возвращается родная стрелка,
@@ -327,7 +346,11 @@ const DL = window.__tgdl = (function(){
             const msg = file.closest('[data-message-id]'); if(!msg) return;
             const mid = msg.getAttribute('data-message-id');
             const cur = registry[mid];
-            if(cur && (cur.status==='pending'||cur.status==='downloading')) return;   // это mousedown отмены, не новый старт
+            if(cur && (cur.status==='pending'||cur.status==='downloading')){
+                e.preventDefault(); e.stopImmediatePropagation();
+                try{ toast(T('dl_already')); }catch(_){}
+                return;
+            }
             const t = file.querySelector('.file-title');
             const filename = t ? (t.getAttribute('title')||t.textContent||'').trim() : '';
             if(filename){ expectDownload(mid, filename); _lastStartMark={mid:mid, ts:Date.now()}; }
