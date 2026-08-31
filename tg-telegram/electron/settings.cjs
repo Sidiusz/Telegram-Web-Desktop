@@ -8,6 +8,7 @@ const DEFAULTS = {
     minimize_to_tray: false,
     popup_notifications: true,
     background_notifications_enabled: false,
+    bypass_hosts: false,
 
 
     notif_sound: true,
@@ -26,12 +27,58 @@ const DEFAULTS = {
     skipped_version: null,
 };
 
+const BYPASS_IP = '149.154.167.220';
+const BYPASS_DOMAINS = [
+    'my.telegram.org',
+    'desktop.telegram.org',
+    'macos.telegram.org',
+    'oauth.telegram.org',
+    'oauth.tg.dev',
+    'cdn.telesco.pe',
+    'cdn1.telesco.pe',
+    'cdn2.telesco.pe',
+    'cdn3.telesco.pe',
+    'cdn4.telesco.pe',
+    'cdn5.telesco.pe',
+    'cdn6.telesco.pe',
+    'core.telegram.org',
+    'zws4.web.telegram.org',
+    'vesta.web.telegram.org',
+    'vesta-1.web.telegram.org',
+    'venus-1.web.telegram.org',
+    'telegram.me',
+    'telegram.dog',
+    'telegram.space',
+    'telesco.pe',
+    'tg.dev',
+    'telegram.org',
+    't.me',
+    'api.telegram.org',
+    'td.telegram.org',
+    'venus.web.telegram.org',
+    'web.telegram.org',
+    'kws2-1.web.telegram.org',
+    'kws2.web.telegram.org',
+    'kws4-1.web.telegram.org',
+    'kws4.web.telegram.org',
+    'zws2-1.web.telegram.org',
+    'zws2.web.telegram.org',
+    'zws4-1.web.telegram.org',
+];
+
+function getBypassRules() {
+    return BYPASS_DOMAINS.map(domain => `MAP ${domain} ${BYPASS_IP}`).join(',');
+}
+
+module.exports.getBypassRules = getBypassRules;
+
 function loadSettings() {
     return {
         save_path: store.get('save_path', DEFAULTS.save_path),
         minimize_to_tray: store.get('minimize_to_tray', DEFAULTS.minimize_to_tray),
         popup_notifications: store.get('popup_notifications', DEFAULTS.popup_notifications),
         background_notifications_enabled: store.get('background_notifications_enabled', DEFAULTS.background_notifications_enabled),
+        bypass_hosts: store.get('bypass_hosts', DEFAULTS.bypass_hosts),
         notif_sound: store.get('notif_sound', DEFAULTS.notif_sound),
         notif_duration: store.get('notif_duration', DEFAULTS.notif_duration),
         notif_volume: store.get('notif_volume', DEFAULTS.notif_volume),
