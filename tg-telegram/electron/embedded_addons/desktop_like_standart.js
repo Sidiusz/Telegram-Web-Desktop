@@ -22,6 +22,13 @@
 
             /* New TG header is a centered island — left-align it like the messages; keep TG's rounding + top gap. */
             #MiddleColumn .MiddleHeader { margin-left: 0 !important; margin-right: auto !important; }
+            /* Right column is absolute overlay (408px + 16px gap). Shrink MiddleColumn content so header/footer/messages stay visible. */
+            #Main.right-column-open #MiddleColumn {
+                padding-right: 424px !important;
+                box-sizing: border-box !important;
+            }
+            /* Composer flex row should not wrap — keep send button on right, not bottom, for long text. */
+            #MiddleColumn .Composer { flex-wrap: nowrap !important; align-items: flex-end !important; }
 
             /* Flip own messages left only in private 1:1 chats (.tgdl-private); skip channels/groups (broken tail otherwise). */
             #MiddleColumn.tgdl-private .MessageList.no-avatars .Message { padding-left: 44px !important; position: relative !important; }

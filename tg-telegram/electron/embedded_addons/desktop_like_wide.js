@@ -104,6 +104,13 @@
                 width: calc(100% - 7rem) !important; max-width: calc(100% - 7rem) !important;
                 margin-left: auto !important; margin-right: auto !important;
             }
+            /* Right column overlay: shrink MiddleColumn content so header/footer stay visible. */
+            #Main.right-column-open #MiddleColumn {
+                padding-right: 424px !important;
+                box-sizing: border-box !important;
+            }
+            /* Keep send button on right for long text (was wrapping to bottom). */
+            #MiddleColumn .Composer { flex-wrap: nowrap !important; align-items: flex-end !important; }
 
             /* Our injected tail: TG hides .svg-appendix unless .message-content has .has-appendix. */
             #MiddleColumn .Message.own .message-content[data-tgdl-appendix] .svg-appendix { display: block !important; }
