@@ -227,29 +227,14 @@ function createWindow(state) {
         menu.popup({ window: mainWindow });
     });
 
-    // Keep document.hidden === false even when window is blurred/minimized so
-    // Telegram's upload/download/media pipelines don't throttle or pause in
-    // background (fixes upload stalling when switching chats / minimizing).
-    // Only hasFocus is toggled for notification logic (bootstrap.js checks it).
+    // Preload overrides Document.prototype.hidden/visibilityState/hasFocus once.
+    // Here we only flip the backing variables — no defineProperty on every blur.
     mainWindow.on('blur', () => {
-        mainWindow.webContents.executeJavaScript(`
-            try {
-                Object.defineProperty(document, 'hasFocus', {value: () => false, configurable: true});
-                window.dispatchEvent(new Event('blur'));
-            } catch(e) {}
-        `).catch(() => {});
+        mainWindow.webContents.executeJavaScript(`try{window.__tgHiddenCtrl&&window.__tgHiddenCtrl.setHasFocus(false)}catch(e){}`).catch(()=>{});
     });
-
     mainWindow.on('focus', () => {
-        mainWindow.webContents.executeJavaScript(`
-            try {
-                Object.defineProperty(document, 'hidden', {get: () => false, configurable: true});
-                Object.defineProperty(document, 'visibilityState', {get: () => 'visible', configurable: true});
-                Object.defineProperty(document, 'hasFocus', {value: () => true, configurable: true});
-                document.dispatchEvent(new Event('visibilitychange'));
-                window.dispatchEvent(new Event('focus'));
-            } catch(e) {}
-        `).catch(() => {});
+        mainWindow.webContents.executeJavaScript(`try{window.__tgHiddenCtrl&&window.__tgHiddenCtrl.setHasFocus(true)}catch(e){}`).catch(()=>{});
+        mainWindow.webContents.executeJavaScript(`try{window.__tgHiddenCtrl&&window.__tgHiddenCtrl.setHidden(false)}catch(e){}`).catch(()=>{});
     });
 
     mainWindow.webContents.session.on('will-download', (event, item) => {

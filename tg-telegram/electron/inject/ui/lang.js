@@ -8,6 +8,8 @@ var L={
     // burger menu / panel titles
     downloads:      {ru:'Загрузки',                 en:'Downloads'},
     addons:         {ru:'Дополнения',               en:'Add-ons'},
+    addons_desc:    {ru:'Плагины, темы и скрипты',    en:'Plugins, themes and scripts'},
+    dl_already:     {ru:'Уже скачивается',           en:'Already downloading'},
     app_settings:   {ru:'Настройки приложения',     en:'App settings'},
     changelog:      {ru:'Список изменений',          en:'Changelog'},
     check_updates:  {ru:'Проверить обновления',      en:'Check for updates'},

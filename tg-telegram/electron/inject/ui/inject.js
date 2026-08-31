@@ -109,7 +109,7 @@ function injectSettingsRows(){
 
     // Clone live native row — keep exact card styling.
     const tmpl = anchorEl.closest('.ListItem.narrow') || anchorEl;
-    function makeRow(id, iconName, label){
+    function makeRow(id, iconName, label, sub){
         const row = tmpl.cloneNode(true);
         row.removeAttribute('id'); row.id = id;
         const btn = row.querySelector('.ListItem-button');
@@ -118,8 +118,16 @@ function injectSettingsRows(){
         if(multi){
             const titleEl = multi.querySelector('.title');
             if(titleEl) titleEl.textContent = label;
-            const subEl = multi.querySelector('.subtitle');
-            if(subEl) subEl.remove();
+            let subEl = multi.querySelector('.subtitle');
+            if(sub){
+                if(subEl) subEl.textContent = sub;
+                else {
+                    subEl = document.createElement('span');
+                    subEl.className = 'subtitle';
+                    multi.appendChild(subEl);
+                    subEl.textContent = sub;
+                }
+            } else if(subEl) subEl.remove();
             // remove stray value badges if any
             multi.querySelectorAll('.settings-item__current-value').forEach(el=>el.remove());
             Array.from(btn.childNodes).forEach(n=>{
@@ -130,6 +138,12 @@ function injectSettingsRows(){
                 if(n.nodeType===3 || (n.nodeType===1 && /settings-item__current-value/.test(n.className||''))) btn.removeChild(n);
             });
             btn.appendChild(document.createTextNode(label));
+            if(sub){
+                const subEl = document.createElement('span');
+                subEl.className = 'subtitle';
+                subEl.textContent = sub;
+                btn.appendChild(subEl);
+            }
         }
         const ico = btn.querySelector('i.icon');
         if(ico){
@@ -145,7 +159,7 @@ function injectSettingsRows(){
     // списке оставляем «Дополнения», а «Проверить обновления» кладём в самый низ.
 
     // «Дополнения» — сразу под «Общие настройки» (первая строка списка), иначе в начало.
-    const adRow = makeRow('_tgst_ad_', 'bots', T('addons'));
+    const adRow = makeRow('_tgst_ad_', 'bots', T('addons'), T('addons_desc'));
     adRow.querySelector('.ListItem-button').addEventListener('click', () => openAddonsNative());
     let generalAnchor = null;
     for(const r of list.querySelectorAll('.ListItem')){

@@ -181,30 +181,36 @@
             }
             wrap(sw.controller);
             sw.addEventListener('controllerchange', function() { wrap(sw.controller); });
-            // TG re-registers/updates its service worker over a long session; when the
-            // controller swaps, background notifications route through a fresh (unhooked)
-            // controller and popups silently stop. wrap() is idempotent (__tgNotifHooked
-            // guard), so keep re-checking forever instead of giving up after 60s.
-            setInterval(function() { if (sw.controller) wrap(sw.controller); }, 5000);
-            // Also re-hook whatever the active registration exposes (controller can lag).
-            try {
-                sw.ready.then(function(reg) {
-                    if (reg && reg.active) wrap(reg.active);
-                }).catch(function() {});
-            } catch (e) {}
-            // Poll all registrations (covers waiting/installing after SW update without controllerchange) — 8s is enough.
-            setInterval(function(){
+            // Pure event-driven — no polling. Cover SW updates via updatefound/statechange.
+            function hookReg(reg){
+                if(!reg) return;
+                if(reg.active) wrap(reg.active);
+                if(reg.waiting) wrap(reg.waiting);
+                if(reg.installing) wrap(reg.installing);
                 try{
-                    if(!sw.getRegistrations) return;
-                    sw.getRegistrations().then(function(regs){
-                        regs.forEach(function(r){
-                            if(r.active) wrap(r.active);
-                            if(r.waiting) wrap(r.waiting);
-                            if(r.installing) wrap(r.installing);
-                        });
-                    }).catch(function(){});
+                    reg.addEventListener('updatefound', function(){
+                        var nw = reg.installing || reg.waiting;
+                        if(nw){
+                            wrap(nw);
+                            nw.addEventListener('statechange', function(){
+                                if(nw.state==='activated' || nw.state==='installed'){
+                                    wrap(nw);
+                                    if(reg.active) wrap(reg.active);
+                                    if(reg.waiting) wrap(reg.waiting);
+                                }
+                            });
+                        }
+                    });
                 }catch(e){}
-            }, 8000);
+            }
+            try {
+                sw.ready.then(function(reg) { hookReg(reg); }).catch(function() {});
+            } catch (e) {}
+            try{
+                if(sw.getRegistrations) sw.getRegistrations().then(function(regs){
+                    regs.forEach(function(r){ hookReg(r); });
+                }).catch(function(){});
+            }catch(e){}
         } catch (e) {}
     }
     hookServiceWorker();
