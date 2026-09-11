@@ -25,7 +25,20 @@ if (!app.isPackaged) app.commandLine.appendSwitch('remote-debugging-port', '9222
 const { createWindow, getWindow } = require('./electron/window.cjs');
 const { createTray } = require('./electron/tray.cjs');
 const { initState, getState, registerIpc } = require('./electron/ipc.cjs');
-const { startTgWsProxyWebBridge } = require('./electron/tg-ws-proxy-web.cjs');
+const {
+    installTgWsProxyHostRules,
+    startTgWsProxyHostBridge,
+} = require('./electron/tg-ws-proxy-hostbridge.cjs');
+
+// This switch must be installed before Chromium's network service starts.
+// It only remaps Telegram Web A DC hosts (zws1..zws5 and media variants)
+// inside this Electron process to the local adapter. No system DNS/hosts/proxy
+// settings are changed.
+try {
+    installTgWsProxyHostRules();
+} catch (e) {
+    console.error('[tg-ws-proxy] failed to install host resolver rules:', e);
+}
 
 // TEMP DEBUG: trace who calls app.quit(); dev (unpackaged) shares the installed app's profile
 const _origQuit = app.quit.bind(app);
@@ -97,14 +110,14 @@ if (!gotLock) {
 app.whenReady().then(async () => {
     try { powerSaveBlocker.start('prevent-app-suspension'); } catch(e) {}
 
-    // Telegram Web A itself still loads normally from web.telegram.org. Only its
-    // zws*/apiws WebSocket transport is redirected to a loopback adapter, which
-    // converts Web A's standard obfuscated MTProto stream to the local TG WS
-    // Proxy MTProxy transport. Install this before the BrowserWindow is created.
+    // The browser still requests the original wss://zwsN.web.telegram.org URL.
+    // Chromium resolves only those DC endpoints to the fixed loopback adapter
+    // port, preserving the original hostname/SNI. The adapter then translates
+    // Web A's obfuscated transport to Flowseal TG WS Proxy's local MTProxy port.
     try {
-        await startTgWsProxyWebBridge(session.defaultSession);
+        await startTgWsProxyHostBridge(session.defaultSession);
     } catch (e) {
-        console.error('[tg-ws-proxy] Web A adapter failed to start:', e);
+        console.error('[tg-ws-proxy] host bridge failed to start:', e);
     }
 
     initState();
