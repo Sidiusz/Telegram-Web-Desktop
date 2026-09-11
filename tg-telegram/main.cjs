@@ -1,5 +1,5 @@
 'use strict';
-const { app, Menu, protocol, powerSaveBlocker } = require('electron');
+const { app, Menu, protocol, powerSaveBlocker, session } = require('electron');
 const path = require('path');
 
 // Electron 40 removed webPreferences.bypassCSP — without it Telegram's CSP
@@ -25,6 +25,7 @@ if (!app.isPackaged) app.commandLine.appendSwitch('remote-debugging-port', '9222
 const { createWindow, getWindow } = require('./electron/window.cjs');
 const { createTray } = require('./electron/tray.cjs');
 const { initState, getState, registerIpc } = require('./electron/ipc.cjs');
+const { registerTgWsProxyIpc } = require('./electron/tg-ws-proxy.cjs');
 
 // TEMP DEBUG: trace who calls app.quit(); dev (unpackaged) shares the installed app's profile
 const _origQuit = app.quit.bind(app);
@@ -95,6 +96,20 @@ if (!gotLock) {
 
 app.whenReady().then(() => {
     try { powerSaveBlocker.start('prevent-app-suspension'); } catch(e) {}
+
+    // Session preloads run before BrowserWindow's normal preload. This is early
+    // enough to wrap Telegram Web A's module worker before GramJS creates it.
+    registerTgWsProxyIpc();
+    try {
+        session.defaultSession.registerPreloadScript({
+            type: 'frame',
+            id: 'tg-ws-proxy-bridge',
+            filePath: path.join(__dirname, 'electron', 'tg-ws-proxy-preload.cjs'),
+        });
+    } catch (e) {
+        console.error('[tg-ws-proxy] preload registration failed:', e);
+    }
+
     initState();
     const state = getState();
     registerIpc(getWindow);
