@@ -25,7 +25,7 @@ if (!app.isPackaged) app.commandLine.appendSwitch('remote-debugging-port', '9222
 const { createWindow, getWindow } = require('./electron/window.cjs');
 const { createTray } = require('./electron/tray.cjs');
 const { initState, getState, registerIpc } = require('./electron/ipc.cjs');
-const { registerTgWsProxyIpc } = require('./electron/tg-ws-proxy.cjs');
+const { startTgWsProxyWebBridge } = require('./electron/tg-ws-proxy-web.cjs');
 
 // TEMP DEBUG: trace who calls app.quit(); dev (unpackaged) shares the installed app's profile
 const _origQuit = app.quit.bind(app);
@@ -94,20 +94,17 @@ if (!gotLock) {
     });
 }
 
-app.whenReady().then(() => {
+app.whenReady().then(async () => {
     try { powerSaveBlocker.start('prevent-app-suspension'); } catch(e) {}
 
-    // Session preloads run before BrowserWindow's normal preload. This is early
-    // enough to wrap Telegram Web A's module worker before GramJS creates it.
-    registerTgWsProxyIpc();
+    // Telegram Web A itself still loads normally from web.telegram.org. Only its
+    // zws*/apiws WebSocket transport is redirected to a loopback adapter, which
+    // converts Web A's standard obfuscated MTProto stream to the local TG WS
+    // Proxy MTProxy transport. Install this before the BrowserWindow is created.
     try {
-        session.defaultSession.registerPreloadScript({
-            type: 'frame',
-            id: 'tg-ws-proxy-bridge',
-            filePath: path.join(__dirname, 'electron', 'tg-ws-proxy-preload.cjs'),
-        });
+        await startTgWsProxyWebBridge(session.defaultSession);
     } catch (e) {
-        console.error('[tg-ws-proxy] preload registration failed:', e);
+        console.error('[tg-ws-proxy] Web A adapter failed to start:', e);
     }
 
     initState();
