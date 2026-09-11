@@ -1,12 +1,12 @@
 # tg-ws-proxy integration
 
-Telegram Web Desktop can route Telegram Web A's MTProto transport through Flowseal's `tg-ws-proxy` without changing the upstream Telegram Web bundle.
+Telegram Web Desktop keeps loading `https://web.telegram.org/a/` normally, but routes Telegram Web A's MTProto WebSocket connections through Flowseal's `tg-ws-proxy`.
 
 ## Normal setup
 
-1. Install/start `tg-ws-proxy` normally.
-2. Configure it in the Flowseal tray app.
-3. Restart Telegram Web Desktop.
+1. Start `TG WS Proxy` and leave it running in the tray.
+2. Configure it normally (`127.0.0.1:1443` by default).
+3. Start Telegram Web Desktop.
 
 The client automatically reads Flowseal's tray configuration from:
 
@@ -14,19 +14,15 @@ The client automatically reads Flowseal's tray configuration from:
 - macOS: `~/Library/Application Support/TgWsProxy/config.json`
 - Linux: `${XDG_CONFIG_HOME:-~/.config}/TgWsProxy/config.json`
 
-It uses the same `host`, `port`, and 16-byte hex `secret` that Flowseal uses, so there is no second proxy configuration to keep in sync.
+It uses the same `host`, `port`, and 16-byte hex `secret` as the tray app. No Telegram proxy link has to be opened in the Web client.
 
-If the config is missing or invalid, the integration stays disabled. If the config exists but the local proxy is not listening, Telegram Web falls back to its normal direct WebSocket transport.
-
-## Portable / CLI configuration
-
-For a portable Flowseal installation, point the client at the proxy config explicitly:
+For a portable Flowseal installation, set:
 
 ```text
 TG_WS_PROXY_CONFIG=/path/to/TgWsProxy_data/config.json
 ```
 
-You can also provide the connection values directly:
+Direct overrides are also supported:
 
 ```text
 TG_WS_PROXY_HOST=127.0.0.1
@@ -34,18 +30,21 @@ TG_WS_PROXY_PORT=1443
 TG_WS_PROXY_SECRET=0123456789abcdef0123456789abcdef
 ```
 
-Environment variables override values read from `config.json`.
-
 ## How it works
 
-Telegram Web A runs GramJS in a dedicated module worker and normally opens `wss://zwsN.web.telegram.org/apiws...` connections using Telegram's obfuscated abridged transport.
+Telegram Web A normally opens connections such as `wss://zws2.web.telegram.org/apiws` and sends standard Telegram obfuscated MTProto over those WebSockets.
 
-The Electron preload wraps module workers before GramJS starts and substitutes only Telegram DC WebSockets. Binary transport data is passed to the Electron main process, where the bridge:
+The Electron main process intercepts only requests whose resource type is `webSocket` and whose destination is a Telegram `zwsN`/`zwsN-1` DC endpoint. Those requests are redirected to a loopback WSS server inside the application. No page scripts, service workers, or Telegram API workers are replaced.
 
-1. unwraps the standard Telegram Web AES-CTR obfuscated stream;
-2. creates the MTProxy-style secret-derived obfuscated handshake expected by `tg-ws-proxy`;
-3. inserts the DC number (and media/download DC sign) into that handshake;
-4. re-encrypts the abridged MTProto byte stream for the local proxy;
-5. performs the inverse transform for responses.
+The loopback adapter then:
 
-No Telegram authorization keys, MTProto messages, or account credentials are interpreted by the bridge; it only translates the transport-layer obfuscation.
+1. accepts the normal Web A binary WebSocket stream;
+2. reads Web A's standard 64-byte obfuscated transport header;
+3. creates the secret-derived MTProxy handshake expected by the running `TG WS Proxy` instance;
+4. inserts the DC number (negative for media/download DCs);
+5. translates the AES-CTR transport stream in both directions;
+6. sends the resulting TCP stream to the configured local Flowseal listener.
+
+The bridge does not parse Telegram authorization data or MTProto RPC messages; it only translates the transport layer.
+
+If the Flowseal config is absent, the adapter is not enabled. If the config exists but `TG WS Proxy` is not listening, Telegram's proxied WebSocket connection fails and retries until the local proxy is available.
