@@ -1,9 +1,6 @@
 'use strict';
 const { app, Menu, protocol, powerSaveBlocker, session } = require('electron');
 const path = require('path');
-const { startTgWsProxyFileLog } = require('./electron/tg-ws-proxy-log.cjs');
-
-startTgWsProxyFileLog();
 
 // Electron 40 removed webPreferences.bypassCSP — without it Telegram's CSP
 // (now delivered via <meta http-equiv> in addition to headers) blocks our
@@ -28,19 +25,17 @@ if (!app.isPackaged) app.commandLine.appendSwitch('remote-debugging-port', '9222
 const { createWindow, getWindow } = require('./electron/window.cjs');
 const { createTray } = require('./electron/tray.cjs');
 const { initState, getState, registerIpc } = require('./electron/ipc.cjs');
-const {
-    installTgWsProxyHostRules,
-    startTgWsProxyHostBridge,
-} = require('./electron/tg-ws-proxy-hostbridge.cjs');
+const { startTgWsProxyHostBridge } = require('./electron/tg-ws-proxy-hostbridge.cjs');
+const { installTgWsProxyEndpointRules } = require('./electron/tg-ws-proxy-hostrules.cjs');
 
-// This switch must be installed before Chromium's network service starts.
-// It only remaps Telegram Web A DC hosts (zws1..zws5 and media variants)
-// inside this Electron process to the local adapter. No system DNS/hosts/proxy
-// settings are changed.
+// Must be installed before Chromium's network service starts. These endpoint
+// mappings are process-local: only Telegram Web A's zws1..zws5 hosts (including
+// media variants) are sent to our loopback adapter. No Windows DNS/hosts/proxy
+// settings are modified.
 try {
-    installTgWsProxyHostRules();
+    installTgWsProxyEndpointRules();
 } catch (e) {
-    console.error('[tg-ws-proxy] failed to install host resolver rules:', e);
+    console.error('[tg-ws-proxy] failed to install endpoint host rules:', e);
 }
 
 // TEMP DEBUG: trace who calls app.quit(); dev (unpackaged) shares the installed app's profile
@@ -114,8 +109,8 @@ app.whenReady().then(async () => {
     try { powerSaveBlocker.start('prevent-app-suspension'); } catch(e) {}
 
     // The browser still requests the original wss://zwsN.web.telegram.org URL.
-    // Chromium resolves only those DC endpoints to the fixed loopback adapter
-    // port, preserving the original hostname/SNI. The adapter then translates
+    // Chromium sends only those endpoints to the fixed loopback adapter port,
+    // preserving the original URL hostname/SNI. The adapter then translates
     // Web A's obfuscated transport to Flowseal TG WS Proxy's local MTProxy port.
     try {
         await startTgWsProxyHostBridge(session.defaultSession);
