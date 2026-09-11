@@ -25,18 +25,7 @@ if (!app.isPackaged) app.commandLine.appendSwitch('remote-debugging-port', '9222
 const { createWindow, getWindow } = require('./electron/window.cjs');
 const { createTray } = require('./electron/tray.cjs');
 const { initState, getState, registerIpc } = require('./electron/ipc.cjs');
-const { startTgWsProxyHostBridge } = require('./electron/tg-ws-proxy-hostbridge.cjs');
-const { installTgWsProxyEndpointRules } = require('./electron/tg-ws-proxy-hostrules.cjs');
-
-// Must be installed before Chromium's network service starts. These endpoint
-// mappings are process-local: only Telegram Web A's zws1..zws5 hosts (including
-// media variants) are sent to our loopback adapter. No Windows DNS/hosts/proxy
-// settings are modified.
-try {
-    installTgWsProxyEndpointRules();
-} catch (e) {
-    console.error('[tg-ws-proxy] failed to install endpoint host rules:', e);
-}
+const { startTgWsProxyConnectBridge } = require('./electron/tg-ws-proxy-connectbridge.cjs');
 
 // TEMP DEBUG: trace who calls app.quit(); dev (unpackaged) shares the installed app's profile
 const _origQuit = app.quit.bind(app);
@@ -108,14 +97,14 @@ if (!gotLock) {
 app.whenReady().then(async () => {
     try { powerSaveBlocker.start('prevent-app-suspension'); } catch(e) {}
 
-    // The browser still requests the original wss://zwsN.web.telegram.org URL.
-    // Chromium sends only those endpoints to the fixed loopback adapter port,
-    // preserving the original URL hostname/SNI. The adapter then translates
-    // Web A's obfuscated transport to Flowseal TG WS Proxy's local MTProxy port.
+    // Route only Telegram Web DC websocket hosts through a process-local PAC
+    // CONNECT proxy. web.telegram.org and all other traffic remain DIRECT.
+    // The local bridge terminates the WSS connection, translates Telegram Web A's
+    // obfuscated MTProto stream, and forwards it to Flowseal TG WS Proxy.
     try {
-        await startTgWsProxyHostBridge(session.defaultSession);
+        await startTgWsProxyConnectBridge(session.defaultSession);
     } catch (e) {
-        console.error('[tg-ws-proxy] host bridge failed to start:', e);
+        console.error('[tg-ws-proxy] PAC CONNECT bridge failed to start:', e);
     }
 
     initState();
