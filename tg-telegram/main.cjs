@@ -30,6 +30,7 @@ const {
     readProxyConfig,
 } = require('./electron/tg-ws-proxy-connectbridge.cjs');
 const { installTgWsProxyStartupPac } = require('./electron/tg-ws-proxy-startup-pac.cjs');
+const { installTgWsProxyDiagnostics } = require('./electron/tg-ws-proxy-diagnostics.cjs');
 
 // session.setProxy() happens after app.ready. Telegram Web A creates its API worker
 // very early, and that worker can keep a network context that never observes a
@@ -122,6 +123,15 @@ app.whenReady().then(async () => {
         await startTgWsProxyConnectBridge(session.defaultSession);
     } catch (e) {
         console.error('[tg-ws-proxy] PAC CONNECT bridge failed to start:', e);
+    }
+
+    // Record every actual ws:// / wss:// request and its network error in the same
+    // bridge log. This tells us which endpoint the deployed Telegram Web A build
+    // is really using instead of assuming zws/kws hostnames.
+    try {
+        installTgWsProxyDiagnostics(session.defaultSession);
+    } catch (e) {
+        console.error('[tg-ws-proxy] WebSocket diagnostics failed:', e);
     }
 
     initState();
