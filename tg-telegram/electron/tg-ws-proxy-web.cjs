@@ -3,7 +3,7 @@
 const { app } = require('electron');
 const crypto = require('crypto');
 const fs = require('fs');
-const http = require('http');
+const https = require('https');
 const net = require('net');
 const os = require('os');
 const path = require('path');
@@ -377,7 +377,12 @@ async function startTgWsProxyWebBridge(electronSession) {
         return null;
     }
 
-    const server = http.createServer((_req, res) => {
+    const certPath = path.join(__dirname, 'local-proxy-cert.pem');
+    const keyPath = path.join(__dirname, 'local-proxy-key.pem');
+    const server = https.createServer({
+        cert: fs.readFileSync(certPath),
+        key: fs.readFileSync(keyPath),
+    }, (_req, res) => {
         res.writeHead(404, { 'Content-Type': 'text/plain' });
         res.end('Telegram Web proxy adapter');
     });
@@ -448,12 +453,17 @@ async function startTgWsProxyWebBridge(electronSession) {
         throw new Error('Failed to allocate local Telegram Web proxy port');
     }
 
+    electronSession.setCertificateVerifyProc((request, callback) => {
+        if (request.hostname === LOCAL_HOST) return callback(0);
+        callback(-3);
+    });
+
     const filter = { urls: ['wss://*.web.telegram.org/*', 'ws://*.web.telegram.org/*'] };
     electronSession.webRequest.onBeforeRequest(filter, (details, callback) => {
         if (details.resourceType !== 'webSocket') return callback({});
         const target = parseTelegramWsUrl(details.url);
         if (!target) return callback({});
-        const redirectURL = `ws://${LOCAL_HOST}:${localPort}/tg-ws-proxy?dc=${encodeURIComponent(target.dc)}`;
+        const redirectURL = `wss://${LOCAL_HOST}:${localPort}/tg-ws-proxy?dc=${encodeURIComponent(target.dc)}`;
         console.log(`[tg-ws-proxy] redirect ${target.hostname} -> local adapter DC${Math.abs(target.dc)}${target.dc < 0 ? ' media' : ''}`);
         callback({ redirectURL });
     });
@@ -466,7 +476,7 @@ async function startTgWsProxyWebBridge(electronSession) {
     app.once('before-quit', stop);
 
     bridgeState = { localPort, configPath: config.configPath, stop };
-    console.log(`[tg-ws-proxy] Web A adapter listening on ws://${LOCAL_HOST}:${localPort}`);
+    console.log(`[tg-ws-proxy] Web A adapter listening on wss://${LOCAL_HOST}:${localPort}`);
     console.log(`[tg-ws-proxy] using config ${config.configPath}`);
     return bridgeState;
 }
