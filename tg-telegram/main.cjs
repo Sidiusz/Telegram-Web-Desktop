@@ -1,5 +1,5 @@
 'use strict';
-const { app, Menu, protocol, powerSaveBlocker } = require('electron');
+const { app, Menu, protocol, powerSaveBlocker, session } = require('electron');
 const path = require('path');
 
 // Electron 40 removed webPreferences.bypassCSP — without it Telegram's CSP
@@ -25,6 +25,25 @@ if (!app.isPackaged) app.commandLine.appendSwitch('remote-debugging-port', '9222
 const { createWindow, getWindow } = require('./electron/window.cjs');
 const { createTray } = require('./electron/tray.cjs');
 const { initState, getState, registerIpc } = require('./electron/ipc.cjs');
+const {
+    startTgWsProxyConnectBridge,
+    readProxyConfig,
+} = require('./electron/tg-ws-proxy-connectbridge.cjs');
+const { installTgWsProxyStartupPac } = require('./electron/tg-ws-proxy-startup-pac.cjs');
+const { installTgWsProxyDiagnostics } = require('./electron/tg-ws-proxy-diagnostics.cjs');
+
+// session.setProxy() happens after app.ready. Telegram Web A creates its API worker
+// very early, and that worker can keep a network context that never observes a
+// later proxy change. Install the same PAC through Chromium's startup switch so
+// every worker/WebSocket context inherits it from process creation. This affects
+// only this Electron process and the PAC sends every non-Telegram-DC host DIRECT.
+try {
+    if (readProxyConfig()) {
+        installTgWsProxyStartupPac();
+    }
+} catch (e) {
+    console.error('[tg-ws-proxy] failed to install startup PAC:', e);
+}
 
 // TEMP DEBUG: trace who calls app.quit(); dev (unpackaged) shares the installed app's profile
 const _origQuit = app.quit.bind(app);
@@ -93,8 +112,28 @@ if (!gotLock) {
     });
 }
 
-app.whenReady().then(() => {
+app.whenReady().then(async () => {
     try { powerSaveBlocker.start('prevent-app-suspension'); } catch(e) {}
+
+    // Route only Telegram Web DC websocket hosts through a process-local PAC
+    // CONNECT proxy. web.telegram.org and all other traffic remain DIRECT.
+    // The local bridge terminates the WSS connection, translates Telegram Web A's
+    // obfuscated MTProto stream, and forwards it to Flowseal TG WS Proxy.
+    try {
+        await startTgWsProxyConnectBridge(session.defaultSession);
+    } catch (e) {
+        console.error('[tg-ws-proxy] PAC CONNECT bridge failed to start:', e);
+    }
+
+    // Record every actual ws:// / wss:// request and its network error in the same
+    // bridge log. This tells us which endpoint the deployed Telegram Web A build
+    // is really using instead of assuming zws/kws hostnames.
+    try {
+        installTgWsProxyDiagnostics(session.defaultSession);
+    } catch (e) {
+        console.error('[tg-ws-proxy] WebSocket diagnostics failed:', e);
+    }
+
     initState();
     const state = getState();
     registerIpc(getWindow);

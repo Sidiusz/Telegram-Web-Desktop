@@ -1,0 +1,46 @@
+name: Build Windows installer
+
+on:
+  push:
+    branches:
+      - feat/tg-ws-proxy-bridge
+  workflow_dispatch:
+
+jobs:
+  build-windows:
+    runs-on: windows-latest
+    defaults:
+      run:
+        working-directory: tg-telegram
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: tg-telegram/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Syntax check
+        run: |
+          node --check main.cjs
+          node --check electron/tg-ws-proxy-connectbridge.cjs
+          node --check electron/tg-ws-proxy-startup-pac.cjs
+
+      - name: Build Windows installer
+        run: npx electron-builder --win nsis --x64
+
+      - name: Upload installer
+        uses: actions/upload-artifact@v4
+        with:
+          name: Telegram-Web-Desktop-Windows
+          path: |
+            tg-telegram/dist/*.exe
+            tg-telegram/dist/*.blockmap
+          if-no-files-found: error
+          retention-days: 7
