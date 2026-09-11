@@ -25,7 +25,24 @@ if (!app.isPackaged) app.commandLine.appendSwitch('remote-debugging-port', '9222
 const { createWindow, getWindow } = require('./electron/window.cjs');
 const { createTray } = require('./electron/tray.cjs');
 const { initState, getState, registerIpc } = require('./electron/ipc.cjs');
-const { startTgWsProxyConnectBridge } = require('./electron/tg-ws-proxy-connectbridge.cjs');
+const {
+    startTgWsProxyConnectBridge,
+    readProxyConfig,
+} = require('./electron/tg-ws-proxy-connectbridge.cjs');
+const { installTgWsProxyStartupPac } = require('./electron/tg-ws-proxy-startup-pac.cjs');
+
+// session.setProxy() happens after app.ready. Telegram Web A creates its API worker
+// very early, and that worker can keep a network context that never observes a
+// later proxy change. Install the same PAC through Chromium's startup switch so
+// every worker/WebSocket context inherits it from process creation. This affects
+// only this Electron process and the PAC sends every non-Telegram-DC host DIRECT.
+try {
+    if (readProxyConfig()) {
+        installTgWsProxyStartupPac();
+    }
+} catch (e) {
+    console.error('[tg-ws-proxy] failed to install startup PAC:', e);
+}
 
 // TEMP DEBUG: trace who calls app.quit(); dev (unpackaged) shares the installed app's profile
 const _origQuit = app.quit.bind(app);
