@@ -30,6 +30,7 @@ jobs:
         run: |
           node --check main.cjs
           node --check electron/tg-ws-proxy-connectbridge.cjs
+          node --check electron/tg-ws-proxy-startup-pac.cjs
 
       - name: Build Windows installer
         run: npx electron-builder --win nsis --x64
