@@ -1,6 +1,9 @@
 'use strict';
 const { app, Menu, protocol, powerSaveBlocker, session } = require('electron');
 const path = require('path');
+const { startTgWsProxyFileLog } = require('./electron/tg-ws-proxy-log.cjs');
+
+startTgWsProxyFileLog();
 
 // Electron 40 removed webPreferences.bypassCSP — without it Telegram's CSP
 // (now delivered via <meta http-equiv> in addition to headers) blocks our
