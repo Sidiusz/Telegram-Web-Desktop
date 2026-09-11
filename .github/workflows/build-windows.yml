@@ -26,6 +26,11 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      - name: Syntax check
+        run: |
+          node --check main.cjs
+          node --check electron/tg-ws-proxy-hostbridge.cjs
+
       - name: Build Windows installer
         run: npx electron-builder --win nsis --x64
 
