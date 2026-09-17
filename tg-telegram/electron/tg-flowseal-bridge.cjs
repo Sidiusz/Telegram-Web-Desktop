@@ -3,6 +3,7 @@
 const http = require('http');
 const crypto = require('crypto');
 const { WebSocketServer, WebSocket } = require('ws');
+const { UpstreamHealth, DEFAULT_COOLDOWN_MS } = require('./tg-flowseal-health.cjs');
 const {
     getProxyBootstrap, setBridgeEndpoint,
     reportBridgeRoute, reportBridgeError,
@@ -102,15 +103,17 @@ function upstreamCandidates(cfg, dc, media) {
     }));
 }
 
-let preferredUpstreamDomain = '';
+const upstreamHealth = new UpstreamHealth();
+
+function noteUpstreamFailure(candidate, reason) {
+    const domain = candidate && candidate.domain;
+    if (!domain) return;
+    upstreamHealth.markFailure(domain);
+    console.warn(`[TG-PROXY-BRIDGE] ${domain} cooling down for ${Math.round(DEFAULT_COOLDOWN_MS / 1000)}s: ${reason}`);
+}
 
 function openUpstream(cfg, dc, media) {
-    let candidates = upstreamCandidates(cfg, dc, media);
-    if (preferredUpstreamDomain) {
-        candidates = candidates.slice().sort((a, b) =>
-            (b.domain === preferredUpstreamDomain ? 1 : 0) -
-            (a.domain === preferredUpstreamDomain ? 1 : 0));
-    }
+    const candidates = upstreamHealth.rank(upstreamCandidates(cfg, dc, media));
     return new Promise((resolve, reject) => {
         if (!candidates.length) return reject(new Error('no upstream routes'));
         const startedAt = Date.now();
@@ -131,6 +134,7 @@ function openUpstream(cfg, dc, media) {
         };
         const failed = (candidate, message) => {
             errors.push(`${candidate.domain}: ${message}`);
+            noteUpstreamFailure(candidate, message);
             finished++;
             if (!settled && finished >= candidates.length) {
                 settled = true;
@@ -162,7 +166,7 @@ function openUpstream(cfg, dc, media) {
                 done = true;
                 settled = true;
                 clearTimeout(timer);
-                preferredUpstreamDomain = candidate.domain;
+                upstreamHealth.markSuccess(candidate.domain);
                 const latencyMs = Date.now() - startedAt;
                 cleanup(upstream);
                 console.log(`[TG-PROXY-BRIDGE] upstream ${candidate.domain} opened in ${latencyMs}ms`);
@@ -206,6 +210,8 @@ function handleLocalConnection(local, request) {
         return;
     }
     let upstream = null;
+    let upstreamCandidate = null;
+    let upstreamFailureNoted = false;
     let ctx = null;
     let closed = false;
     let chain = Promise.resolve();
@@ -221,6 +227,11 @@ function handleLocalConnection(local, request) {
         console.error(`[TG-PROXY-BRIDGE] DC${dc}${media ? ' media' : ''}: ${message}`);
         closePeer(local, 1011, 'upstream failed');
         if (upstream) closePeer(upstream, 1011, 'bridge failed');
+    };
+    const noteActiveFailure = reason => {
+        if (upstreamFailureNoted) return;
+        upstreamFailureNoted = true;
+        noteUpstreamFailure(upstreamCandidate, reason);
     };
 
     local.on('message', data => {
@@ -243,6 +254,7 @@ function handleLocalConnection(local, request) {
                     opened = await openUpstream(cfg, dc, media);
                 }
                 upstream = opened.upstream;
+                upstreamCandidate = opened.candidate;
                 reportBridgeRoute(dc, opened.candidate.domain, opened.candidate.kind);
                 console.log(`[TG-PROXY-BRIDGE] DC${dc}${media ? ' media' : ''} via ${opened.candidate.domain}`);
 
@@ -257,9 +269,13 @@ function handleLocalConnection(local, request) {
                 upstream.on('close', (code, reason) => {
                     if (closed) return;
                     const why = reason?.toString() || `upstream closed ${code}`;
+                    if (code !== 1000) noteActiveFailure(why);
                     closePeer(local, code === 1000 ? 1000 : 1011, why);
                 });
-                upstream.on('error', err => fail(err));
+                upstream.on('error', err => {
+                    noteActiveFailure(err?.message || 'upstream error');
+                    fail(err);
+                });
                 upstream.send(relayInit, { binary: true });
                 return;
             }

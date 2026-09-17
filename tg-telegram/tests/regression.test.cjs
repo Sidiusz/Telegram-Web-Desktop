@@ -86,3 +86,28 @@ test('embedded desktop addons exist', () => {
     assert.equal(fs.existsSync(path.join(dir, 'desktop_like_standart.js')), true);
     assert.equal(fs.existsSync(path.join(dir, 'desktop_like_wide.js')), true);
 });
+
+const { UpstreamHealth, DEFAULT_COOLDOWN_MS } = require('../electron/tg-flowseal-health.cjs');
+
+test('proxy cooldown is passive and deprioritizes failed domains', () => {
+    let now = 1_000;
+    const health = new UpstreamHealth({ cooldownMs: 30_000, now: () => now });
+    const candidates = ['a.test', 'b.test', 'c.test'].map(domain => ({ domain }));
+    health.markSuccess('a.test');
+    assert.deepEqual(health.rank(candidates).map(x => x.domain), ['a.test', 'b.test', 'c.test']);
+    health.markFailure('a.test');
+    assert.deepEqual(health.rank(candidates).map(x => x.domain), ['b.test', 'c.test', 'a.test']);
+    assert.equal(health.isCooling('a.test'), true);
+    health.markSuccess('b.test');
+    assert.deepEqual(health.rank(candidates).map(x => x.domain), ['b.test', 'c.test', 'a.test']);
+    now += 30_001;
+    assert.equal(health.isCooling('a.test'), false);
+    assert.equal(DEFAULT_COOLDOWN_MS, 45_000);
+});
+
+test('proxy health does not add heartbeat traffic', () => {
+    const bridge = read('electron/tg-flowseal-bridge.cjs');
+    assert.doesNotMatch(bridge, /\.ping\s*\(/);
+    assert.doesNotMatch(bridge, /['"]pong['"]/i);
+    assert.match(bridge, /noteUpstreamFailure/);
+});
