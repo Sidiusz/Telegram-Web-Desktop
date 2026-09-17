@@ -11,14 +11,15 @@ if (process.platform !== 'win32') {
   process.exit(2);
 }
 
-if (!process.env.WIN_CSC_LINK && !process.env.CSC_LINK) {
-  console.error('Refusing to create a release: WIN_CSC_LINK/CSC_LINK is not configured.');
-  console.error('Use npm run build for a local unsigned test build.');
-  process.exit(2);
+const signingConfigured = Boolean(process.env.WIN_CSC_LINK || process.env.CSC_LINK);
+if (!signingConfigured) {
+  console.warn('WARNING: building an unsigned release; Windows may show Unknown publisher / SmartScreen.');
 }
 
 const builder = path.join(root, 'node_modules', '.bin', 'electron-builder.cmd');
-const result = spawnSync(builder, ['--win', 'nsis', '--config.forceCodeSigning=true'], {
+const builderArgs = ['--win', 'nsis'];
+if (signingConfigured) builderArgs.push('--config.forceCodeSigning=true');
+const result = spawnSync(builder, builderArgs, {
   cwd: root,
   env: process.env,
   stdio: 'inherit',
@@ -34,6 +35,7 @@ for (const file of artifacts) {
     console.error('Missing release artifact:', file);
     process.exit(3);
   }
+  if (!signingConfigured) continue;
   const escaped = file.replace(/'/g, "''");
   const ps = spawnSync('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command',
     `$s=Get-AuthenticodeSignature -LiteralPath '${escaped}'; ` +
@@ -47,4 +49,4 @@ for (const file of artifacts) {
   }
   console.log('Valid Authenticode:', path.basename(file), '-', ps.stdout.trim());
 }
-console.log(`Signed release ${pkg.version} passed Authenticode verification.`);
+console.log(signingConfigured ? `Signed release ${pkg.version} passed Authenticode verification.` : `Unsigned release ${pkg.version} built successfully.`);

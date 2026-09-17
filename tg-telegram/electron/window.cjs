@@ -37,7 +37,7 @@ function getWindow() {
     try { return mainWindow.isDestroyed() ? null : mainWindow; } catch (_) { return null; }
 }
 
-function createWindow(state) {
+function createWindow(state, onTelegramLink) {
     const initialSettings = loadSettings();
     installFlowsealWsRoute(session.defaultSession, initialSettings);
     let webAMode = initialSettings.proxy_web_fallback !== false && initialSettings.proxy_web_fallback_latched === true
@@ -400,6 +400,14 @@ function createWindow(state) {
     const openExternalWebUrl = (url) => {
         try {
             const u = new URL(url);
+            const host = u.hostname.toLowerCase().replace(/^www\./, '');
+            const isTelegramLink = u.protocol === 'tg:' ||
+                ((u.protocol === 'https:' || u.protocol === 'http:') &&
+                 ['t.me', 'telegram.me', 'telegram.dog'].includes(host));
+            if (isTelegramLink && typeof onTelegramLink === 'function') {
+                onTelegramLink(u.toString());
+                return;
+            }
             if (u.protocol === 'https:' || u.protocol === 'http:') shell.openExternal(u.toString()).catch(() => {});
         } catch (_) {}
     };

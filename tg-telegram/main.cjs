@@ -27,15 +27,18 @@ if (!app.isPackaged) {
     else app.setPath('userData', path.join(app.getPath('appData'), 'Telegram Web Desktop'));
 }
 
-// Register as tg:// handler (replaces the official app). When packaged the plain
-// call points the registry at our exe. Unpackaged (electron .), Windows would
-// otherwise register bare electron.exe with no app path → tg:// links launch an
-// empty Electron. Pass execPath + resolved app dir so dev runs work too.
-if (app.isPackaged) {
-    app.setAsDefaultProtocolClient('tg');
-} else {
-    app.setAsDefaultProtocolClient('tg', process.execPath, [path.resolve(process.argv[1])]);
+// Register tg:// only from an installed build. `app.isPackaged` is also true for
+// dist/win-unpacked, so test builds must not steal the OS association.
+function isInstalledBuildPath() {
+    if (!app.isPackaged) return false;
+    if (process.env.TWD_REGISTER_PROTOCOL === '1') return true;
+    const exe = path.resolve(process.execPath).toLowerCase();
+    const roots = [process.env.LOCALAPPDATA && path.join(process.env.LOCALAPPDATA, 'Programs'),
+        process.env.ProgramFiles, process.env['ProgramFiles(x86)']].filter(Boolean)
+        .map(v => path.resolve(v).toLowerCase() + path.sep);
+    return roots.some(root => exe.startsWith(root));
 }
+if (isInstalledBuildPath()) { try { app.setAsDefaultProtocolClient('tg'); } catch (_) {} }
 
 function handleTgUrl(tgUrl) {
     const win = getWindow();
@@ -52,20 +55,47 @@ function handleTgUrl(tgUrl) {
 
 // t.me/<...> https links → tg:// so webZ resolves them via the same deep-link path.
 function normalizeToTg(url) {
-    if (!url) return null;
-    if (url.startsWith('tg://')) return url;
-    var m = /^https?:\/\/(?:t\.me|telegram\.me|telegram\.dog)\/(.+)$/i.exec(url);
-    if (!m) return null;
-    var rest = m[1];
-    if (rest.charAt(0) === '+' || /^joinchat\//i.test(rest)) {
-        return 'tg://join?invite=' + encodeURIComponent(rest.replace(/^joinchat\//i, '').replace(/^\+/, ''));
+    if (!url || typeof url !== 'string') return null;
+    if (/^tg:\/\//i.test(url)) return url;
+    let u;
+    try { u = new URL(url); } catch (_) { return null; }
+    const host = u.hostname.toLowerCase().replace(/^www\./, '');
+    if (!['t.me', 'telegram.me', 'telegram.dog'].includes(host)) return null;
+    const parts = u.pathname.split('/').filter(Boolean);
+    if (!parts.length) return null;
+    const first = parts[0];
+    const action = first.toLowerCase();
+    if (first.startsWith('+') || action === 'joinchat') {
+        const invite = first.startsWith('+') ? first.slice(1) : (parts[1] || '');
+        return invite ? 'tg://join?invite=' + encodeURIComponent(invite) : null;
     }
-    var parts = rest.split(/[?#]/)[0].split('/');
-    var domain = parts[0];
+    if (action === 'c' && /^\d+$/.test(parts[1] || '') && /^\d+$/.test(parts[2] || '')) {
+        const qs = new URLSearchParams();
+        qs.set('channel', parts[1]);
+        if (parts[3] && /^\d+$/.test(parts[3])) { qs.set('thread', parts[2]); qs.set('post', parts[3]); }
+        else qs.set('post', parts[2]);
+        for (const [k, v] of u.searchParams) qs.append(k, v);
+        return 'tg://privatepost?' + qs.toString();
+    }
+    if (action === 'share' && (parts[1] || '').toLowerCase() === 'url') {
+        return 'tg://msg_url?' + u.searchParams.toString();
+    }
+    if (['proxy', 'socks'].includes(action)) {
+        return 'tg://' + action + '?' + u.searchParams.toString();
+    }
+    const actionMap = { addstickers: 'set', addemoji: 'set', setlanguage: 'lang', login: 'code', invoice: 'slug', giftcode: 'slug' };
+    if (actionMap[action] && parts[1]) {
+        const qs = new URLSearchParams(u.searchParams);
+        qs.set(actionMap[action], parts[1]);
+        return 'tg://' + action + '?' + qs.toString();
+    }
+    const offset = action === 's' ? 1 : 0;
+    const domain = parts[offset];
     if (!domain) return null;
-    var tg = 'tg://resolve?domain=' + encodeURIComponent(domain);
-    if (parts[1] && /^\d+$/.test(parts[1])) tg += '&post=' + parts[1];
-    return tg;
+    const qs = new URLSearchParams(u.searchParams);
+    qs.set('domain', domain);
+    if (parts[offset + 1] && /^\d+$/.test(parts[offset + 1])) qs.set('post', parts[offset + 1]);
+    return 'tg://resolve?' + qs.toString();
 }
 
 function getTgUrlFromArgs(argv) {
@@ -73,34 +103,37 @@ function getTgUrlFromArgs(argv) {
     return normalizeToTg(raw);
 }
 
-const gotLock = process.env.TWD_ALLOW_MULTI_INSTANCE === '1' || app.requestSingleInstanceLock();
+const initialDeepLink = getTgUrlFromArgs(process.argv);
+const gotLock = process.env.TWD_ALLOW_MULTI_INSTANCE === '1' ||
+    app.requestSingleInstanceLock({ deepLink: initialDeepLink || '' });
 if (!gotLock) {
     app.quit();
 } else {
-    // Already running — second instance forwards its args here
-    app.on('second-instance', (event, argv) => {
+    // Forward the parsed deep link through Electron's additionalData channel too.
+    // On Windows the secondary argv is not reliable for custom protocols on every launch path.
+    app.on('second-instance', (event, argv, workingDirectory, additionalData) => {
         const win = getWindow();
         if (win) { win.show(); win.focus(); }
-        const tgUrl = getTgUrlFromArgs(argv);
+        const tgUrl = normalizeToTg(additionalData?.deepLink) || getTgUrlFromArgs(argv);
         if (tgUrl) handleTgUrl(tgUrl);
     });
 }
 
+if (gotLock) {
 app.whenReady().then(async () => {
     try { powerSaveBlocker.start('prevent-app-suspension'); } catch(e) {}
     initState();
     try { await startEmbeddedFlowsealBridge(); } catch (e) { console.error('[TG-PROXY-BRIDGE] startup failed:', e); }
     const state = getState();
     registerIpc(getWindow);
-    createWindow(state);
+    createWindow(state, rawUrl => { const tgUrl = normalizeToTg(rawUrl); if (tgUrl) handleTgUrl(tgUrl); });
     createTray(getWindow);
 
     Menu.setApplicationMenu(null);
 
-    const tgUrl = getTgUrlFromArgs(process.argv);
-    if (tgUrl) {
+    if (initialDeepLink) {
         const win = getWindow();
-        win.webContents.once('did-finish-load', () => handleTgUrl(tgUrl));
+        win.webContents.once('did-finish-load', () => handleTgUrl(initialDeepLink));
     }
 });
 
@@ -109,3 +142,4 @@ app.on('before-quit', () => { void stopEmbeddedFlowsealBridge().catch(() => {});
 app.on('window-all-closed', () => {
     if (process.platform !== 'darwin') app.quit();
 });
+}
