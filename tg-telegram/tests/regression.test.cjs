@@ -111,3 +111,17 @@ test('proxy health does not add heartbeat traffic', () => {
     assert.doesNotMatch(bridge, /['"]pong['"]/i);
     assert.match(bridge, /noteUpstreamFailure/);
 });
+
+test('manual launch maximizes while autostart stays hidden', () => {
+    const main = read('main.cjs');
+    const win = read('electron/window.cjs');
+    assert.match(main, /isAutostartLaunch/);
+    assert.match(main, /--autostart/);
+    assert.match(main, /--hidden/);
+    assert.match(main, /showMainWindow\(win, true\)/);
+    assert.match(main, /startHidden: initialAutostart/);
+    assert.match(win, /const startHidden = options\.startHidden === true/);
+    assert.match(win, /ready-to-show/);
+    assert.match(win, /mainWindow\.maximize\(\)/);
+    assert.match(win, /process\.env\.TWD_SMOKE_HIDDEN === '1' \|\| startHidden/);
+});

@@ -41,11 +41,18 @@ function isInstalledBuildPath() {
 }
 if (isInstalledBuildPath()) { try { app.setAsDefaultProtocolClient('tg'); } catch (_) {} }
 
+function showMainWindow(win, maximize = true) {
+    if (!win || win.isDestroyed()) return;
+    try { if (win.isMinimized()) win.restore(); } catch (_) {}
+    try { if (maximize && !win.isMaximized()) win.maximize(); } catch (_) {}
+    win.show();
+    win.focus();
+}
+
 function handleTgUrl(tgUrl) {
     const win = getWindow();
     if (!win) return;
-    win.show();
-    win.focus();
+    showMainWindow(win, true);
     // webZ reads tgaddr from the hash only at app startup. loadURL to a URL that
     // differs only by hash is a same-document nav (no reload) → the effect never
     // re-runs and the link is ignored. A unique query param forces a full load.
@@ -55,8 +62,11 @@ function handleTgUrl(tgUrl) {
 }
 
 const initialDeepLink = getTgUrlFromArgs(process.argv);
+const isAutostartLaunch = (argv = process.argv) => argv.some(arg =>
+    ['--autostart', '--startup', '--hidden'].includes(String(arg).toLowerCase()));
+const initialAutostart = isAutostartLaunch(process.argv);
 const gotLock = process.env.TWD_ALLOW_MULTI_INSTANCE === '1' ||
-    app.requestSingleInstanceLock({ deepLink: initialDeepLink || '' });
+    app.requestSingleInstanceLock({ deepLink: initialDeepLink || '', autostart: initialAutostart });
 if (!gotLock) {
     app.quit();
 } else {
@@ -64,9 +74,10 @@ if (!gotLock) {
     // On Windows the secondary argv is not reliable for custom protocols on every launch path.
     app.on('second-instance', (event, argv, workingDirectory, additionalData) => {
         const win = getWindow();
-        if (win) { win.show(); win.focus(); }
         const tgUrl = normalizeToTg(additionalData?.deepLink) || getTgUrlFromArgs(argv);
+        const autostart = additionalData?.autostart === true || isAutostartLaunch(argv);
         if (tgUrl) handleTgUrl(tgUrl);
+        else if (!autostart) showMainWindow(win, true);
     });
 }
 
@@ -77,7 +88,11 @@ app.whenReady().then(async () => {
     try { await startEmbeddedFlowsealBridge(); } catch (e) { console.error('[TG-PROXY-BRIDGE] startup failed:', e); }
     const state = getState();
     registerIpc(getWindow);
-    createWindow(state, rawUrl => { const tgUrl = normalizeToTg(rawUrl); if (tgUrl) handleTgUrl(tgUrl); });
+    createWindow(
+        state,
+        rawUrl => { const tgUrl = normalizeToTg(rawUrl); if (tgUrl) handleTgUrl(tgUrl); },
+        { startHidden: initialAutostart }
+    );
     createTray(getWindow);
 
     Menu.setApplicationMenu(null);

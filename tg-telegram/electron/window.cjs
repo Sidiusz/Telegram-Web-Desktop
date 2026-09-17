@@ -37,7 +37,8 @@ function getWindow() {
     try { return mainWindow.isDestroyed() ? null : mainWindow; } catch (_) { return null; }
 }
 
-function createWindow(state, onTelegramLink) {
+function createWindow(state, onTelegramLink, options = {}) {
+    const startHidden = options.startHidden === true;
     const initialSettings = loadSettings();
     installFlowsealWsRoute(session.defaultSession, initialSettings);
     let webAMode = initialSettings.proxy_web_fallback !== false && initialSettings.proxy_web_fallback_latched === true
@@ -453,8 +454,11 @@ function createWindow(state, onTelegramLink) {
     });
 
     mainWindow.on('ready-to-show', () => {
-        if (process.env.TWD_SMOKE_HIDDEN === '1') return;
-        if (mainWindow && !mainWindow.isDestroyed()) mainWindow.show();
+        if (process.env.TWD_SMOKE_HIDDEN === '1' || startHidden) return;
+        if (!mainWindow || mainWindow.isDestroyed()) return;
+        try { if (!mainWindow.isMaximized()) mainWindow.maximize(); } catch (_) {}
+        mainWindow.show();
+        mainWindow.focus();
     });
     // Taskbar badge vanishes on cold start (button doesn't exist yet when setBadgeCount runs) and on restore from tray — reapplied on show/restore.
     const reapplyBadge = () => { try { app.setBadgeCount(state.lastNotificationCount || 0); } catch (e) {} };
