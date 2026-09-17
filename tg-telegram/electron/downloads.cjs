@@ -18,7 +18,10 @@ function loadDownloads() {
 
 function saveDownloads(downloads) {
     try {
-        fs.writeFileSync(downloadsPath(), JSON.stringify(downloads));
+        const p = downloadsPath();
+        const tmp = p + '.tmp';
+        fs.writeFileSync(tmp, JSON.stringify(downloads));
+        fs.renameSync(tmp, p);
     } catch (e) {}
 }
 

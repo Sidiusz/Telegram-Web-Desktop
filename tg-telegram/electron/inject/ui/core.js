@@ -37,10 +37,11 @@ const CSS=`
 ._mo_{position:fixed;inset:0;z-index:2147483647;display:flex;align-items:center;justify-content:center;background:rgba(0,0,0,.5);animation:_moBg_ .15s ease;}
 @keyframes _moBg_{from{opacity:0}to{opacity:1}}
 @keyframes _moIn_{from{opacity:0;transform:scale(.94)}to{opacity:1;transform:none}}
-._mo_ .modal-dialog{background:var(--color-background,#212121);border-radius:16px;min-width:300px;max-width:420px;overflow:hidden;box-shadow:rgba(16,16,16,.61) 0 4px 8px 2px;display:flex;flex-direction:column;animation:_moIn_ .18s cubic-bezier(.32,.72,0,1);}
+._mo_ .modal-dialog{background:var(--color-background,#212121);border-radius:16px;min-width:300px;max-width:420px;max-height:calc(100vh - 32px);overflow:hidden;box-shadow:rgba(16,16,16,.61) 0 4px 8px 2px;display:flex;flex-direction:column;animation:_moIn_ .18s cubic-bezier(.32,.72,0,1);}
 ._mo_ .modal-header{padding:18px 22px 6px;}
 ._mo_ .modal-title{font-size:20px;font-weight:500;color:#fff;line-height:1.2;}
-._mo_ .modal-content{padding:6px 22px 12px;display:flex;flex-direction:column;gap:14px;}
+._mo_ .modal-content{padding:6px 22px 12px;display:flex;flex-direction:column;gap:14px;min-height:0;}
+._mo_ ._tgpick_grp_{overflow-y:auto;min-height:0;}
 ._mo_ ._msg_{color:rgba(255,255,255,.85);font-size:16px;line-height:1.4;}
 ._mo_ ._url_{color:var(--color-primary,#8774e1);font-size:13px;word-break:break-all;padding:8px 10px;background:#1a1a1a;border-radius:8px;}
 ._mo_ .dialog-buttons{display:flex;gap:6px;justify-content:flex-end;padding-top:4px;}
@@ -190,29 +191,29 @@ html._tgreading_ .bubble.menu-container.shown{opacity:0 !important;pointer-event
 ._tgpanel_ ._ns_lbl_{padding:16px 24px 6px;color:var(--color-text-secondary,#aaa);font-size:13px;}
 ._tgpanel_ ._ns_card_{background:var(--color-background,#212121);border-radius:12px;margin:0 12px 6px;overflow:hidden;}
 ._tgpanel_ ._ns_row_{display:flex;align-items:center;gap:16px;min-height:48px;padding:8px 16px;box-sizing:border-box;}
-._tgpanel_ ._ns_card_ ._ns_row_+._ns_row_{border-top:1px solid rgba(255,255,255,.06);}
-._tgpanel_ ._ns_ico_{font-size:24px;color:var(--color-text-secondary,#aaa);flex-shrink:0;}
+._tgpanel_ ._ns_card_ ._ns_row_+._ns_row_{border-top:1px solid var(--color-borders,rgba(127,127,127,.16));}
+._tgpanel_ ._ns_ico_{font-size:24px;color:var(--color-text-secondary,#777);flex-shrink:0;}
 ._tgpanel_ ._ns_main_{flex:1;min-width:0;}
-._tgpanel_ ._ns_title_{font-size:16px;color:#fff;line-height:1.25;}
-._tgpanel_ ._ns_sub_{font-size:14px;color:var(--color-text-secondary,#aaa);margin-top:1px;line-height:1.3;}
-._tgpanel_ ._ns_val_{font-size:15px;color:var(--color-text-secondary,#aaa);}
-._tgpanel_ ._ns_inp_{height:44px;background:var(--color-background,#212121);border:1px solid #5b5b5a;border-radius:12px;color:#fff;font-size:15px;padding:0 14px;box-sizing:border-box;outline:none;}
+._tgpanel_ ._ns_title_{font-size:16px;color:var(--color-text,#111);line-height:1.25;}
+._tgpanel_ ._ns_sub_{font-size:14px;color:var(--color-text-secondary,#777);margin-top:1px;line-height:1.3;}
+._tgpanel_ ._ns_val_{font-size:15px;color:var(--color-text-secondary,#777);}
+._tgpanel_ ._ns_inp_{height:44px;background:var(--color-background,#fff);border:1px solid var(--color-borders-input,#bbb);border-radius:12px;color:var(--color-text,#111);font-size:15px;padding:0 14px;box-sizing:border-box;outline:none;}
 ._tgpanel_ ._ns_inp_:focus{border-color:var(--color-primary,#8774e1);}
 ._tgpanel_ ._ns_inp_._num_{width:96px;flex:0 0 auto;text-align:right;height:38px;}
 ._tgpanel_ ._ns_btn_{height:40px;padding:0 16px;border:none;border-radius:10px;background:var(--color-primary,#8774e1);color:#fff;font-size:14px;cursor:pointer;display:inline-flex;align-items:center;justify-content:center;gap:6px;white-space:nowrap;}
-._tgpanel_ ._ns_btn_:hover{filter:brightness(1.1);}
-._tgpanel_ ._ns_btn_.sec{background:rgba(255,255,255,.1);}
-._tgpanel_ ._ns_sel_{background:var(--color-background,#212121);border:1px solid #5b5b5a;border-radius:10px;color:#fff;padding:7px 10px;font-size:14px;cursor:pointer;outline:none;}
+._tgpanel_ ._ns_btn_:hover{filter:brightness(1.05);}
+._tgpanel_ ._ns_btn_.sec{background:var(--color-background-secondary-accent,var(--color-borders,rgba(127,127,127,.12)));color:var(--color-text,#111);}
+._tgpanel_ ._ns_sel_{background:var(--color-background,#fff);border:1px solid var(--color-borders-input,#bbb);border-radius:10px;color:var(--color-text,#111);padding:7px 10px;font-size:14px;cursor:pointer;outline:none;}
 ._tgpanel_ ._ns_swt_{position:relative;width:34px;height:20px;flex-shrink:0;cursor:pointer;}
 ._tgpanel_ ._ns_swt_ input{display:none;}
-._tgpanel_ ._ns_swt_ i{position:absolute;inset:0;background:#5a5a5a;border-radius:10px;transition:.2s;}
+._tgpanel_ ._ns_swt_ i{position:absolute;inset:0;background:var(--color-borders-input,#999);border-radius:10px;transition:.2s;}
 ._tgpanel_ ._ns_swt_ i::after{content:'';position:absolute;top:2px;left:2px;width:16px;height:16px;border-radius:50%;background:#fff;transition:.2s;}
 ._tgpanel_ ._ns_swt_ input:checked~i{background:var(--color-primary,#8774e1);}
 ._tgpanel_ ._ns_swt_ input:checked~i::after{transform:translateX(14px);}
-._tgpanel_ ._ns_radio_{position:relative;width:20px;height:20px;border-radius:50%;border:2px solid #5a5a5a;flex-shrink:0;transition:.15s;}
+._tgpanel_ ._ns_radio_{position:relative;width:20px;height:20px;border-radius:50%;border:2px solid var(--color-borders-input,#999);flex-shrink:0;transition:.15s;}
 ._tgpanel_ ._ns_radio_._on_{border-color:var(--color-primary,#8774e1);}
 ._tgpanel_ ._ns_radio_._on_::after{content:'';position:absolute;inset:3px;border-radius:50%;background:var(--color-primary,#8774e1);}
-._tgpanel_ ._addon_del_{background:none;border:none;color:var(--color-text-secondary,#aaa);cursor:pointer;padding:6px;border-radius:6px;display:flex;flex-shrink:0;}
+._tgpanel_ ._addon_del_{background:none;border:none;color:var(--color-text-secondary,#777);cursor:pointer;padding:6px;border-radius:6px;display:flex;flex-shrink:0;}
 ._tgpanel_ ._addon_del_:hover{background:rgba(229,57,53,.15);color:#e53935;}
 /* строка-загрузка: действие справа (Открыть/Папку/Удалить) — подменяем шеврон */
 ._tgpanel_ ._tpright_{margin-left:auto;display:flex;gap:2px;flex-shrink:0;}

@@ -153,7 +153,7 @@ function injectSettingsRows(){
             // Color the wrapper to match new design (cloned row was notifications pink)
             const wrap = ico.closest('.ListItem-main-icon');
             if(wrap){
-                const bgMap = {bots:'#8774e1', download:'#4caf50', info:'#5288c1', reload:'#4caf50'};
+                const bgMap = {bots:'#8774e1', data:'#5288c1', download:'#4caf50', info:'#5288c1', reload:'#4caf50'};
                 wrap.style.background = bgMap[iconName] || '#8774e1';
             }
         }
@@ -167,6 +167,8 @@ function injectSettingsRows(){
     // «Дополнения» — сразу под «Общие настройки» (первая строка списка), иначе в начало.
     const adRow = makeRow('_tgst_ad_', 'bots', T('addons'), T('addons_desc'));
     adRow.querySelector('.ListItem-button').addEventListener('click', () => openAddonsNative());
+    const proxyRow = makeRow('_tgst_proxy_', 'data', T('proxy'), T('proxy_desc'));
+    proxyRow.querySelector('.ListItem-button').addEventListener('click', () => openProxyNative());
     let generalAnchor = null;
     for(const r of list.querySelectorAll('.ListItem')){
         if(/Общие настройки|General Settings/i.test(r.textContent||'')){ generalAnchor = r; break; }
@@ -177,6 +179,7 @@ function injectSettingsRows(){
     } else {
         list.insertBefore(adRow, list.firstChild);
     }
+    adRow.after(proxyRow);
 
     // «Проверить обновления» и «О приложении» — отдельной категорией-облачком в
     // самом низу главного экрана настроек (injectAboutSection), не строками здесь.

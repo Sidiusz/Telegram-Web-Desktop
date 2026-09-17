@@ -1,5 +1,5 @@
 // @name Desktop-like - Wide Messages
-// @version 2.3.0
+// @version 2.3.1
 // @description Left-aligned messages + avatars, plus wide bubbles and footer panel.
 // @group desktop_like_chat
 
@@ -43,7 +43,10 @@
             /* Footer + Composer: robust flex so send button never wraps on long text */
             #MiddleColumn .middle-column-footer { width: 100% !important; max-width: 100% !important; box-sizing:border-box !important; margin-left: 0 !important; }
             /* Keep TG's own composer spacing (send button sits 4px from the edge); only stop it wrapping. */
-            #MiddleColumn .Composer { flex-wrap: nowrap !important; box-sizing:border-box !important; }
+            /* Plain composer stays on one row. Reply/edit embeds need TG's native wrap;
+               forcing nowrap collapses ComposerEmbeddedMessage to 0px and crushes the input. */
+            #MiddleColumn .Composer:not(.with-embedded) { flex-wrap: nowrap !important; box-sizing:border-box !important; }
+            #MiddleColumn .Composer.with-embedded { box-sizing:border-box !important; }
             #MiddleColumn .Composer .composer-wrapper { min-width:0 !important; }
             #MiddleColumn .Composer #editable-message-text { min-width:0 !important; }
             /* Footer keeps clear of the right column; TG shifts it by half its width instead, so drop that transform. */

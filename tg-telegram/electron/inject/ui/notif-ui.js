@@ -40,7 +40,7 @@ async function showUpdateModal(data){
         okText:T('upd_download'),
         cancelText:T('upd_later'),
         extraBtn:{label:T('upd_skip'),danger:false},
-        onOk:async()=>{showUpdateProgress(data.url,fname,data.version);},
+        onOk:async()=>{showUpdateProgress(fname,data.version);},
         onExtra:async()=>{await INV('skip_version',{version:data.version});},
     });
     // notes из релиза приходят в событии — показываем сразу; иначе дёргаем fetch_changelog.
@@ -54,7 +54,7 @@ async function showUpdateModal(data){
         }catch(e){const el=document.getElementById('_upd_cl_');if(el)el.textContent=T('load_error');}
     }
 }
-function showUpdateProgress(url,filename,version){
+function showUpdateProgress(filename,version){
     ensureCornerWrap();
     const w=document.getElementById('_cnw_');if(!w)return;
     const el=document.createElement('div');el.className='_cnotif_';el.style.minWidth='280px';
@@ -71,7 +71,7 @@ function showUpdateProgress(url,filename,version){
     el._setProgress=function(r,t){text.textContent=fmtBytes(r)+(t?' / '+fmtBytes(t):'');const sp=barInner.querySelector('span');if(sp&&t)sp.style.width=Math.round(r/t*100)+'%';};
     el._setDone=function(err){if(err){title.textContent=T('error');text.textContent=err;av.innerHTML='<i class="icon icon-close" style="color:#e53935"></i>';}else{title.textContent=T('upd_downloaded');text.textContent=T('upd_installing');av.innerHTML='<i class="icon icon-check" style="color:#4caf50"></i>';}setTimeout(()=>{el.classList.add('out');setTimeout(()=>el.remove(),220);},3000);};
     window._updEl=el;
-    INV('download_update',{url,filename}).catch(()=>{});
+    INV('download_update',{}).catch(()=>{});
 }
 function setupUpdateListeners(){
     if(!window.tgBridge)return;

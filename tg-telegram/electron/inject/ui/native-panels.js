@@ -147,11 +147,147 @@ function closeNativeDlPanel(){
     closeNativePanel();
 }
 
-// ── «Дополнения» как нативный раздел ────────────────────────────────────────
-// Отдельная панель (своя кнопка в гамбургер-меню), а не закопанный раздел настроек.
-// Тумблеры мгновенно сохраняют состояние; группа взаимоисключающая → включение
-// одного автоматически гасит остальные той же группы. Кнопка «Применить» —
-// перезагрузка страницы (аддоны инжектятся на загрузке).
+// ── «Прокси» ────────────────────────────────────────────────────────────────
+function openProxyNative(){
+    if(!document.getElementById('Settings')){
+        tgOpenSettings();
+        const tries=setInterval(()=>{
+            if(document.getElementById('Settings')){ clearInterval(tries); openProxyNative(); }
+        },80);
+        setTimeout(()=>clearInterval(tries),4000);
+        return;
+    }
+    openNativePanel({
+        title:T('proxy'),
+        renderContent(content){ renderProxyNative(content); },
+    });
+}
+
+async function renderProxyNative(content){
+    if(!content)return;
+    content.innerHTML='<div class="_tpempty_">'+T('loading')+'</div>';
+    let st; try{st=await INV('get_proxy_status');}catch(e){content.innerHTML='<div class="_tpempty_">'+T('load_error')+'</div>';return;}
+    captureWidgetTpl();
+    const cardCls=_genCardCls(), headerTpl=_genHeaderTpl();
+    const liEl=document.querySelector('#Settings .ListItem.narrow')||document.querySelector('#Settings .ListItem');
+    if(!cardCls||!liEl){setTimeout(()=>renderProxyNative(content),120);return;}
+    content.innerHTML='';
+    const addSection=(title,card)=>content.append(_genHeader(headerTpl,title),card);
+    const card=()=>_genCard(cardCls);
+    const nativeRow=(title,sub,value,onClick)=>_genNativeSettingRow(liEl,title,sub,value,onClick);
+    const passive=(text)=>{
+        const src=document.querySelector('#Settings .settings-item-description');
+        const el=src?src.cloneNode(false):document.createElement('p');
+        el.className=src?src.className:'settings-item-description';
+        el.textContent=text;
+        return el;
+    };
+    let draft={
+        mode:st.mode,domainSource:st.domainSource||'flowseal',customDomains:(st.customDomains||[]).join(', '),
+        pinnedDomain:st.pinnedDomain||'',workerEnabled:!!st.workerEnabled,workerDomains:(st.workerDomains||[]).join(', '),
+        autoFailures:st.autoFailures||1,autoWindowSec:st.autoWindowSec||12,webFallback:st.webFallback!==false,
+        dcIps:Object.entries(st.dcIps||{}).map(([k,v])=>k+':'+v).join('\n')
+    };
+    let statusText=null,diagBox=null,testLines=[];
+    const statusLabel=()=>st.active?T('proxy_active'):T('proxy_direct');
+    const connectionDetails=()=>[statusLabel(),st.domain||'',st.lastDc?('DC'+st.lastDc):''].filter(Boolean).join(' \u00b7 ');
+    const statusDetails=()=>T('proxy_status')+': '+connectionDetails();
+    const diagLines=()=>[
+        T('proxy_diag_current')+': '+connectionDetails(),
+        'route: '+(st.route||'direct'),
+        'error: '+(st.lastError||'\u2014'),
+        'Web A: '+(st.webFallback?(st.webFallbackLatched?'fallback active':'fallback enabled'):'off'),
+        'commit: '+((st.fallback&&st.fallback.ref)||'\u2014')
+    ].concat(testLines);
+    function paintStatus(){if(statusText)statusText.textContent=statusDetails();}
+    function paintDiag(){if(!diagBox)return;diagBox.replaceChildren(...diagLines().map(x=>passive(x)));}
+    async function saveOptions(patch){st=await INV('save_proxy_options',patch);paintStatus();paintDiag();return st;}
+
+    const modeCard=card();
+    modeCard.appendChild(_genRadioGroup('_tg_proxy_mode_',[{value:'auto',label:T('proxy_auto')},{value:'always',label:T('proxy_always')},{value:'off',label:T('proxy_off')}],draft.mode,async v=>{
+        draft.mode=v;st=await INV('set_proxy_mode',{mode:v});paintStatus();paintDiag();
+    }));
+    statusText=passive(statusDetails());
+    modeCard.appendChild(statusText);
+    addSection(T('proxy_mode'),modeCard);
+
+    const domainCard=card();
+    domainCard.appendChild(_genRadioGroup('_tg_proxy_route_',[{value:'flowseal',label:T('proxy_flowseal')},{value:'custom',label:T('proxy_custom')}],draft.domainSource,async v=>{
+        draft.domainSource=v;
+        const list=(v==='custom'?draft.customDomains.split(/[\s,;]+/):(st.flowsealDomains||[])).filter(Boolean);
+        if(draft.pinnedDomain&&!list.includes(draft.pinnedDomain))draft.pinnedDomain='';
+        customWrap.node.hidden=v!=='custom';refreshPin();
+        await saveOptions({domainSource:v,pinnedDomain:draft.pinnedDomain});
+    }));
+    const customWrap=_genInput(T('proxy_custom_hint'),draft.customDomains,false,async v=>{
+        draft.customDomains=v;refreshPin();await saveOptions({customDomains:v,pinnedDomain:draft.pinnedDomain});
+    });
+    customWrap.node.hidden=draft.domainSource!=='custom';domainCard.appendChild(customWrap.node);
+    const pinRow=nativeRow(T('proxy_pin'),' ',draft.pinnedDomain||T('proxy_rotate'),()=>{
+        const list=(draft.domainSource==='custom'?draft.customDomains.split(/[\s,;]+/):(st.flowsealDomains||[])).filter(Boolean);
+        pickModal({title:T('proxy_pin'),current:draft.pinnedDomain,options:[{value:'',label:T('proxy_rotate')}].concat(list.map(v=>({value:v,label:v}))),onSave:async v=>{
+            draft.pinnedDomain=v;refreshPin();await saveOptions({pinnedDomain:v});
+        }});
+    });
+    domainCard.appendChild(pinRow);
+    function refreshPin(){
+        const list=(draft.domainSource==='custom'?draft.customDomains.split(/[\s,;]+/):(st.flowsealDomains||[])).filter(Boolean);
+        if(draft.pinnedDomain&&!list.includes(draft.pinnedDomain))draft.pinnedDomain='';
+        pinRow._value.textContent=draft.pinnedDomain||T('proxy_rotate');
+    }
+    let refreshing=false;
+    const refreshRow=nativeRow(T('proxy_refresh'),T('proxy_refresh_desc'),'',async()=>{
+        if(refreshing)return;
+        refreshing=true; refreshRow._title.textContent=T('proxy_testing');
+        try{const r=await INV('refresh_proxy_domains');if(r&&r.status)st=r.status;refreshPin();paintStatus();paintDiag();}
+        finally{refreshing=false;refreshRow._title.textContent=T('proxy_refresh');}
+    });
+    domainCard.appendChild(refreshRow);
+    addSection(T('proxy_domains'),domainCard);
+
+    const workerCard=card();
+    const workerDomains=_genInput(T('proxy_worker_domains'),draft.workerDomains,false,async v=>{draft.workerDomains=v;await saveOptions({workerDomains:v});});
+    const dcWrap=_genTextarea(T('proxy_dc_ips'),draft.dcIps,async v=>{draft.dcIps=v;await saveOptions({dcIps:v});});
+    const workerToggle=_genToggle(T('proxy_worker_toggle'),draft.workerEnabled,async v=>{
+        draft.workerEnabled=v;workerDomains.node.hidden=!v;dcWrap.node.hidden=!v;if(v)dcWrap.resize();await saveOptions({workerEnabled:v});
+    },T('proxy_worker_desc'));
+    workerCard.appendChild(workerToggle);
+    workerDomains.node.hidden=!draft.workerEnabled;dcWrap.node.hidden=!draft.workerEnabled;
+    workerCard.append(workerDomains.node,dcWrap.node);
+    addSection(T('proxy_worker'),workerCard);
+
+    const autoCard=card();
+    const failWrap=_genInput(T('proxy_failures'),String(draft.autoFailures),true,async v=>{draft.autoFailures=Number(v)||1;await saveOptions({autoFailures:draft.autoFailures});});
+    const winWrap=_genInput(T('proxy_window'),String(draft.autoWindowSec),true,async v=>{draft.autoWindowSec=Number(v)||12;await saveOptions({autoWindowSec:draft.autoWindowSec});});
+    autoCard.append(failWrap.node,winWrap.node);
+    autoCard.appendChild(_genToggle(T('proxy_web_fallback'),draft.webFallback,async v=>{
+        draft.webFallback=v;await saveOptions({webFallback:v});
+    },T('proxy_web_fallback_desc')));
+    addSection(T('proxy_auto_opts'),autoCard);
+    const diagCard=card();
+    diagBox=document.createElement('div');
+    diagBox.append(...diagLines().map(x=>passive(x)));
+    diagCard.appendChild(diagBox);
+    let testing=false;
+    const testRow=nativeRow(T('proxy_test'),T('proxy_test_desc'),'',async()=>{
+        if(testing)return;
+        testing=true; testRow._title.textContent=T('proxy_testing');
+        try{
+            const rs=await INV('test_proxy_connectivity');
+            testLines=(rs||[]).map(x=>'DC'+x.dc+': '+(x.ok?'\u2713 '+(x.domain||''):'\u2715 '+(x.error||'')));
+            paintDiag();toast((rs||[]).every(x=>x.ok)?T('proxy_test_ok'):T('proxy_test_bad'));
+        }finally{testing=false;testRow._title.textContent=T('proxy_test');}
+    });
+    const copyRow=nativeRow(T('proxy_copy'),T('proxy_copy_desc'),'',()=>navigator.clipboard.writeText(diagLines().join('\n')).then(()=>toast(T('st_saved_short'))).catch(()=>{}));
+    diagCard.append(testRow,copyRow);
+    addSection(T('proxy_diag'),diagCard);
+
+    const liveTimer=setInterval(async()=>{
+        if(!content.isConnected){clearInterval(liveTimer);return;}
+        try{const next=await INV('get_proxy_status');st=Object.assign(st||{},next||{});paintStatus();paintDiag();}catch(e){}
+    },1000);
+}
+
 function openAddonsNative(){
     if(!document.getElementById('Settings')){
         tgOpenSettings();

@@ -75,7 +75,7 @@ function markRead(win, peerId) {
 
 function buildHtml() {
     return String.raw`<!DOCTYPE html>
-<html><head><meta charset="UTF-8"><style>
+<html><head><meta charset="UTF-8"><meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; img-src data: blob: https:; script-src 'unsafe-inline';"><style>
     *{box-sizing:border-box;}
     html,body{margin:0;width:100%;height:100%;overflow:hidden;background:transparent;
         font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;user-select:none;}
@@ -109,14 +109,13 @@ function buildHtml() {
 <body>
 <div id="stack"></div>
 <script>
-    const { ipcRenderer } = require('electron');
     const stack = document.getElementById('stack');
     const cards = new Map();
 
     function reportSize(){
         requestAnimationFrame(function(){
             const h = stack.scrollHeight;
-            ipcRenderer.send('notif-resize', { h: h + 4 });
+            window.notifBridge.sendResize(h + 4);
         });
     }
     function firstLetter(s){ s=(s||'T').trim(); return (s[0]||'T').toUpperCase(); }
@@ -129,7 +128,7 @@ function buildHtml() {
         setTimeout(function(){
             if(c.el.parentNode)c.el.parentNode.removeChild(c.el);
             reportSize();
-            if(cards.size===0)ipcRenderer.send('notif-empty');
+            if(cards.size===0)window.notifBridge.sendEmpty();
         },200);
     }
 
@@ -147,7 +146,7 @@ function buildHtml() {
         if(first.parentNode)first.parentNode.removeChild(first);
     }
 
-    ipcRenderer.on('notif-add', function(_e, data){
+    window.notifBridge.onAdd(function(data){
         const id=data.id;
         const dur=(data.duration||6)*1000;
         const el=document.createElement('div'); el.className='card';
@@ -168,9 +167,9 @@ function buildHtml() {
 
         const acts=document.createElement('div'); acts.className='actions';
         const reply=document.createElement('button'); reply.className='btn reply'; reply.textContent=data.btnOpen||'Открыть';
-        reply.onclick=function(){ipcRenderer.send('notif-action',{action:'open',peerId:data.peerId});removeCard(id);};
+        reply.onclick=function(){window.notifBridge.sendAction('open', data.peerId);removeCard(id);};
         const read=document.createElement('button'); read.className='btn read'; read.textContent=data.btnRead||'Прочитано';
-        read.onclick=function(){ipcRenderer.send('notif-action',{action:'read',peerId:data.peerId});removeCard(id);};
+        read.onclick=function(){window.notifBridge.sendAction('read', data.peerId);removeCard(id);};
         acts.appendChild(reply); acts.appendChild(read);
 
         const prog=document.createElement('div'); prog.className='progress';
@@ -201,7 +200,7 @@ function buildHtml() {
 function ensureWin() {
     if (_win && !_win.isDestroyed()) return _win;
     const wa = primaryWorkArea();
-    _win = new BrowserWindow({
+    const win = _win = new BrowserWindow({
         width: WIDTH,
         height: 120,
         x: wa.x + wa.width - WIDTH - MARGIN,
@@ -221,26 +220,38 @@ function ensureWin() {
         roundedCorners: true,
         type: 'notification',
         webPreferences: {
-            nodeIntegration: true,
-            contextIsolation: false,
+            preload: require('path').join(__dirname, 'notification-preload.js'),
+            contextIsolation: true,
+            nodeIntegration: false,
             backgroundThrottling: false,
-            sandbox: false,
+            sandbox: true,
         },
     });
-    _win.setAlwaysOnTop(true, 'screen-saver');
-    try { _win.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true }); } catch (e) {}
+    win.setAlwaysOnTop(true, 'screen-saver');
+    try { win.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true }); } catch (e) {}
 
     _ready = false;
-    _win.webContents.once('did-finish-load', () => { _ready = true; flush(); });
+    win.webContents.once('did-finish-load', () => {
+        if (_win !== win || win.isDestroyed()) return;
+        _ready = true;
+        flush();
+    });
     const html = buildHtml();
-    _win.loadURL('data:text/html;charset=utf-8,' + encodeURIComponent(html)).catch(() => {});
-    _win.on('closed', () => { _win = null; _ready = false; });
-    // Renderer crash/hang leaves _win alive but blank — notifications would silently stop
-    // forever. Drop the handle so the next queueNotification rebuilds a fresh window.
-    const drop = () => { try { if (_win && !_win.isDestroyed()) _win.destroy(); } catch (e) {} _win = null; _ready = false; };
-    _win.webContents.on('render-process-gone', drop);
-    _win.webContents.on('unresponsive', drop);
-    return _win;
+    win.loadURL('data:text/html;charset=utf-8,' + encodeURIComponent(html)).catch(() => {});
+    win.on('closed', () => {
+        // An old popup can finish closing after a replacement was already created.
+        // Never let the stale window clear the handle/ready state of the new one.
+        if (_win === win) { _win = null; _ready = false; }
+    });
+    // Renderer crash/hang leaves the BrowserWindow alive but blank. Destroy exactly
+    // the failed instance; the next queueNotification will build a fresh one.
+    const drop = () => {
+        try { if (!win.isDestroyed()) win.destroy(); } catch (e) {}
+        if (_win === win) { _win = null; _ready = false; }
+    };
+    win.webContents.on('render-process-gone', drop);
+    win.webContents.on('unresponsive', drop);
+    return win;
 }
 
 function flush() {

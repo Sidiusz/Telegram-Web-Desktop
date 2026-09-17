@@ -128,7 +128,10 @@ function getAddons() {
 // ── Удаление (только пользовательские) ───────────────────────────────────────
 
 function deleteAddon(name) {
-    try { fs.unlinkSync(path.join(userAddonsDir(), name)); } catch (e) {}
+    const safe = path.basename(String(name || ''));
+    if (!safe || safe === '.' || safe === '..') return;
+    if (!/^[a-zA-Z0-9._-]+\.(js|crx)$/i.test(safe)) return;
+    try { fs.unlinkSync(path.join(userAddonsDir(), safe)); } catch (e) {}
     // Чистим состояние: выкидываем ключ из ОБОИХ списков (не включаем заново —
     // иначе в enabled_addons копится мусор для уже удалённых файлов).
     const key = 'user:' + name;

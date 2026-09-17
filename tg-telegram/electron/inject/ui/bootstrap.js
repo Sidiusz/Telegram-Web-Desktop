@@ -23,7 +23,32 @@ function makeTrayPng(count){
 }
 function waitBody(cb){if(document.body)cb();else{const t=setInterval(()=>{if(document.body){clearInterval(t);cb();}},50);}}
 
+function installAtomicQrReveal(){
+    if(document.getElementById('_twd_qr_atomic_css_')) return;
+    const style=document.createElement('style'); style.id='_twd_qr_atomic_css_';
+    style.textContent='#auth-qr-form .qr-inner._twd_qr_wait_{visibility:hidden!important;}';
+    (document.head||document.documentElement).appendChild(style);
+    let bound=null, seq=0;
+    const bind=()=>{
+        const inner=document.querySelector('#auth-qr-form .qr-inner');
+        const qr=inner&&inner.querySelector('.qr-container');
+        if(!inner||!qr||qr===bound) return;
+        bound=qr; inner.classList.add('_twd_qr_wait_');
+        const sync=()=>{
+            const n=++seq, svg=qr.querySelector('svg');
+            const ready=!!svg && svg.querySelectorAll('*').length>100;
+            if(!ready){inner.classList.add('_twd_qr_wait_');return;}
+            requestAnimationFrame(()=>requestAnimationFrame(()=>{
+                if(n===seq && qr.querySelector('svg')?.querySelectorAll('*').length>100) inner.classList.remove('_twd_qr_wait_');
+            }));
+        };
+        new MutationObserver(sync).observe(qr,{childList:true,subtree:true}); sync();
+    };
+    new MutationObserver(bind).observe(document.documentElement,{childList:true,subtree:true}); bind();
+}
+
 waitBody(()=>{
+    installAtomicQrReveal();
     tryInject();
     new MutationObserver(tryInject).observe(document.body,{childList:true,subtree:false});
     
@@ -174,25 +199,35 @@ waitBody(()=>{
 // Fast path for large/multiple files: avoid 10-60s freeze while generating previews.
 // Telegram reads each dropped file via FileReader to make thumbnails; for >10MB files
 // that blocks the UI. Stub readAsDataURL for large blobs so the send dialog appears instantly.
-document.addEventListener('drop', function(e){
-    try{
-        const dt = e.dataTransfer;
-        if(!dt || !dt.files || dt.files.length===0) return;
-        const files = Array.from(dt.files);
-        const total = files.reduce((s,f)=>s+f.size,0);
-        if(files.length>5 || total>30*1024*1024){
-            const orig = FileReader.prototype.readAsDataURL;
-            FileReader.prototype.readAsDataURL = function(blob){
-                if(blob && blob.size>10*1024*1024){
-                    setTimeout(()=>{ try{ this.result=''; if(this.onload) this.onload({target:this}); if(this.onloadend) this.onloadend({target:this}); }catch(_){} },0);
-                    return;
-                }
-                return orig.call(this, blob);
-            };
-            setTimeout(()=>{ try{ FileReader.prototype.readAsDataURL = orig; }catch(_){} }, 8000);
-        }
-    }catch(_){}
-}, true);
+(function(){
+    let _origRS = null, _timer = null;
+    function unpatch(){ if(_origRS){ try{ FileReader.prototype.readAsDataURL = _origRS; }catch(_){} _origRS=null; } if(_timer){ clearTimeout(_timer); _timer=null; } }
+    function patch(){
+        if(_origRS) return;
+        _origRS = FileReader.prototype.readAsDataURL;
+        FileReader.prototype.readAsDataURL = function(blob){
+            if(blob && blob.size>10*1024*1024){
+                setTimeout(()=>{ try{ this.result=''; if(this.onload) this.onload({target:this}); if(this.onloadend) this.onloadend({target:this}); }catch(_){} },0);
+                return;
+            }
+            return _origRS.call(this, blob);
+        };
+        _timer = setTimeout(unpatch, 1500);
+    }
+    document.addEventListener('drop', function(e){
+        try{
+            const dt = e.dataTransfer;
+            if(!dt || !dt.files || dt.files.length===0) return;
+            const files = Array.from(dt.files);
+            const total = files.reduce((s,f)=>s+f.size,0);
+            if(files.length>5 || total>30*1024*1024){
+                patch();
+            }
+        }catch(_){}
+    }, true);
+    // safety: restore on next unrelated drop
+    document.addEventListener('dragend', function(){ unpatch(); }, true);
+})();
 // ─────────────────────────────────────────────────────────────────────────────
 
 // Kill the pull-down stories reveal: wheel-up at the top of the chat list never reaches TG,
@@ -456,16 +491,16 @@ window.__tgMarkAllRead=function(){
 // ──────────────────────────────────────────────────────────────────────────
 
 // ── Входящие сообщения → попап-уведомление + фирменный звук ─────────────────
-// Источник истины — состояние TG (getGlobal), НЕ DOM. Детект нового сообщения:
-// рост threadInfo.lastMessageId в треде «-1». Текст/отправитель/тип чата берём
-// из состояния (messages.byChatId[id].byId, users/chats.byId). Это убирает все
-// прежние костыли DOM-скрапера: гонку превью (320мс), утечку черновика, промахи
-// виртуализации чат-листа, эвристику типа чата по композеру. Единственный
-// остаточный DOM-контакт — аватар (best-effort: в состоянии лежит лишь photoId,
-// без готового URL) и фокус/открытый чат (это свойства окна, не состояния).
-// При включённых «Веб-уведомлениях» TG уходит в путь системного уведомления и НЕ
-// играет свой in-app звук → мы играем /a/notification.mp3 сами; если TG всё же
-// сыграл свой (галка выкл) — не дублируем (lastTgSound).
+// После миграции Web A с webpack на Vite прямого доступа к getGlobal больше нет.
+// Поэтому источник здесь — собственный notification pipeline Telegram, который
+// notif-intercept.js перехватывает ДО нативного системного уведомления. Payload из
+// service worker содержит chatId/messageId/title/body/icon и уже учитывает mute,
+// silent, preview/privacy и прочие правила Telegram. DOM используется только как
+// best-effort fallback для аватара/peerId и для определения активного чата.
+// Когда Web A считает web-уведомления включёнными, он отдаёт сообщение в свой
+// notification pipeline и не играет обычный in-app звук. Мы перехватываем этот
+// pipeline и играем /a/notification.mp3 сами; если TG всё же успел сыграть свой —
+// не дублируем (lastTgSound).
 (function setupIncomingNotifications(){
     var seen={}, seeded=false, lastTgSound=0;
     // Кэш настроек (звук/громкость/категории). Обновляем периодически — дёшево
@@ -567,11 +602,12 @@ window.__tgMarkAllRead=function(){
         });
     }
 
-    // Источник уведомлений — перехват notify-пайплайна Telegram (см. notif-intercept.js):
-    // в фокусе TG идёт через window.Notification, в фоне — через postMessage в service
-    // worker ('showMessageNotification'). Оба пути кладут сюда {title,body,icon,chatId,
-    // messageId,isSilent}. Старый опрос tgRuntime.getGlobal МЁРТВ: webZ переехал на Vite,
-    // глобального webpack-require больше нет, состояние из страницы недостижимо.
+    // Источник уведомлений — перехват notify-пайплайна Telegram (см. notif-intercept.js).
+    // На desktop Web A сначала сам решает, нужно ли уведомлять (обычно только когда
+    // document.hasFocus() === false). При доступном Push API он шлёт
+    // 'showMessageNotification' через ServiceWorker.postMessage; локальный
+    // window.Notification остаётся fallback-путём. Оба варианта приводятся к одному
+    // payload {title,body,icon,chatId,messageId,isSilent}.
     function handleTgNotif(p){
         if(!p)return;
         var pid = p.chatId!=null ? String(p.chatId) : '';

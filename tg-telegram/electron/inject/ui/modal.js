@@ -28,7 +28,7 @@ function pickModal(opts){
         return '<label class="Radio'+(o.value===current?' checked':'')+'"><input type="radio" name="_tgpick_" value="'+o.value+'"'+(o.value===current?' checked':'')+'><div class="Radio-main"><span class="label">'+o.label+'</span></div></label>';
     }).join('');
     mo.innerHTML='<div class="modal-dialog"><div class="modal-header"><div class="modal-title">'+title+'</div></div>'
-        +'<div class="modal-content"><div class="radio-group _tgpick_grp_">'+radios+'</div>'
+        +'<div class="modal-content"><div class="radio-group _tgpick_grp_ custom-scroll">'+radios+'</div>'
         +'<div class="dialog-buttons"><button class="Button danger" id="_pk_cn_">'+T('cancel')+'</button>'
         +'<button class="Button" id="_pk_ok_">'+T('save_upper')+'</button></div></div></div>';
     document.body.appendChild(mo);

@@ -1,39 +1,108 @@
 'use strict';
-const { BrowserWindow, session, app, net, Menu, MenuItem, screen } = require('electron');
+const { BrowserWindow, session, app, net, Menu, MenuItem, screen, shell } = require('electron');
 const path = require('path');
 const fs = require('fs');
 
-// Windows-style dedup: if the file exists, append " (1)", " (2)", … like Explorer.
-function uniquePath(p) {
-    if (!fs.existsSync(p)) return p;
-    const dir = path.dirname(p);
-    const ext = path.extname(p);
-    const base = path.basename(p, ext);
-    for (let i = 1; i < 10000; i++) {
-        const cand = path.join(dir, `${base} (${i})${ext}`);
-        if (!fs.existsSync(cand)) return cand;
-    }
-    return p;
-}
 const { getScripts } = require('./scripts.cjs');
 const { loadAddonScripts } = require('./addons.cjs');
 const { saveDownloads, trackActive, untrackActive } = require('./downloads.cjs');
 const { loadSettings } = require('./settings.cjs');
+const { uniquePath } = require('./utils.cjs');
+const { installFlowsealWsRoute, noteTelegramLoadFailure, isWebFallbackEnabled } = require('./tg-flowseal-route.cjs');
+const { fetchTelegramWebAFallback } = require('./telegram-web-fallback.cjs');
+const { injectTelegramWorkerProxy } = require('./tg-flowseal-worker.cjs');
 
 const TG_URL = 'https://web.telegram.org/a/';
+const WEBSYNC_HOSTS = new Set(['t.me', 'telegram.me', 'telegram.dog']);
+function isTelegramWebsyncUrl(urlString) {
+    try {
+        const u = new URL(urlString);
+        return WEBSYNC_HOSTS.has(u.hostname) && u.pathname === '/_websync_';
+    } catch (_) { return false; }
+}
+function telegramWebsyncNoopResponse() {
+    return new Response('// Telegram Web Desktop: browser websync is not needed here.\n', {
+        status: 200,
+        headers: { 'content-type': 'text/javascript; charset=utf-8', 'cache-control': 'no-store' },
+    });
+}
 
 let mainWindow = null;
 let forceQuit = false;
 
 app.on('before-quit', () => { forceQuit = true; });
 
-function getWindow() { return mainWindow; }
+function getWindow() {
+    if (!mainWindow) return null;
+    try { return mainWindow.isDestroyed() ? null : mainWindow; } catch (_) { return null; }
+}
 
 function createWindow(state) {
-    session.defaultSession.setPermissionRequestHandler((webContents, permission, callback) => {
-        callback(true);
+    const initialSettings = loadSettings();
+    installFlowsealWsRoute(session.defaultSession, initialSettings);
+    let webAMode = initialSettings.proxy_web_fallback !== false && initialSettings.proxy_web_fallback_latched === true
+        ? 'fallback' : 'auto';
+    if (webAMode === 'fallback') console.log('[TG-PROXY] Web A fallback pre-armed from previous direct failure');
+    let fallbackReloadScheduled = false;
+    function isWebAEntry(url) {
+        try { const p = new URL(url).pathname; return p === '/a' || p === '/a/'; } catch (_) { return false; }
+    }
+    function scheduleFallbackReload() {
+        if (fallbackReloadScheduled || !mainWindow || mainWindow.isDestroyed()) return;
+        fallbackReloadScheduled = true;
+        setTimeout(() => {
+            fallbackReloadScheduled = false;
+            if (mainWindow && !mainWindow.isDestroyed()) mainWindow.loadURL(TG_URL);
+        }, 50);
+    }
+    async function fetchTelegramAsset(request, url) {
+        if (webAMode === 'fallback') return fetchTelegramWebAFallback(url);
+        try {
+            const response = await net.fetch(request, { bypassCustomProtocolHandlers: true });
+            if (isWebAEntry(url) && webAMode === 'auto') webAMode = 'direct';
+            return response;
+        } catch (e) {
+            noteTelegramLoadFailure(e && e.message ? e.message : e);
+            if (!isWebFallbackEnabled()) throw e;
+            const entry = isWebAEntry(url);
+            webAMode = 'fallback';
+            // Restart the shell once so every worker/resource belongs to the same
+            // pinned fallback session and receives the embedded proxy transform.
+            scheduleFallbackReload();
+            if (!entry) throw e;
+            return fetchTelegramWebAFallback(url);
+        }
+    }
+
+    const ALLOWED_PERMS = new Set([
+        'notifications', 'media', 'mediaKeySystem',
+        'clipboard-read', 'clipboard-sanitized-write',
+        'display-capture', 'window-management',
+    ]);
+    function isTelegramHost(hostname) {
+        if (!hostname) return false;
+        const h = hostname.toLowerCase().replace(/^www\./, '');
+        return h === 'web.telegram.org' || h === 'telegram.org' ||
+               h === 't.me' || h.endsWith('.telegram.org') || h.endsWith('.telesco.pe');
+    }
+    session.defaultSession.setPermissionRequestHandler((webContents, permission, callback, details) => {
+        try {
+            const url = (details && (details.requestingUrl || details.embeddingUrl)) || '';
+            const host = url ? new URL(url).hostname : '';
+            if (!isTelegramHost(host)) return callback(false);
+            if (!ALLOWED_PERMS.has(permission)) return callback(false);
+            return callback(true);
+        } catch (_) { return callback(false); }
     });
-    session.defaultSession.setPermissionCheckHandler(() => true);
+    session.defaultSession.setPermissionCheckHandler((webContents, permission, requestingOrigin, details) => {
+        try {
+            if (!isTelegramHost(requestingOrigin ? new URL(requestingOrigin).hostname : '')) {
+                const u = details && (details.requestingUrl || details.embeddingUrl);
+                if (!isTelegramHost(u ? new URL(u).hostname : '')) return false;
+            }
+            return ALLOWED_PERMS.has(permission);
+        } catch (_) { return false; }
+    });
 
     // Telegram now delivers CSP via <meta http-equiv="Content-Security-Policy"> (see /a/ HTML)
     // – stripping response headers alone is no longer enough and the page stays white
@@ -49,11 +118,13 @@ function createWindow(state) {
         if (canHandle && !already) {
             ses.protocol.handle('https', async (request) => {
                 const url = request.url;
+                if (isTelegramWebsyncUrl(url)) return telegramWebsyncNoopResponse();
                 const isTgCandidate = url.startsWith('https://web.telegram.org/a');
                 if (!isTgCandidate) {
                     return net.fetch(request, { bypassCustomProtocolHandlers: true });
                 }
-                const resp = await net.fetch(request, { bypassCustomProtocolHandlers: true });
+                let resp = await fetchTelegramAsset(request, url);
+                resp = await injectTelegramWorkerProxy(resp, url);
                 const ct = (resp.headers.get('content-type') || '').toLowerCase();
                 if (!ct.includes('text/html')) return resp;
                 let body = await resp.text();
@@ -75,9 +146,11 @@ function createWindow(state) {
                 if (!httpAlready) {
                     ses.protocol.handle('http', async (request) => {
                         const url = request.url;
+                        if (isTelegramWebsyncUrl(url)) return telegramWebsyncNoopResponse();
                         const isTgCandidate = url.startsWith('http://web.telegram.org/a');
                         if (!isTgCandidate) return net.fetch(request, { bypassCustomProtocolHandlers: true });
-                        const resp = await net.fetch(request, { bypassCustomProtocolHandlers: true });
+                        let resp = await fetchTelegramAsset(request, url);
+                        resp = await injectTelegramWorkerProxy(resp, url);
                         const ct = (resp.headers.get('content-type') || '').toLowerCase();
                         if (!ct.includes('text/html')) return resp;
                         let body = await resp.text();
@@ -112,6 +185,7 @@ function createWindow(state) {
             preload: path.join(__dirname, 'preload.js'),
             contextIsolation: true,
             nodeIntegration: false,
+            sandbox: true,
             spellcheck: false,
             backgroundThrottling: false,
         },
@@ -121,6 +195,9 @@ function createWindow(state) {
     // protocol.handle above strips the meta; this strips the header variant.
     // Keys are lower-cased by Electron but be defensive and strip case-insensitively.
     session.defaultSession.webRequest.onHeadersReceived((details, callback) => {
+        if (!/^https:\/\/web\.telegram\.org\/a(?:\/|[?#]|$)/i.test(details.url || '')) {
+            return callback({ responseHeaders: details.responseHeaders || {} });
+        }
         const headers = details.responseHeaders || {};
         for (const key of Object.keys(headers)) {
             const lk = key.toLowerCase();
@@ -153,28 +230,35 @@ function createWindow(state) {
         mainWindow.webContents.executeJavaScript(NOTIF_INTERCEPT_JS).catch(e => console.error('[NOTIF]', e));
     });
 
+    let injectPromise = null;
     const injectAll = () => {
-        // getScripts() re-reads inject/* on every call in dev, so edits land on a reload.
-        // NOTIF_INTERCEPT_JS must come first: otherwise, after TG's own self-reload (service worker), the Notification intercept got lost and the watchdog never restored it.
-        const { NOTIF_INTERCEPT_JS, EXTERNAL_JS, AUDIO_JS, UI_JS } = getScripts();
-        const allScripts = [NOTIF_INTERCEPT_JS, EXTERNAL_JS, AUDIO_JS, UI_JS, ...loadAddonScripts()];
-        for (const script of allScripts) {
-            mainWindow.webContents.executeJavaScript(script).catch(e => console.error('[SCRIPT]', e));
-        }
+        if (injectPromise || !mainWindow || mainWindow.isDestroyed()) return injectPromise;
+        injectPromise = (async () => {
+            // Keep ordering deterministic and avoid piling many executeJavaScript
+            // calls onto WebContents while a load is still settling.
+            const { NOTIF_INTERCEPT_JS, EXTERNAL_JS, AUDIO_JS, UI_JS } = getScripts();
+            const allScripts = [NOTIF_INTERCEPT_JS, EXTERNAL_JS, AUDIO_JS, UI_JS, ...loadAddonScripts()];
+            for (const script of allScripts) {
+                if (!mainWindow || mainWindow.isDestroyed()) break;
+                try { await mainWindow.webContents.executeJavaScript(script); }
+                catch (e) { console.error('[SCRIPT]', e); }
+            }
+        })().finally(() => { injectPromise = null; });
+        return injectPromise;
     };
 
     mainWindow.webContents.on('did-finish-load', () => {
         const s = loadSettings();
         if (s.devtools_enabled) mainWindow.webContents.openDevTools();
-        injectAll();
+        void injectAll();
     });
 
     // Watchdog: TG's self-reload ("Reload" in the chat list) goes through a service
-    // worker, and did-finish-load can fire on an intermediate load and miss the final page — checks the __tgUIInjected marker and re-injects everything if it's gone.
+    // worker, and did-finish-load can fire on an intermediate load and miss the final page.
     setInterval(() => {
-        if (mainWindow.isDestroyed()) return;
+        if (!mainWindow || mainWindow.isDestroyed() || mainWindow.webContents.isLoading() || injectPromise) return;
         mainWindow.webContents.executeJavaScript('!!window.__tgUIInjected', true)
-            .then(ok => { if (!ok) injectAll(); })
+            .then(ok => { if (!ok) void injectAll(); })
             .catch(() => {});
     }, 3000);
 
@@ -228,18 +312,24 @@ function createWindow(state) {
     });
 
     // Preload overrides Document.prototype.hidden/visibilityState/hasFocus once.
-    // Here we only flip the backing variables — no defineProperty on every blur.
+    // Wake Telegram explicitly when Electron shows/focuses the window: Web A can
+    // otherwise keep body.in-background after auth even though the DOM is ready.
+    const wakeTelegramForeground = () => {
+        if (!mainWindow || mainWindow.isDestroyed()) return;
+        mainWindow.webContents.executeJavaScript(
+            `try{window.__tgHiddenCtrl&&window.__tgHiddenCtrl.wakeForeground()}catch(e){}`
+        ).catch(()=>{});
+    };
     mainWindow.on('blur', () => {
         mainWindow.webContents.executeJavaScript(`try{window.__tgHiddenCtrl&&window.__tgHiddenCtrl.setHasFocus(false)}catch(e){}`).catch(()=>{});
     });
-    mainWindow.on('focus', () => {
-        mainWindow.webContents.executeJavaScript(`try{window.__tgHiddenCtrl&&window.__tgHiddenCtrl.setHasFocus(true)}catch(e){}`).catch(()=>{});
-        mainWindow.webContents.executeJavaScript(`try{window.__tgHiddenCtrl&&window.__tgHiddenCtrl.setHidden(false)}catch(e){}`).catch(()=>{});
-    });
+    mainWindow.on('focus', wakeTelegramForeground);
 
     mainWindow.webContents.session.on('will-download', (event, item) => {
         const settings = loadSettings();
-        const originalFilename = item.getFilename();
+        const rawName = item.getFilename();
+        const { sanitizeFilename } = require('./utils.cjs');
+        const originalFilename = sanitizeFilename(rawName);
 
         const downloadDir = settings.save_path || app.getPath('downloads');
         item.setSavePath(uniquePath(path.join(downloadDir, originalFilename)));
@@ -300,30 +390,71 @@ function createWindow(state) {
         mainWindow.loadURL(TG_URL);
     };
 
+    const isTrustedMainUrl = (url) => {
+        try {
+            const u = new URL(url);
+            return u.protocol === 'https:' && u.hostname === 'web.telegram.org' &&
+                   (u.pathname === '/a' || u.pathname.startsWith('/a/'));
+        } catch (_) { return false; }
+    };
+    const openExternalWebUrl = (url) => {
+        try {
+            const u = new URL(url);
+            if (u.protocol === 'https:' || u.protocol === 'http:') shell.openExternal(u.toString()).catch(() => {});
+        } catch (_) {}
+    };
+
     mainWindow.webContents.on('will-navigate', (e, url) => {
         if (isKVersionUrl(url)) { forceAVersion(e); return; }
-        // blob: always means "download" (the viewer gives an <a download href=blob:>). The
-        // renderer does the actual download (bootstrap.js → save_blob). Just block navigation here — webContents.downloadURL(blob:) doesn't work in Electron and pops a "choose an app" dialog.
-        if (url.startsWith('blob:')) e.preventDefault();
+        if (url.startsWith('blob:')) { e.preventDefault(); return; }
+        if (!isTrustedMainUrl(url)) {
+            e.preventDefault();
+            openExternalWebUrl(url);
+        }
     });
     mainWindow.webContents.on('will-redirect', (e, url) => {
-        if (isKVersionUrl(url)) forceAVersion(e);
+        if (isKVersionUrl(url)) { forceAVersion(e); return; }
+        if (!isTrustedMainUrl(url)) {
+            e.preventDefault();
+            openExternalWebUrl(url);
+        }
     });
     mainWindow.webContents.setWindowOpenHandler(({ url }) => {
         if (isKVersionUrl(url)) { mainWindow.loadURL(TG_URL); return { action: 'deny' }; }
-        return { action: 'deny' };   // don't open blob/external links in a new window (see external.js)
+        if (!isTrustedMainUrl(url)) openExternalWebUrl(url);
+        return { action: 'deny' };
     });
-    mainWindow.on('ready-to-show', () => mainWindow.show());
+
+    // A renderer crash used to leave a perfectly valid BrowserWindow showing a white
+    // surface, while the tray still held a reference to it. Recover the Telegram page
+    // in-place, but cap retries so a deterministic startup crash cannot spin forever.
+    const rendererRecoveries = [];
+    mainWindow.webContents.on('render-process-gone', (_event, details) => {
+        if (forceQuit || !mainWindow || mainWindow.isDestroyed()) return;
+        const now = Date.now();
+        while (rendererRecoveries.length && now - rendererRecoveries[0] > 60000) rendererRecoveries.shift();
+        if (rendererRecoveries.length >= 3) {
+            console.error('[WINDOW] renderer repeatedly failed; automatic reload stopped', details);
+            return;
+        }
+        rendererRecoveries.push(now);
+        console.error('[WINDOW] renderer process gone; reloading Telegram', details);
+        setTimeout(() => {
+            if (!forceQuit && mainWindow && !mainWindow.isDestroyed()) mainWindow.loadURL(TG_URL).catch(() => {});
+        }, 300);
+    });
+
+    mainWindow.on('ready-to-show', () => { if (mainWindow && !mainWindow.isDestroyed()) mainWindow.show(); });
     // Taskbar badge vanishes on cold start (button doesn't exist yet when setBadgeCount runs) and on restore from tray — reapplied on show/restore.
     const reapplyBadge = () => { try { app.setBadgeCount(state.lastNotificationCount || 0); } catch (e) {} };
-    mainWindow.on('show', reapplyBadge);
-    mainWindow.on('restore', reapplyBadge);
+    mainWindow.on('show', () => { reapplyBadge(); wakeTelegramForeground(); });
+    mainWindow.on('restore', () => { reapplyBadge(); wakeTelegramForeground(); });
 
     // TG's column layout caches window width via ResizeObserver and won't recompute after a
     // monitor change or mid-transition reload (chat stays narrow); a synthetic resize event doesn't trigger it, but nudging zoom by 0.001 does (no visible jump, unlike resizing the frame).
     let _nudging = false;
     function nudgeRelayout() {
-        if (_nudging || mainWindow.isDestroyed()) return;
+        if (_nudging || !mainWindow || mainWindow.isDestroyed()) return;
         _nudging = true;
         try {
             const wc = mainWindow.webContents;
@@ -341,6 +472,10 @@ function createWindow(state) {
         } catch (e) {}
     });
     mainWindow.webContents.on('did-finish-load', () => { setTimeout(nudgeRelayout, 500); });
+    mainWindow.on('hide', () => {
+        if (!mainWindow || mainWindow.isDestroyed()) return;
+        mainWindow.webContents.executeJavaScript(`try{window.__tgHiddenCtrl&&window.__tgHiddenCtrl.setHasFocus(false)}catch(e){}`).catch(()=>{});
+    });
     mainWindow.on('close', (e) => {
         if (forceQuit) return;
         const settings = loadSettings();
@@ -348,6 +483,14 @@ function createWindow(state) {
             e.preventDefault();
             mainWindow.hide();
         }
+    });
+    mainWindow.on('closed', () => {
+        mainWindow = null;
+        // The notification popup is another BrowserWindow, so relying on
+        // window-all-closed can leave the process/tray alive after the main window is
+        // gone. If X really closed the main window (not hide-to-tray), terminate the
+        // app explicitly; otherwise tray actions later target a destroyed object.
+        if (!forceQuit) setImmediate(() => { if (!forceQuit) app.quit(); });
     });
 
     mainWindow.loadURL(TG_URL);

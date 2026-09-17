@@ -142,48 +142,85 @@ function _genHeader(headerTpl,text){
     if(!headerTpl) h.style.cssText='font-size:14px;font-weight:500;line-height:20px;color:rgb(170,170,170);padding:0 16px;';
     h.textContent=text; return h;
 }
-function _genToggle(labelText, checked, onChange){
-    var n=_tgWidgetTpl.toggle.cloneNode(true);
-    n.classList.remove('withSubLabel');
-    var sub=n.querySelector('.subLabel'); if(sub)sub.remove();
+function _genToggle(labelText, checked, onChange, subText){
+    var base=_tgWidgetTpl.toggle||document.querySelector('#Settings label.Checkbox');
+    var n=base?base.cloneNode(true):document.createElement('label');
+    if(!base){ n.className='Checkbox'; n.innerHTML='<input type="checkbox"><div class="Checkbox-main"><span class="label"></span></div>'; }
     var av=n.querySelector('.user-avatar, .Avatar'); if(av)av.remove();
     var lab=n.querySelector('.label'); if(lab)lab.textContent=labelText;
+    var sub=n.querySelector('.subLabel');
+    if(subText){
+        n.classList.add('withSubLabel');
+        if(!sub){ sub=document.createElement('span'); sub.className='subLabel'; n.querySelector('.Checkbox-main').appendChild(sub); }
+        sub.textContent=subText;
+    }else{
+        n.classList.remove('withSubLabel');
+        if(sub)sub.remove();
+    }
     var inp=n.querySelector('input[type=checkbox]');
-    if(inp){ inp.removeAttribute('id'); inp.checked=!!checked; inp.addEventListener('change',function(){ onChange(inp.checked); }); }
+    if(inp){ inp.removeAttribute('id'); inp.disabled=false; inp.checked=!!checked; inp.addEventListener('change',function(){ onChange(inp.checked); }); }
     return n;
 }
-function _genInput(labelText, value, numeric, onCommit){
-    // Нет образца .input-group (не открывали страниц с полями ввода) — строим своё
-    // поле в стиле нативного, чтобы секция «Загрузки» не зависела от клона.
-    if(!_tgWidgetTpl.input){
-        var w=document.createElement('div'); w.className='input-group touched';
-        var fi=document.createElement('input'); fi.type=numeric?'number':'text'; fi.value=value==null?'':value;
-        fi.className='form-control'; fi.style.cssText='width:100%;background:rgba(0,0,0,.18);border:1px solid var(--color-borders-input,#3a3a3a);border-radius:10px;color:#fff;padding:10px 12px;font-size:15px;outline:none;';
-        var lb=document.createElement('label'); lb.textContent=labelText; lb.style.cssText='display:block;font-size:13px;color:rgb(170,170,170);margin:0 0 6px 2px;';
-        var c2=function(){ onCommit(fi.value); }; fi.addEventListener('change',c2); fi.addEventListener('blur',c2);
-        w.appendChild(lb); w.appendChild(fi);
-        return { node:w, input:fi };
-    }
-    var n=_tgWidgetTpl.input.cloneNode(true);
-    var inp=n.querySelector('input');
-    if(inp){
-        inp.removeAttribute('id'); inp.removeAttribute('readonly'); inp.removeAttribute('disabled');
-        inp.type=numeric?'number':'text';
-        inp.value=value==null?'':value;
-        var commit=function(){ onCommit(inp.value); };
-        inp.addEventListener('change',commit); inp.addEventListener('blur',commit);
-    }
-    var lab=n.querySelector('label'); if(lab)lab.textContent=labelText;
-    return { node:n, input:inp };
+function _genRadioGroup(name, options, current, onChange){
+    var live=document.querySelector('#Settings .radio-group');
+    var liveRadio=(live&&live.querySelector('label.Radio'))||document.querySelector('#Settings label.Radio')||_tgWidgetTpl.radio;
+    var group=live?live.cloneNode(false):document.createElement('div');
+    group.className=live?live.className:'radio-group';
+    options.forEach(function(opt){
+        var label=liveRadio?liveRadio.cloneNode(true):document.createElement('label');
+        if(!liveRadio){ label.className='Radio'; label.innerHTML='<input type="radio"><div class="Radio-main"><span class="label"></span></div>'; }
+        var inp=label.querySelector('input[type=radio]'), text=label.querySelector('.label');
+        if(!inp||!text)return;
+        inp.name=name; inp.value=opt.value; inp.checked=opt.value===current; inp.removeAttribute('id'); inp.disabled=false;
+        text.textContent=opt.label; label.classList.toggle('checked',inp.checked);
+        inp.addEventListener('change',function(){ if(!inp.checked)return; group.querySelectorAll('label.Radio').forEach(function(x){x.classList.toggle('checked',x.contains(inp));}); onChange(opt.value); });
+        group.appendChild(label);
+    });
+    return group;
 }
-function _genButton(text, onClick){
-    var b=_tgWidgetTpl.button.cloneNode(true);
-    b.removeAttribute('id'); b.removeAttribute('disabled');
-    var rip=b.querySelector('.ripple-container'); if(rip)rip.innerHTML='';
-    var txt=b.querySelector('.Button-text'); if(txt){ txt.textContent=text; } else { b.textContent=text; }
-    b.addEventListener('click',function(e){ e.stopPropagation(); onClick(); });
-    b.style.marginTop='12px';
-    return b;
+function _genInput(labelText, value, numeric, onCommit){
+    var tpl=_tgWidgetTpl.input, n=tpl?tpl.cloneNode(false):document.createElement('div');
+    n.className=(tpl&&tpl.className)||'input-group touched'; n.removeAttribute('style');
+    var src=tpl&&tpl.querySelector('input'), inp=src?src.cloneNode(false):document.createElement('input');
+    inp.className=(src&&src.className)||'form-control'; inp.removeAttribute('style'); inp.removeAttribute('id');
+    inp.removeAttribute('readonly'); inp.removeAttribute('disabled'); inp.type='text';
+    if(numeric){inp.inputMode='numeric';inp.pattern='[0-9]*';}else{inp.removeAttribute('inputmode');inp.removeAttribute('pattern');}
+    inp.value=value==null?'':value;
+    var srcLab=tpl&&tpl.querySelector('label'), lab=srcLab?srcLab.cloneNode(false):document.createElement('label');
+    lab.removeAttribute('style'); lab.textContent=labelText; n.append(inp,lab);
+    var commit=function(){onCommit(inp.value);};inp.addEventListener('change',commit);inp.addEventListener('blur',commit);
+    return {node:n,input:inp};
+}
+function _genTextarea(labelText,value,onCommit){
+    var base=_genInput(labelText,value,false,function(){}), old=base.input;
+    var ta=document.createElement('textarea'); ta.className=old.className||'form-control';
+    ta.value=value==null?'':value; ta.rows=1; ta.spellcheck=false;
+    old.replaceWith(ta);
+    var resize=function(){ ta.style.height='0px'; ta.style.height=ta.scrollHeight+'px'; };
+    ta.style.overflow='hidden'; ta.style.resize='none';
+    ta.addEventListener('input',resize); ta.addEventListener('change',function(){onCommit(ta.value);});
+    ta.addEventListener('blur',function(){onCommit(ta.value);}); queueMicrotask(resize);
+    return {node:base.node,input:ta,resize:resize};
+}
+function _genNativeSettingRow(liEl,title,sub,value,onClick){
+    var r=liEl.cloneNode(true); r.removeAttribute('id'); r.removeAttribute('style');
+    var btn=r.querySelector('.ListItem-button');
+    if(!btn){btn=document.createElement('div');btn.className='ListItem-button';r.appendChild(btn);}
+    btn.querySelectorAll('.ListItem-main-icon,.Avatar,.user-avatar').forEach(function(x){x.remove();});
+    var multi=btn.querySelector('.multiline-item');
+    if(!multi){multi=document.createElement('div');multi.className='multiline-item';btn.prepend(multi);}
+    var te=multi.querySelector('.title'); if(!te){te=document.createElement('span');te.className='title';multi.appendChild(te);} te.textContent=title||'';
+    var se=multi.querySelector('.subtitle'); if(!se){se=document.createElement('span');se.className='subtitle';multi.appendChild(se);} se.textContent=sub||''; se.hidden=!sub;
+    btn.querySelectorAll('.settings-item__current-value').forEach(function(x){x.remove();});
+    var ve=document.createElement('span');ve.className='settings-item__current-value';ve.textContent=value==null?'':value;btn.appendChild(ve);
+    if(onClick){btn.setAttribute('role','button');btn.setAttribute('tabindex','0');btn.addEventListener('click',function(e){e.stopPropagation();onClick(ve);});}
+    r._title=te;r._subtitle=se;r._value=ve;return r;
+}
+function _genNativeActionRow(liEl){
+    var r=liEl.cloneNode(true); r.removeAttribute('id'); r.removeAttribute('style');
+    var btn=r.querySelector('.ListItem-button');
+    if(!btn){btn=document.createElement('div');btn.className='ListItem-button';r.appendChild(btn);}
+    btn.innerHTML=''; r._content=btn; return r;
 }
 // Native value row (like “Language — Russian”): single line with colored icon.
 function _genRow(liEl, icon, title, value, onClick, danger){

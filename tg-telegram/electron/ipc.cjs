@@ -3,14 +3,31 @@ const { ipcMain, shell, dialog, app, Menu, MenuItem } = require('electron');
 const { pathToFileURL } = require('url');
 const { init: initNotifications, queueNotification } = require('./notification.cjs');
 const { loadSettings, saveSettings } = require('./settings.cjs');
+const { configureProxySettings, setProxyMode, resetAutoProxy, updateProxyOptions, getProxyStatus, getProxyBootstrap, refreshFlowsealDomains, testProxyConnectivity } = require('./tg-flowseal-route.cjs');
+const { getFallbackInfo } = require('./telegram-web-fallback.cjs');
 const { loadDownloads, saveDownloads, deleteDownload, cancelActive } = require('./downloads.cjs');
 const { getAddons, deleteAddon, openAddonsFolder, toggleAddon } = require('./addons.cjs');
 const path = require('path');
 const fs = require('fs');
 const { updateTrayBadge, setTrayLang, setTrayImageFromDataURL, getTrayBaseDataURL } = require('./tray.cjs');
-const { checkForUpdate, downloadUpdate, scheduleChecks, init: initUpdater, fetchChangelog, fetchReleases } = require('./updater.cjs');
+const { checkForUpdate, downloadPendingUpdate, scheduleChecks, init: initUpdater, fetchChangelog, fetchReleases } = require('./updater.cjs');
 
 const TG_URL = 'https://web.telegram.org/a/';
+
+
+const SAFE_OPEN_EXTS = new Set([
+    '.jpg','.jpeg','.png','.gif','.webp','.bmp','.avif','.heic','.tif','.tiff',
+    '.mp4','.mkv','.webm','.mov','.avi','.m4v','.mp3','.ogg','.opus','.wav','.flac','.m4a','.aac',
+    '.pdf','.txt','.md','.csv','.json','.docx','.xlsx','.pptx','.odt','.ods','.odp',
+    '.zip','.rar','.7z','.tar','.gz','.tgz'
+]);
+function isSafeToOpenPath(filePath) {
+    return SAFE_OPEN_EXTS.has(path.extname(String(filePath || '')).toLowerCase());
+}
+function isSafeExternalUrl(raw) {
+    try { const u = new URL(String(raw || '')); return u.protocol === 'https:' || u.protocol === 'http:'; }
+    catch (_) { return false; }
+}
 
 // Windows-style dedup: turns "file.jpg" into "file (1).jpg", like Explorer.
 function uniquePath(p) {
@@ -53,17 +70,55 @@ function initState() {
 function getState() { return state; }
 
 function registerIpc(getWindow) {
+    const approvedSavePaths = new Map();
+    const isTrustedEvent = (event) => {
+        try {
+            const win = getWindow();
+            if (!win || win.isDestroyed() || event.sender !== win.webContents) return false;
+            const raw = (event.senderFrame && event.senderFrame.url) || event.sender.getURL() || '';
+            const u = new URL(raw);
+            return u.protocol === 'https:' && u.hostname === 'web.telegram.org' && (u.pathname === '/a' || u.pathname.startsWith('/a/'));
+        } catch (_) { return false; }
+    };
+    const handle = (channel, listener) => ipcMain.handle(channel, (event, ...args) => {
+        if (!isTrustedEvent(event)) throw new Error('Forbidden IPC sender');
+        return listener(event, ...args);
+    });
+
     initNotifications(getWindow);
     initUpdater(getWindow);
     scheduleChecks();
 
-    ipcMain.handle('get_settings', () => state.settings);
+    handle('get_settings', () => state.settings);
+    ipcMain.on('get_proxy_bootstrap', (event) => {
+        // Preload asks synchronously at document_start, before senderFrame.url is guaranteed
+        // to contain the committed Telegram URL. Bind this one channel to the exact main WebContents.
+        try {
+            const win = getWindow();
+            event.returnValue = win && !win.isDestroyed() && event.sender === win.webContents ? getProxyBootstrap() : null;
+        } catch (_) { event.returnValue = null; }
+    });
 
-    ipcMain.handle('get_app_info', () => ({
+    handle('get_app_info', () => ({
         version: app.getVersion(),
     }));
 
-    ipcMain.handle('show_notification', (e, { title, body, icon, sender, peerId }) => {
+    handle('get_proxy_status', () => Object.assign(getProxyStatus(), { fallback: getFallbackInfo() }));
+    handle('set_proxy_mode', (e, { mode }) => {
+        const status = setProxyMode(mode); state.settings = loadSettings(); return status;
+    });
+    handle('reset_proxy_auto', () => {
+        const status = resetAutoProxy(); state.settings = loadSettings(); return status;
+    });
+    handle('save_proxy_options', (e, options) => {
+        const status = updateProxyOptions(options || {}); state.settings = loadSettings(); return status;
+    });
+    handle('refresh_proxy_domains', async () => {
+        const result = await refreshFlowsealDomains(); return Object.assign(result, { status: getProxyStatus() });
+    });
+    handle('test_proxy_connectivity', () => testProxyConnectivity());
+
+    handle('show_notification', (e, { title, body, icon, sender, peerId }) => {
         const settings = state.settings || loadSettings();
         if (!settings.popup_notifications) return;
 
@@ -82,41 +137,56 @@ function registerIpc(getWindow) {
         });
     });
 
-    ipcMain.handle('save_settings', (e, { settings }) => {
-        saveSettings(settings);
+    handle('save_settings', (e, { settings }) => {
+        const current = state.settings || loadSettings();
+        const next = Object.assign({}, settings || {});
+        if (Object.prototype.hasOwnProperty.call(next, 'save_path') && next.save_path !== current.save_path) {
+            const grant = approvedSavePaths.get(e.sender.id);
+            let accepted = false;
+            try {
+                const requested = path.resolve(String(next.save_path || ''));
+                accepted = !!grant && grant.expires >= Date.now() && requested === grant.path && fs.statSync(requested).isDirectory();
+            } catch (_) {}
+            if (!accepted) next.save_path = current.save_path;
+            else approvedSavePaths.delete(e.sender.id);
+        }
+        saveSettings(next);
         state.settings = loadSettings();
-        // Auto-check interval may have changed — reschedule now so it applies without a restart.
+        configureProxySettings(state.settings);
         scheduleChecks();
     });
 
     // Open/close DevTools instantly without a reload
-    ipcMain.handle('toggle_devtools', (e, { open }) => {
+    handle('toggle_devtools', (e, { open }) => {
         const win = getWindow();
         if (!win) return;
         if (open) win.webContents.openDevTools();
         else win.webContents.closeDevTools();
     });
 
-    ipcMain.handle('open_url', (e, { url }) => {
-        shell.openExternal(url);
+    handle('open_url', (e, { url }) => {
+        if (!isSafeExternalUrl(url)) return { error: 'invalid-url' };
+        return shell.openExternal(String(url));
     });
 
-    ipcMain.handle('open_folder_dialog', async () => {
+    handle('open_folder_dialog', async (e) => {
         const win = getWindow();
         const result = await dialog.showOpenDialog(win, { properties: ['openDirectory'] });
         if (result.canceled || !result.filePaths.length) return null;
-        return result.filePaths[0];
+        const selected = path.resolve(result.filePaths[0]);
+        approvedSavePaths.set(e.sender.id, { path: selected, expires: Date.now() + 60_000 });
+        return selected;
     });
 
     // Check existence on the fly — the filesystem is the source of truth, since a saved
     // 'completed' status can be stale; exists===false tells the renderer to skip the checkmark (see restoreForChat).
-    ipcMain.handle('get_downloads', () => state.downloads.map(d => ({
+    handle('get_downloads', () => state.downloads.map(d => ({
         ...d,
         exists: d.path ? fs.existsSync(d.path) : false,
     })));
 
     // Bind a download to a message (to restore status after restart)
-    ipcMain.handle('bind_download', (e, { id, mid, peerId }) => {
+    handle('bind_download', (e, { id, mid, peerId }) => {
         const item = state.downloads.find(d => d.id === id);
         if (item) {
             if (mid != null) item.mid = String(mid);
@@ -126,7 +196,7 @@ function registerIpc(getWindow) {
     });
 
     // File gone: drop the binding for this mid so "downloaded" isn't restored after restart.
-    ipcMain.handle('forget_download', (e, { mid }) => {
+    handle('forget_download', (e, { mid }) => {
         if (mid == null) return;
         let changed = false;
         for (const d of state.downloads) {
@@ -135,25 +205,30 @@ function registerIpc(getWindow) {
         if (changed) saveDownloads(state.downloads);
     });
 
-    ipcMain.handle('delete_download', (e, { id }) => {
+    handle('delete_download', (e, { id }) => {
         state.downloads = deleteDownload(state.downloads, id);
     });
 
-    ipcMain.handle('cancel_download', (e, { id }) => ({ ok: cancelActive(id) }));
+    handle('cancel_download', (e, { id }) => ({ ok: cancelActive(id) }));
 
-    ipcMain.handle('open_download_folder', (e, { id }) => {
+    handle('open_download_folder', (e, { id }) => {
         const item = state.downloads.find(d => d.id === id);
         if (item && item.path && fs.existsSync(item.path)) shell.showItemInFolder(item.path);
         else return { error: 'missing' };
     });
 
-    ipcMain.handle('open_download_file', (e, { id }) => {
+    handle('open_download_file', async (e, { id }) => {
         const item = state.downloads.find(d => d.id === id);
-        if (item && item.path && fs.existsSync(item.path)) shell.openPath(item.path);
-        else return { error: 'missing' };
+        if (!item || !item.path || !fs.existsSync(item.path)) return { error: 'missing' };
+        if (!isSafeToOpenPath(item.path)) {
+            shell.showItemInFolder(item.path);
+            return { error: 'unsafe-open' };
+        }
+        const error = await shell.openPath(item.path);
+        return error ? { error } : { ok: true };
     });
 
-    ipcMain.handle('clear_cache', async () => {
+    handle('clear_cache', async () => {
         const win = getWindow();
         if (win) {
             // Don't touch 'serviceworkers' — removing it breaks TG after reload ("Service
@@ -166,7 +241,7 @@ function registerIpc(getWindow) {
         }
     });
 
-    ipcMain.handle('fetch_changelog', async () => {
+    handle('fetch_changelog', async () => {
         try {
             const text = await fetchChangelog();
             return { text };
@@ -176,7 +251,7 @@ function registerIpc(getWindow) {
     });
 
     // Structured per-version changelog (for the block "Changelog" screen)
-    ipcMain.handle('fetch_changelog_structured', async () => {
+    handle('fetch_changelog_structured', async () => {
         try {
             const versions = await fetchReleases();
             if (versions && versions.length) return { current: app.getVersion(), versions };
@@ -186,7 +261,7 @@ function registerIpc(getWindow) {
         }
     });
 
-    ipcMain.handle('check_update_manual', async () => {
+    handle('check_update_manual', async () => {
         try {
             const result = await checkForUpdate({ silent: false });
             return result;
@@ -195,15 +270,17 @@ function registerIpc(getWindow) {
         }
     });
 
-    ipcMain.handle('skip_version', (e, { version }) => {
+    handle('skip_version', (e, { version }) => {
         const s = loadSettings();
         saveSettings(Object.assign({}, s, { skipped_version: version }));
     });
 
-    ipcMain.handle('download_update', async (e, { url, filename }) => {
+    handle('download_update', async () => {
         const win = getWindow();
         try {
-            const destPath = await downloadUpdate(url, filename, (received, total) => {
+            // URL, filename and checksum are resolved in main from our GitHub release.
+            // Renderer input is deliberately ignored for the update trust boundary.
+            const destPath = await downloadPendingUpdate((received, total) => {
                 if (win && !win.isDestroyed()) {
                     win.webContents.send('update-download-progress', { received, total });
                 }
@@ -212,12 +289,8 @@ function registerIpc(getWindow) {
             if (win && !win.isDestroyed()) {
                 win.webContents.send('update-download-done', { path: destPath });
             }
-
-            shell.openExternal('file:///' + destPath.replace(/\\/g, '/'))
-                .catch(() => {
-                    shell.openPath(destPath);
-                });
-
+            const openError = await shell.openPath(destPath);
+            if (openError) throw new Error(openError);
         } catch (e) {
             if (win && !win.isDestroyed()) {
                 win.webContents.send('update-download-done', { error: e.message });
@@ -226,20 +299,20 @@ function registerIpc(getWindow) {
         }
     });
 
-    ipcMain.handle('get_addons', () => getAddons());
+    handle('get_addons', () => getAddons());
 
-    ipcMain.handle('delete_addon', (e, { name }) => deleteAddon(name));
+    handle('delete_addon', (e, { name }) => deleteAddon(name));
 
-    ipcMain.handle('toggle_addon', (e, { key, enabled }) => {
+    handle('toggle_addon', (e, { key, enabled }) => {
         toggleAddon(key, enabled);
     });
 
-    ipcMain.handle('apply_addons', () => {
+    handle('apply_addons', () => {
         const win = getWindow();
         if (win) win.webContents.reload();
     });
 
-    ipcMain.handle('show_image_context_menu', (e, { srcURL, x, y, downloadId }) => {
+    handle('show_image_context_menu', (e, { srcURL, x, y, downloadId }) => {
         const win = getWindow();
         if (!win) return;
         const menu = new Menu();
@@ -270,9 +343,11 @@ function registerIpc(getWindow) {
 
     // webContents.downloadURL(blob:) doesn't work in Electron (blob lives in the renderer,
     // unreachable from main), so the renderer fetches it to a dataURL and sends the bytes here to be written and registered.
-    ipcMain.handle('save_blob', (e, { dataUrl, filename }) => {
+    handle('save_blob', (e, { dataUrl, filename }) => {
         try {
-            const m = /^data:([^;,]*)?(;base64)?,([\s\S]*)$/.exec(dataUrl || '');
+            const rawData = String(dataUrl || '');
+            if (rawData.length > 384 * 1024 * 1024) return { error: 'too-large' };
+            const m = /^data:([^;,]*)?(;base64)?,([\s\S]*)$/.exec(rawData);
             if (!m) return { error: 'bad-data' };
             const buf = m[2] ? Buffer.from(m[3], 'base64') : Buffer.from(decodeURIComponent(m[3]));
             const settings = state.settings || loadSettings();
@@ -299,28 +374,28 @@ function registerIpc(getWindow) {
         }
     });
 
-    ipcMain.handle('open_addons_folder', () => openAddonsFolder());
+    handle('open_addons_folder', () => openAddonsFolder());
 
     // Renderer reports Telegram's UI language → localize tray menu.
-    ipcMain.handle('report_lang', (e, { lang }) => {
+    handle('report_lang', (e, { lang }) => {
         _uiLang = (String(lang || '').toLowerCase().indexOf('ru') === 0) ? 'ru' : 'en';
         setTrayLang(lang);
     });
 
     // Tray icon PNG drawn on a canvas in the renderer (SVG→nativeImage fails here).
-    ipcMain.handle('set_tray_image', (e, { dataURL }) => {
+    handle('set_tray_image', (e, { dataURL }) => {
         setTrayImageFromDataURL(dataURL);
     });
 
     // Base tray logo (PNG data URL) so the renderer can composite logo + badge.
-    ipcMain.handle('get_tray_base', () => getTrayBaseDataURL());
+    handle('get_tray_base', () => getTrayBaseDataURL());
 
-    ipcMain.handle('get_hint_img_url', () => {
+    handle('get_hint_img_url', () => {
         const imgPath = path.join(__dirname, 'assets', 'webnotif-hint.png');
         return pathToFileURL(imgPath).href;
     });
 
-    ipcMain.handle('set_notifications_count', (e, { count }) => {
+    handle('set_notifications_count', (e, { count }) => {
         const n = parseInt(count) || 0;
         state.lastNotificationCount = n;
         // Electron's native taskbar badge (self-drawn, no "attention" flash). On cold start/
@@ -329,7 +404,7 @@ function registerIpc(getWindow) {
         updateTrayBadge(n);
     });
 
-    ipcMain.handle('set_window_title', (e, { title }) => {
+    handle('set_window_title', (e, { title }) => {
         const win = getWindow();
         if (win) win.setTitle(title);
     });

@@ -14,6 +14,18 @@ const TR = {
 };
 const tr = k => (TR[_lang] || TR.en)[k];
 
+function liveWindow() {
+    const w = _getWindow && _getWindow();
+    if (!w) return null;
+    try { return w.isDestroyed() ? null : w; } catch (_) { return null; }
+}
+
+function showWindow() {
+    const w = liveWindow();
+    if (!w) return;
+    try { w.show(); w.focus(); } catch (_) {}
+}
+
 // Renderer reports Telegram's UI language (report_lang IPC) — relocalize the menu.
 function setTrayLang(lang) {
     _lang = (lang === 'ru') ? 'ru' : 'en';
@@ -38,7 +50,7 @@ function createTray(getWindow) {
     tray = new Tray(baseIcon);
     tray.setToolTip('Telegram Web Desktop');
     tray.setContextMenu(buildMenu(0));
-    tray.on('click', () => { const w = _getWindow && _getWindow(); if (w) { w.show(); w.focus(); } });
+    tray.on('click', showWindow);
     return tray;
 }
 
@@ -58,15 +70,15 @@ const IC = {
 };
 
 function runInPage(js) {
-    const w = _getWindow && _getWindow();
+    const w = liveWindow();
     if (!w) return;
-    w.webContents.executeJavaScript(js).catch(() => {});
+    try { w.webContents.executeJavaScript(js).catch(() => {}); } catch (_) {}
 }
 
 function buildMenu(count) {
     const items = [
-        { label: tr('show'), icon: IC.show(), click: () => { const w = _getWindow && _getWindow(); if (w) { w.show(); w.focus(); } } },
-        { label: tr('settings'), icon: IC.settings(), click: () => { const w = _getWindow && _getWindow(); if (w) { w.show(); w.focus(); runInPage('window.__tgOpenAppSettings&&window.__tgOpenAppSettings()'); } } },
+        { label: tr('show'), icon: IC.show(), click: showWindow },
+        { label: tr('settings'), icon: IC.settings(), click: () => { showWindow(); runInPage('window.__tgOpenAppSettings&&window.__tgOpenAppSettings()'); } },
     ];
     if (count > 0) {
         items.push({ label: tr('read'), icon: IC.read(), click: () => runInPage('window.__tgMarkAllRead&&window.__tgMarkAllRead()') });

@@ -1,5 +1,5 @@
 // @name Desktop-like - Standart
-// @version 2.3.0
+// @version 2.3.1
 // @description Left-aligned messages and avatars, like desktop Telegram. Standard width.
 // @group desktop_like_chat
 
@@ -36,7 +36,10 @@
             }
             ._tg_right_open #MiddleColumn .middle-column-footer { transform: none !important; }
             /* Keep TG's own composer spacing (send button sits 4px from the edge); only stop it wrapping. */
-            #MiddleColumn .Composer { flex-wrap: nowrap !important; box-sizing:border-box !important; }
+            /* Plain composer stays on one row. Reply/edit embeds need TG's native wrap;
+               forcing nowrap collapses ComposerEmbeddedMessage to 0px and crushes the input. */
+            #MiddleColumn .Composer:not(.with-embedded) { flex-wrap: nowrap !important; box-sizing:border-box !important; }
+            #MiddleColumn .Composer.with-embedded { box-sizing:border-box !important; }
             #MiddleColumn .Composer .composer-wrapper { min-width:0 !important; }
             #MiddleColumn .Composer #editable-message-text { min-width:0 !important; }
 

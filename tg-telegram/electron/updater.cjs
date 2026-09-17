@@ -3,7 +3,6 @@ const { app, net, powerMonitor } = require('electron');
 const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
-const { spawn } = require('child_process');
 const { loadSettings } = require('./settings.cjs');
 const { sanitizeFilename, uniquePath } = require('./utils.cjs');
 
@@ -35,6 +34,7 @@ let _powerHooked = false;
 let _armCheck = null;
 let _checking = null;
 let _lastCheckFailed = false;
+let _pendingUpdate = null;
 
 function init(getWindow) {
     _getWindow = getWindow;
@@ -168,7 +168,11 @@ async function fetchLatestRelease() {
     const assets  = Array.isArray(rel.assets) ? rel.assets : [];
     const exe = assets.find(a => /\.exe$/i.test(a.name || ''));
     if (!version || !exe || !exe.browser_download_url) throw new Error('no .exe asset in release');
-    return { version, url: exe.browser_download_url, filename: exe.name, notes: rel.body || '', size: exe.size || 0 };
+    return {
+        version, url: exe.browser_download_url, filename: exe.name,
+        notes: rel.body || '', size: exe.size || 0,
+        digest: typeof exe.digest === 'string' ? exe.digest : '',
+    };
 }
 
 // Minimal HTML → text for atom <content> (release body arrives HTML-escaped).
@@ -241,11 +245,13 @@ async function runCheck({ silent = false } = {}) {
         console.log(`[Updater] Server version:                  v${info.version}`);
 
         if (compareVersions(info.version, current) <= 0) {
+            _pendingUpdate = null;
             console.log(`[Updater] Up to date. No update needed.`);
             if (!silent) return { upToDate: true };
             return null;
         }
 
+        _pendingUpdate = info;
         console.log(`[Updater] Update found! v${current} -> v${info.version}`);
 
         const s = loadSettings();
@@ -259,7 +265,6 @@ async function runCheck({ silent = false } = {}) {
             win.webContents.send('update-available', {
                 version: info.version,
                 current,
-                url: info.url,
                 filename: info.filename,   // from API (asset name); null → renderer builds it
                 notes: info.notes,         // from release body; null → renderer calls fetch_changelog
                 silent,
@@ -276,10 +281,10 @@ async function runCheck({ silent = false } = {}) {
 
 function assertAllowedHost(url) {
     const u = new URL(url);
-    if (u.protocol !== 'https:' && u.protocol !== 'http:') throw new Error('Invalid URL protocol');
-    const allowedHosts = ['github.com', 'githubusercontent.com'];
-    const hostOk = allowedHosts.some(h => u.hostname === h || u.hostname.endsWith('.' + h));
-    if (!hostOk) throw new Error('Host not allowed: ' + u.hostname);
+    if (u.protocol !== 'https:') throw new Error('Update URL must use HTTPS');
+    if (u.hostname !== 'github.com') throw new Error('Update host not allowed: ' + u.hostname);
+    const prefix = '/Sidiusz/Telegram-Web-Desktop/releases/download/';
+    if (!u.pathname.startsWith(prefix)) throw new Error('Update URL is outside the release repository');
     return u;
 }
 
@@ -362,15 +367,17 @@ function downloadOnce(url, partPath, startAt, onProgress) {
     });
 }
 
-function sha512Base64(filePath) {
+function hashFile(filePath, algorithm, encoding) {
     return new Promise((resolve, reject) => {
-        const h = crypto.createHash('sha512');
-        const s = fs.createReadStream(filePath);
-        s.on('data', d => h.update(d));
-        s.on('end', () => resolve(h.digest('base64')));
-        s.on('error', reject);
+        const h = crypto.createHash(algorithm);
+        const stream = fs.createReadStream(filePath);
+        stream.on('data', d => h.update(d));
+        stream.on('end', () => resolve(h.digest(encoding)));
+        stream.on('error', reject);
     });
 }
+function sha512Base64(filePath) { return hashFile(filePath, 'sha512', 'base64'); }
+function sha256Hex(filePath) { return hashFile(filePath, 'sha256', 'hex'); }
 
 // Minimal reader for electron-builder's latest.yml — enough for the file entry we downloaded.
 function parseLatestYml(yml, filename) {
@@ -404,7 +411,7 @@ async function fetchExpectedHash(url, filename) {
     }
 }
 
-async function verifyDownload(filePath, total, expected) {
+async function verifyDownload(filePath, total, expected, releaseDigest) {
     const size = statSize(filePath);
     if (total && size !== total) throw new Error(`incomplete download (${size}/${total} bytes)`);
     if (size < 1024) throw new Error('downloaded file is too small');
@@ -413,19 +420,25 @@ async function verifyDownload(filePath, total, expected) {
     try {
         const buf = Buffer.alloc(2);
         await fd.read(buf, 0, 2, 0);
-        // An HTML error page saved as .exe would install nothing.
         if (buf.toString('latin1') !== 'MZ') { const e = new Error('downloaded file is not a Windows installer'); e.permanent = true; throw e; }
     } finally { await fd.close(); }
+
+    const digestMatch = /^sha256:([0-9a-f]{64})$/i.exec(String(releaseDigest || ''));
+    if (!digestMatch) { const e = new Error('trusted update digest is unavailable'); e.permanent = true; throw e; }
+    const got256 = await sha256Hex(filePath);
+    if (got256.toLowerCase() !== digestMatch[1].toLowerCase()) {
+        const e = new Error('release digest mismatch - update rejected'); e.permanent = true; throw e;
+    }
+    console.log('[Updater] sha256 verified against GitHub release asset digest');
 
     if (expected && expected.size && size !== expected.size) throw new Error(`size mismatch (${size}/${expected.size} bytes)`);
     if (expected && expected.sha512) {
         const got = await sha512Base64(filePath);
-        if (got !== expected.sha512) { const e = new Error('checksum mismatch — download corrupted'); e.permanent = true; throw e; }
-        console.log('[Updater] sha512 verified against latest.yml');
+        if (got !== expected.sha512) { const e = new Error('latest.yml checksum mismatch'); e.permanent = true; throw e; }
     }
 }
 
-async function downloadUpdate(url, filename, onProgress) {
+async function downloadUpdate(url, filename, onProgress, releaseDigest) {
     assertAllowedHost(url);
 
     const destDir = app.getPath('downloads');
@@ -451,9 +464,8 @@ async function downloadUpdate(url, filename, onProgress) {
     for (let attempt = 1; attempt <= DOWNLOAD_ATTEMPTS; attempt++) {
         try {
             const { total } = await downloadOnce(url, partPath, startAt, report);
-            await verifyDownload(partPath, total, expected);
+            await verifyDownload(partPath, total, expected, releaseDigest);
             await fs.promises.rename(partPath, destPath);
-            unblockFile(destPath);
             if (onProgress) onProgress(statSize(destPath), statSize(destPath));
             return destPath;
         } catch (e) {
@@ -470,12 +482,18 @@ async function downloadUpdate(url, filename, onProgress) {
     throw lastErr || new Error('Download failed');
 }
 
-function unblockFile(destPath) {
-    if (process.platform !== 'win32') return;
-    try {
-        const ps = spawn('powershell', ['-NoProfile', '-Command', `Unblock-File -LiteralPath ${JSON.stringify(destPath)}`], { stdio: 'ignore', windowsHide: true });
-        ps.on('error', () => {});
-    } catch (e) {}
+async function downloadPendingUpdate(onProgress) {
+    let info = _pendingUpdate;
+    const current = app.getVersion();
+    if (!info || compareVersions(info.version, current) <= 0 || !/^sha256:[0-9a-f]{64}$/i.test(String(info.digest || ''))) {
+        const fresh = await fetchLatestRelease();
+        if (!fresh || compareVersions(fresh.version, current) <= 0) throw new Error('No update is available');
+        info = fresh;
+        _pendingUpdate = fresh;
+    }
+    assertAllowedHost(info.url);
+    if (!/^sha256:[0-9a-f]{64}$/i.test(String(info.digest || ''))) throw new Error('Release integrity metadata is unavailable');
+    return downloadUpdate(info.url, info.filename, onProgress, info.digest);
 }
 
 function compareVersions(a, b) {
@@ -526,5 +544,5 @@ async function fetchChangelog() {
     return fetchText(CHANGELOG_URL);
 }
 
-module.exports = { init, scheduleChecks, checkForUpdate, downloadUpdate, fetchChangelog, fetchReleases };
+module.exports = { init, scheduleChecks, checkForUpdate, downloadPendingUpdate, fetchChangelog, fetchReleases };
 module.exports._internals = { compareVersions, parseLatestYml, downloadOnce, verifyDownload };

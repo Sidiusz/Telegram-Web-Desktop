@@ -1,18 +1,10 @@
 'use strict';
-const { app, Menu, protocol, powerSaveBlocker } = require('electron');
+const { app, Menu, powerSaveBlocker } = require('electron');
 const path = require('path');
 
-// Electron 40 removed webPreferences.bypassCSP — without it Telegram's CSP
-// (now delivered via <meta http-equiv> in addition to headers) blocks our
-// inline injections and the page stays white. Register https/http as CSP-
-// bypassing so executeJavaScript / inline scripts are not subject to page CSP.
-// Must be before app ready and only once.
-try {
-    protocol.registerSchemesAsPrivileged([
-        { scheme: 'https', privileges: { standard: true, secure: true, bypassCSP: true, allowServiceWorkers: true, supportFetchAPI: true, corsEnabled: true, stream: true } },
-        { scheme: 'http',  privileges: { standard: true, secure: true, bypassCSP: true, allowServiceWorkers: true, supportFetchAPI: true, corsEnabled: true, stream: true } },
-    ]);
-} catch (e) { /* already registered (e.g. by Sentry) */ }
+// Do not grant CSP-bypass privileges to the global http/https schemes.
+// The narrowly-scoped Telegram /a response transform in window.cjs is the only
+// place where CSP is relaxed for compatibility with our injected UI.
 
 app.commandLine.appendSwitch('autoplay-policy', 'no-user-gesture-required');
 app.commandLine.appendSwitch('disable-renderer-backgrounding');
@@ -25,13 +17,14 @@ if (!app.isPackaged) app.commandLine.appendSwitch('remote-debugging-port', '9222
 const { createWindow, getWindow } = require('./electron/window.cjs');
 const { createTray } = require('./electron/tray.cjs');
 const { initState, getState, registerIpc } = require('./electron/ipc.cjs');
+const { startEmbeddedFlowsealBridge, stopEmbeddedFlowsealBridge } = require('./electron/tg-flowseal-bridge.cjs');
 
-// TEMP DEBUG: trace who calls app.quit(); dev (unpackaged) shares the installed app's profile
-const _origQuit = app.quit.bind(app);
-app.quit = (...a) => { console.error('[DBG] app.quit() called from:\n' + new Error().stack); return _origQuit(...a); };
-if (!app.isPackaged && !process.env.TWD_DEV_PROFILE) {
-    app.setPath('userData', path.join(app.getPath('appData'), 'Telegram Web Desktop'));
-    console.error('[DBG] userData →', app.getPath('userData'));
+// Dev/test runs can use an isolated profile without competing with the installed app.
+// Production behavior is unchanged unless these explicit test-only env vars are set.
+if (!app.isPackaged) {
+    const devProfile = process.env.TWD_DEV_PROFILE;
+    if (devProfile) app.setPath('userData', path.resolve(devProfile));
+    else app.setPath('userData', path.join(app.getPath('appData'), 'Telegram Web Desktop'));
 }
 
 // Register as tg:// handler (replaces the official app). When packaged the plain
@@ -80,7 +73,7 @@ function getTgUrlFromArgs(argv) {
     return normalizeToTg(raw);
 }
 
-const gotLock = app.requestSingleInstanceLock();
+const gotLock = process.env.TWD_ALLOW_MULTI_INSTANCE === '1' || app.requestSingleInstanceLock();
 if (!gotLock) {
     app.quit();
 } else {
@@ -93,9 +86,10 @@ if (!gotLock) {
     });
 }
 
-app.whenReady().then(() => {
+app.whenReady().then(async () => {
     try { powerSaveBlocker.start('prevent-app-suspension'); } catch(e) {}
     initState();
+    try { await startEmbeddedFlowsealBridge(); } catch (e) { console.error('[TG-PROXY-BRIDGE] startup failed:', e); }
     const state = getState();
     registerIpc(getWindow);
     createWindow(state);
@@ -109,6 +103,8 @@ app.whenReady().then(() => {
         win.webContents.once('did-finish-load', () => handleTgUrl(tgUrl));
     }
 });
+
+app.on('before-quit', () => { void stopEmbeddedFlowsealBridge().catch(() => {}); });
 
 app.on('window-all-closed', () => {
     if (process.platform !== 'darwin') app.quit();

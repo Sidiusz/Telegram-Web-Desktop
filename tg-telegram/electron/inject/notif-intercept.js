@@ -14,65 +14,16 @@
     var nativeNotification = window.Notification;
     if (!nativeNotification && typeof window.Notification !== 'function') return;
 
-    function ensureBackgroundSupport() {
+    function ensureNotificationPermission() {
         try {
-            if (!window.PushManager) {
-                window.PushManager = function PushManager() {};
-            }
-            if (!window.PushSubscription) {
-                window.PushSubscription = function PushSubscription() {};
-            }
-            if (!window.ServiceWorkerRegistration) {
-                window.ServiceWorkerRegistration = function ServiceWorkerRegistration() {};
-            }
-            if (!navigator.serviceWorker) {
-                var fakeSW = {
-                    controller: null,
-                    ready: Promise.resolve({
-                        scope: location.origin + '/',
-                        active: null,
-                        installing: null,
-                        waiting: null,
-                        showNotification: function(t, o) { try { notify(t, o); } catch (e) {} return Promise.resolve(); },
-                        getNotifications: function() { return Promise.resolve([]); },
-                    }),
-                    register: function() {
-                        return Promise.resolve({
-                            scope: location.origin + '/',
-                            active: null,
-                            installing: null,
-                            waiting: null,
-                            pushManager: {
-                                getSubscription: function() { return Promise.resolve(null); },
-                                subscribe: function() { return Promise.reject(new Error('Push is disabled in this build')); },
-                            },
-                            showNotification: function(t, o) { try { notify(t, o); } catch (e) {} return Promise.resolve(); },
-                            getNotifications: function() { return Promise.resolve([]); },
-                            addEventListener: function() {},
-                            removeEventListener: function() {},
-                            unregister: function() { return Promise.resolve(true); },
-                        });
-                    },
-                    getRegistration: function() {
-                        return Promise.resolve(null);
-                    },
-                    getRegistrations: function() {
-                        return Promise.resolve([]);
-                    },
-                    addEventListener: function() {},
-                    removeEventListener: function() {},
-                    dispatchEvent: function() { return true; },
-                };
-                try {
-                    Object.defineProperty(navigator, 'serviceWorker', { configurable: true, get: function() { return fakeSW; } });
-                } catch (e) {
-                    navigator.serviceWorker = fakeSW;
-                }
-            }
+            // Do NOT manufacture PushManager/PushSubscription/ServiceWorker APIs.
+            // Telegram chooses its notification branch from those capability checks;
+            // inventing missing APIs sends Web A down a path the runtime may not
+            // actually support and can corrupt its hasWeb/hasPush notification state.
             if (navigator.permissions && navigator.permissions.query) {
                 var nativeQuery = navigator.permissions.query.bind(navigator.permissions);
                 navigator.permissions.query = function(desc) {
-                    if (desc && (desc.name === 'notifications' || desc.name === 'notification' || desc.name === 'push' || desc.name === 'push-notifications')) {
+                    if (desc && (desc.name === 'notifications' || desc.name === 'notification')) {
                         return Promise.resolve({
                             state: 'granted',
                             onchange: null,
@@ -87,7 +38,58 @@
         } catch (e) {}
     }
 
-    ensureBackgroundSupport();
+    ensureNotificationPermission();
+
+    // The desktop wrapper owns popup/sound enablement. Web A still has to keep its
+    // internal web-notification pipeline enabled, otherwise it returns before our
+    // bridge can see the message. Repair stale/failed cached flags for every account;
+    // browser push itself is deliberately kept disabled because Electron has no usable
+    // push subscription here. If Web A already loaded a broken hasWeb=false value,
+    // reload once after repairing the cache so the in-memory state is corrected too.
+    function repairTelegramNotificationFlags(){
+        try{
+            if(!window.indexedDB) return;
+            var req=indexedDB.open('tt-data');
+            req.onsuccess=function(){
+                var db=req.result, tx;
+                try{ tx=db.transaction('store','readwrite'); }catch(e){ try{db.close();}catch(_){} return; }
+                var store=tx.objectStore('store'), cursor=store.openCursor(), needsReload=false;
+                cursor.onsuccess=function(){
+                    var c=cursor.result;
+                    if(!c)return;
+                    var key=String(c.key||'');
+                    if(/^tt-global-state(?:_\d+)?$/.test(key)){
+                        var v=c.value, byKey=v&&v.settings&&v.settings.byKey;
+                        if(byKey){
+                            if(byKey.hasWebNotifications!==true){ byKey.hasWebNotifications=true; needsReload=true; }
+                            if(byKey.hasPushNotifications!==false){ byKey.hasPushNotifications=false; needsReload=true; }
+                            try{ c.update(v); }catch(e){}
+                        }
+                    }
+                    c.continue();
+                };
+                tx.oncomplete=function(){
+                    try{db.close();}catch(_){}
+                    var repairKey='__twd_notif_repaired_at';
+                    if(needsReload){
+                        var now=Date.now(), last=Number(sessionStorage.getItem(repairKey)||0);
+                        // Prevent a tight reload loop if Web A writes the stale value again
+                        // during startup, but do not suppress future repairs for the whole
+                        // tab lifetime (the old permanent marker could make notifications
+                        // stop again after a later self-update).
+                        if(!last || now-last>5000){
+                            sessionStorage.setItem(repairKey,String(now));
+                            setTimeout(function(){ location.reload(); },0);
+                        }
+                    }else{
+                        sessionStorage.removeItem(repairKey);
+                    }
+                };
+                tx.onerror=function(){ try{db.close();}catch(_){} };
+            };
+        }catch(e){}
+    }
+    repairTelegramNotificationFlags();
 
     // ── Мост в наш попап ────────────────────────────────────────────────────
     // Состояние TG больше НЕ достать через webpack (TG webZ переехал на Vite —
@@ -131,9 +133,9 @@
         return '';
     }
 
-    // Telegram-уведомления (window.Notification) больше не «проглатываем молча» —
-    // маршрутизируем в наш попап. Срабатывает, когда окно В фокусе (TG в этом случае
-    // идёт по пути new Notification, а не через service worker, см. перехват SW ниже).
+    // Local Notification is Telegram's fallback when browser push APIs are unavailable.
+    // Keep it intercepted as a compatibility path; on normal Electron Web A builds the
+    // message notification path below goes through ServiceWorker.postMessage.
     function notify(title, opts) {
         opts = opts || {};
         pushTgNotif({
@@ -146,13 +148,51 @@
         });
     }
 
-    // Перехват service worker: в фоне (окно не в фокусе) TG не зовёт new Notification,
-    // а постит контроллеру SW {type:'showMessageNotification', payload:{title,body,icon,
-    // chatId,messageId,isSilent}} — и нативное уведомление рисует сам SW. Перехватываем
-    // этот postMessage: payload (с chatId!) уходит в наш попап, форвард в SW глушим,
-    // чтобы не было дубля-нативки.
+    function consumeServiceWorkerNotification(msg) {
+        try {
+            if (!msg || msg.type !== 'showMessageNotification' || !msg.payload) return false;
+            var p = msg.payload;
+            pushTgNotif({
+                title: p.title || '',
+                body: p.body || '',
+                icon: p.icon || '',
+                chatId: p.chatId != null ? String(p.chatId) : '',
+                messageId: p.messageId != null ? String(p.messageId) : '',
+                isSilent: !!p.isSilent,
+            });
+            return true;
+        } catch (e) { return false; }
+    }
+
+    // Hook the ServiceWorker PROTOTYPE, not the current controller object. Web A can
+    // replace/re-register its controller at any time. Per-instance hooks therefore
+    // disappear with the old ServiceWorker wrapper; this is exactly why the old fixes
+    // needed polling and why b56a710 regressed after removing it. A prototype hook is
+    // inherited by every current and future controller, so no watchdog/re-hook loop is
+    // required. Keep a controller-level fallback only for engines that forbid patching
+    // the prototype.
     function hookServiceWorker() {
         try {
+            var proto = window.ServiceWorker && window.ServiceWorker.prototype;
+            if (proto && typeof proto.postMessage === 'function') {
+                if (!proto.__twdNotifProtoHooked) {
+                    var nativePostMessage = proto.postMessage;
+                    Object.defineProperty(proto, 'postMessage', {
+                        configurable: true,
+                        writable: true,
+                        value: function(msg) {
+                            if (consumeServiceWorkerNotification(msg)) return;
+                            return nativePostMessage.apply(this, arguments);
+                        },
+                    });
+                    Object.defineProperty(proto, '__twdNotifProtoHooked', {
+                        configurable: true,
+                        value: true,
+                    });
+                }
+                return;
+            }
+
             var sw = navigator.serviceWorker;
             if (!sw || typeof sw.addEventListener !== 'function') return;
             function wrap(ctrl) {
@@ -160,84 +200,61 @@
                 try {
                     var orig = ctrl.postMessage;
                     ctrl.postMessage = function(msg) {
-                        try {
-                            if (msg && msg.type === 'showMessageNotification' && msg.payload) {
-                                var p = msg.payload;
-                                pushTgNotif({
-                                    title: p.title || '',
-                                    body: p.body || '',
-                                    icon: p.icon || '',
-                                    chatId: p.chatId != null ? String(p.chatId) : '',
-                                    messageId: p.messageId != null ? String(p.messageId) : '',
-                                    isSilent: !!p.isSilent,
-                                });
-                                return;   // не форвардим в SW → нет дубля нативного уведомления
-                            }
-                        } catch (e) {}
-                        return orig.apply(ctrl, arguments);
+                        if (consumeServiceWorkerNotification(msg)) return;
+                        return orig.apply(this, arguments);
                     };
-                    ctrl.__tgNotifHooked = true;
+                    Object.defineProperty(ctrl, '__tgNotifHooked', { configurable: true, value: true });
                 } catch (e) {}
             }
             wrap(sw.controller);
             sw.addEventListener('controllerchange', function() { wrap(sw.controller); });
-            // Pure event-driven — no polling. Cover SW updates via updatefound/statechange.
-            function hookReg(reg){
-                if(!reg) return;
-                if(reg.active) wrap(reg.active);
-                if(reg.waiting) wrap(reg.waiting);
-                if(reg.installing) wrap(reg.installing);
-                try{
-                    reg.addEventListener('updatefound', function(){
-                        var nw = reg.installing || reg.waiting;
-                        if(nw){
-                            wrap(nw);
-                            nw.addEventListener('statechange', function(){
-                                if(nw.state==='activated' || nw.state==='installed'){
-                                    wrap(nw);
-                                    if(reg.active) wrap(reg.active);
-                                    if(reg.waiting) wrap(reg.waiting);
-                                }
-                            });
-                        }
-                    });
-                }catch(e){}
-            }
-            try {
-                sw.ready.then(function(reg) { hookReg(reg); }).catch(function() {});
-            } catch (e) {}
-            try{
-                if(sw.getRegistrations) sw.getRegistrations().then(function(regs){
-                    regs.forEach(function(r){ hookReg(r); });
-                }).catch(function(){});
-            }catch(e){}
         } catch (e) {}
     }
     hookServiceWorker();
 
     if (_alreadyProxied) return;
 
-    function makeInstance(title, opts) {
-        var instance = Object.create(NotificationShim.prototype || Object.prototype);
-        instance.title = normalizeText(title, '');
-        instance.body = normalizeText(opts && opts.body, '');
-        instance.tag = normalizeText(opts && opts.tag, '');
-        instance.data = opts && opts.data;
-        instance.icon = normalizeText(opts && opts.icon, '');
-        instance.lang = normalizeText(opts && opts.lang, '');
-        instance.dir = normalizeText(opts && opts.dir, '');
-        instance.close = function() {};
-        return instance;
-    }
-
     function NotificationShim(title, opts) {
+        if (!(this instanceof NotificationShim)) return new NotificationShim(title, opts);
+        opts = opts || {};
         notify(title, opts);
-        return makeInstance(title, opts);
+        // Never inherit from Chromium's native Notification.prototype. Objects that
+        // do so without the native internal slots throw "Illegal invocation" when
+        // Telegram assigns onclick/reads fields/calls close(). That bug was latent
+        // while Web A mostly used the SW path, but breaks the local fallback path.
+        this.title = normalizeText(title, '');
+        this.body = normalizeText(opts.body, '');
+        this.tag = normalizeText(opts.tag, '');
+        this.data = opts.data;
+        this.icon = normalizeText(opts.icon, '');
+        this.badge = normalizeText(opts.badge, '');
+        this.lang = normalizeText(opts.lang, '');
+        this.dir = normalizeText(opts.dir, '');
+        this.silent = !!opts.silent;
+        this.onclick = null;
+        this.onshow = null;
+        this.onerror = null;
+        this.onclose = null;
+        this._listeners = Object.create(null);
     }
-
-    if (nativeNotification && nativeNotification.prototype) {
-        NotificationShim.prototype = nativeNotification.prototype;
-    }
+    NotificationShim.prototype.close = function() {
+        try { if (typeof this.onclose === 'function') this.onclose.call(this, { type: 'close', target: this }); } catch (e) {}
+    };
+    NotificationShim.prototype.addEventListener = function(type, cb) {
+        if (typeof cb !== 'function') return;
+        var a = this._listeners[type] || (this._listeners[type] = []); a.push(cb);
+    };
+    NotificationShim.prototype.removeEventListener = function(type, cb) {
+        var a = this._listeners[type]; if (!a) return;
+        this._listeners[type] = a.filter(function(x){ return x !== cb; });
+    };
+    NotificationShim.prototype.dispatchEvent = function(ev) {
+        var type = ev && ev.type; if (!type) return true;
+        var a = (this._listeners[type] || []).slice();
+        for (var i=0;i<a.length;i++) { try { a[i].call(this, ev); } catch (e) {} }
+        var h = this['on'+type]; if (typeof h === 'function') { try { h.call(this, ev); } catch (e) {} }
+        return true;
+    };
 
     function permissionsResponse() {
         return Promise.resolve({
@@ -249,42 +266,18 @@
         });
     }
 
-    var proxy = new Proxy(NotificationShim, {
-        apply: function(target, thisArg, args) {
-            notify(args && args[0], args && args[1]);
-            return Object.create(target.prototype || Object.prototype);
-        },
-        construct: function(target, args) {
-            notify(args && args[0], args && args[1]);
-            return Object.create(target.prototype || Object.prototype);
-        },
-        get: function(target, prop) {
-            if (prop === 'permission') return 'granted';
-            if (prop === 'requestPermission') return function(cb) {
-                var p = Promise.resolve('granted');
-                if (typeof cb === 'function') p.then(cb);
-                return p;
-            };
-            if (prop === 'maxActions') return 2;
-            if (prop === 'prototype') return target.prototype || Object.prototype;
-            if (prop === 'name') return 'Notification';
-            if (nativeNotification && prop in nativeNotification) {
-                var v = nativeNotification[prop];
-                return typeof v === 'function' ? v.bind(nativeNotification) : v;
-            }
-            return target[prop];
-        },
-        set: function(target, prop, value) {
-            if (prop === 'permission') return true;
-            target[prop] = value;
-            return true;
-        },
-    });
+    Object.defineProperty(NotificationShim, 'permission', { configurable: true, get: function(){ return 'granted'; } });
+    Object.defineProperty(NotificationShim, 'maxActions', { configurable: true, get: function(){ return 2; } });
+    NotificationShim.requestPermission = function(cb) {
+        var p = Promise.resolve('granted');
+        if (typeof cb === 'function') p.then(cb);
+        return p;
+    };
 
     try {
-        Object.defineProperty(window, 'Notification', { configurable: true, get: function() { return proxy; } });
+        Object.defineProperty(window, 'Notification', { configurable: true, writable: true, value: NotificationShim });
     } catch (e) {
-        window.Notification = proxy;
+        window.Notification = NotificationShim;
     }
 
     try {
