@@ -11,13 +11,14 @@ app.commandLine.appendSwitch('disable-renderer-backgrounding');
 // Keep timers alive (our incoming-message interceptor) when window is backgrounded/hidden
 app.commandLine.appendSwitch('disable-background-timer-throttling');
 app.commandLine.appendSwitch('disable-backgrounding-occluded-windows');
-// Dev only (unpackaged): expose CDP for local UI testing. Never in shipped builds.
-if (!app.isPackaged) app.commandLine.appendSwitch('remote-debugging-port', '9222');
+// Dev only (unpackaged): expose CDP for local UI/smoke testing. Never in shipped builds.
+if (!app.isPackaged) app.commandLine.appendSwitch('remote-debugging-port', process.env.TWD_CDP_PORT || '9222');
 
 const { createWindow, getWindow } = require('./electron/window.cjs');
 const { createTray } = require('./electron/tray.cjs');
 const { initState, getState, registerIpc } = require('./electron/ipc.cjs');
 const { startEmbeddedFlowsealBridge, stopEmbeddedFlowsealBridge } = require('./electron/tg-flowseal-bridge.cjs');
+const { normalizeToTg, getTgUrlFromArgs } = require('./electron/deep-links.cjs');
 
 // Dev/test runs can use an isolated profile without competing with the installed app.
 // Production behavior is unchanged unless these explicit test-only env vars are set.
@@ -51,56 +52,6 @@ function handleTgUrl(tgUrl) {
     const internalUrl = 'https://web.telegram.org/a/?_tgdl=' + Date.now()
         + '#?tgaddr=' + encodeURIComponent(tgUrl);
     win.webContents.loadURL(internalUrl);
-}
-
-// t.me/<...> https links → tg:// so webZ resolves them via the same deep-link path.
-function normalizeToTg(url) {
-    if (!url || typeof url !== 'string') return null;
-    if (/^tg:\/\//i.test(url)) return url;
-    let u;
-    try { u = new URL(url); } catch (_) { return null; }
-    const host = u.hostname.toLowerCase().replace(/^www\./, '');
-    if (!['t.me', 'telegram.me', 'telegram.dog'].includes(host)) return null;
-    const parts = u.pathname.split('/').filter(Boolean);
-    if (!parts.length) return null;
-    const first = parts[0];
-    const action = first.toLowerCase();
-    if (first.startsWith('+') || action === 'joinchat') {
-        const invite = first.startsWith('+') ? first.slice(1) : (parts[1] || '');
-        return invite ? 'tg://join?invite=' + encodeURIComponent(invite) : null;
-    }
-    if (action === 'c' && /^\d+$/.test(parts[1] || '') && /^\d+$/.test(parts[2] || '')) {
-        const qs = new URLSearchParams();
-        qs.set('channel', parts[1]);
-        if (parts[3] && /^\d+$/.test(parts[3])) { qs.set('thread', parts[2]); qs.set('post', parts[3]); }
-        else qs.set('post', parts[2]);
-        for (const [k, v] of u.searchParams) qs.append(k, v);
-        return 'tg://privatepost?' + qs.toString();
-    }
-    if (action === 'share' && (parts[1] || '').toLowerCase() === 'url') {
-        return 'tg://msg_url?' + u.searchParams.toString();
-    }
-    if (['proxy', 'socks'].includes(action)) {
-        return 'tg://' + action + '?' + u.searchParams.toString();
-    }
-    const actionMap = { addstickers: 'set', addemoji: 'set', setlanguage: 'lang', login: 'code', invoice: 'slug', giftcode: 'slug' };
-    if (actionMap[action] && parts[1]) {
-        const qs = new URLSearchParams(u.searchParams);
-        qs.set(actionMap[action], parts[1]);
-        return 'tg://' + action + '?' + qs.toString();
-    }
-    const offset = action === 's' ? 1 : 0;
-    const domain = parts[offset];
-    if (!domain) return null;
-    const qs = new URLSearchParams(u.searchParams);
-    qs.set('domain', domain);
-    if (parts[offset + 1] && /^\d+$/.test(parts[offset + 1])) qs.set('post', parts[offset + 1]);
-    return 'tg://resolve?' + qs.toString();
-}
-
-function getTgUrlFromArgs(argv) {
-    var raw = argv.find(arg => arg.startsWith('tg://') || /^https?:\/\/(t\.me|telegram\.me|telegram\.dog)\//i.test(arg));
-    return normalizeToTg(raw);
 }
 
 const initialDeepLink = getTgUrlFromArgs(process.argv);

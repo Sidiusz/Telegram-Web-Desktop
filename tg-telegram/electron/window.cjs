@@ -452,7 +452,10 @@ function createWindow(state, onTelegramLink) {
         }, 300);
     });
 
-    mainWindow.on('ready-to-show', () => { if (mainWindow && !mainWindow.isDestroyed()) mainWindow.show(); });
+    mainWindow.on('ready-to-show', () => {
+        if (process.env.TWD_SMOKE_HIDDEN === '1') return;
+        if (mainWindow && !mainWindow.isDestroyed()) mainWindow.show();
+    });
     // Taskbar badge vanishes on cold start (button doesn't exist yet when setBadgeCount runs) and on restore from tray — reapplied on show/restore.
     const reapplyBadge = () => { try { app.setBadgeCount(state.lastNotificationCount || 0); } catch (e) {} };
     mainWindow.on('show', () => { reapplyBadge(); wakeTelegramForeground(); });

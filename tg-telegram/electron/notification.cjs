@@ -260,7 +260,7 @@ function flush() {
     _pending = [];
     if (!items.length) return;
     items.forEach(it => _win.webContents.send('notif-add', it));
-    _win.showInactive();
+    if (process.env.TWD_SMOKE_HIDDEN !== '1') _win.showInactive();
 }
 
 function queueNotification(data) {
