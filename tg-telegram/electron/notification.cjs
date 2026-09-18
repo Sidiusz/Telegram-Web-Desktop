@@ -124,8 +124,8 @@ function buildHtml() {
     .btn.read{color:#aaa;}
     .btn.read:hover{background:rgba(255,255,255,.08);color:#fff;}
     .progress{margin-top:8px;height:4px;border-radius:2px;overflow:hidden;background:rgba(255,255,255,.1);}
-    .bar{height:100%;background:#8774e1;width:100%;}
-    @keyframes barshrink{from{width:100%;}to{width:0%;}}
+    .bar{height:100%;background:#8774e1;width:100%;transform:scaleX(1);transform-origin:left center;will-change:transform;}
+    @keyframes barshrink{from{transform:scaleX(1);}to{transform:scaleX(0);}}
 </style></head>
 <body>
 <div id="stack"></div>
@@ -138,39 +138,124 @@ function buildHtml() {
     const FADE_MS=180;
     const MOVE_EASE='cubic-bezier(.25,1,.5,1)';
 
-    function visibleStackHeight(){
-        const all=Array.from(stack.children), shown=all.slice(-MAX_CARDS);
-        if(!shown.length)return 1;
-        let h=0;
-        shown.forEach(function(el){h+=el.getBoundingClientRect().height;});
-        h+=GAP*Math.max(0,shown.length-1);
-        return Math.ceil(h)+4;
+    let opChain=Promise.resolve();
+
+    function wait(ms){return new Promise(function(resolve){setTimeout(resolve,ms);});}
+    function nextFrame(){
+        return new Promise(function(resolve){requestAnimationFrame(function(){requestAnimationFrame(resolve);});});
     }
-    function reportSize(){
-        window.notifBridge.sendResize(visibleStackHeight());
+    function enqueue(op){
+        opChain=opChain.then(op).catch(function(){});
+        return opChain;
+    }
+    function contentHeight(nodes){
+        const all=Array.from(nodes||[]);
+        if(!all.length)return 1;
+        let h=0;
+        all.forEach(function(node){h+=node.getBoundingClientRect().height;});
+        return Math.ceil(h+GAP*Math.max(0,all.length-1)+4);
+    }
+    function resizeWindow(targetHeight){
+        const target=Math.max(1,Math.ceil(targetHeight||1));
+        if(Math.abs(window.innerHeight-target)<=1)return Promise.resolve();
+        return new Promise(function(resolve){
+            let done=false;
+            const finish=function(){
+                if(done)return;
+                done=true;
+                window.removeEventListener('resize',onResize);
+                requestAnimationFrame(resolve);
+            };
+            const onResize=function(){requestAnimationFrame(finish);};
+            window.addEventListener('resize',onResize);
+            window.notifBridge.sendResize(target);
+            setTimeout(finish,100);
+        });
+    }
+    function measureCard(el){
+        const css=el.style.cssText;
+        el.style.position='absolute';
+        el.style.left='8px';el.style.right='8px';el.style.top='0';
+        el.style.visibility='hidden';el.style.pointerEvents='none';
+        el.style.opacity='1';el.style.transform='none';el.style.transition='none';
+        document.body.appendChild(el);
+        const h=Math.ceil(el.getBoundingClientRect().height);
+        el.remove();el.style.cssText=css;
+        return h;
     }
     function firstLetter(s){ s=(s||'T').trim(); return (s[0]||'T').toUpperCase(); }
-
-    function removeCard(id){
-        const c=cards.get(id); if(!c)return;
-        clearTimeout(c.timer);
-        cards.delete(id);
-        c.el.style.transition='opacity 180ms ease, transform 200ms '+MOVE_EASE;
-        c.el.classList.add('hide');
-        setTimeout(function(){
-            if(c.el.parentNode)c.el.parentNode.removeChild(c.el);
-            reportSize();
-            if(cards.size===0)window.notifBridge.sendEmpty();
-        },205);
-    }
 
     function arm(id,duration){
         const c=cards.get(id); if(!c)return;
         clearTimeout(c.timer);
-        c.timer=setTimeout(function(){removeCard(id);},duration);
+        c.remaining=Math.max(0,Number(duration)||0);
+        c.startedAt=Date.now();
+        c.timer=setTimeout(function(){enqueue(function(){return removeCardNow(id);});},c.remaining);
+    }
+    function pauseCard(id){
+        const c=cards.get(id);if(!c)return;
+        if(c.timer){
+            c.remaining=Math.max(0,c.remaining-(Date.now()-c.startedAt));
+            clearTimeout(c.timer);c.timer=null;
+        }
+        if(c.bar)c.bar.style.animationPlayState='paused';
+    }
+    function resumeCard(id){
+        const c=cards.get(id);if(!c)return;
+        if(c.bar)c.bar.style.animationPlayState='running';
+        clearTimeout(c.timer);
+        c.startedAt=Date.now();
+        c.timer=setTimeout(function(){enqueue(function(){return removeCardNow(id);});},Math.max(0,c.remaining));
     }
 
-    window.notifBridge.onAdd(function(data){
+    async function removeCardNow(id){
+        const c=cards.get(id);if(!c)return;
+        clearTimeout(c.timer);c.timer=null;
+        cards.delete(id);
+        const el=c.el;
+        if(!el||!el.isConnected){
+            if(cards.size===0)window.notifBridge.sendEmpty();
+            return;
+        }
+
+        // First let the card itself leave upward and fade. Nothing else moves yet.
+        el.style.transition='transform '+FADE_MS+'ms '+MOVE_EASE+', opacity '+FADE_MS+'ms ease-out';
+        el.style.transform='translateY(-12px)';
+        el.style.opacity='0';
+        await wait(FADE_MS+12);
+
+        // Then close the gap with FLIP. This prevents the remaining cards from jumping
+        // down and then back again when the bottom-anchored BrowserWindow shrinks.
+        const survivors=Array.from(stack.children).filter(function(node){return node!==el;});
+        const before=new Map();
+        survivors.forEach(function(node){before.set(node,node.getBoundingClientRect());});
+        if(el.parentNode)el.parentNode.removeChild(el);
+        const after=new Map();
+        survivors.forEach(function(node){after.set(node,node.getBoundingClientRect());});
+        survivors.forEach(function(node){
+            const a=before.get(node),b=after.get(node);
+            const dy=a.top-b.top;
+            node.style.transition='none';
+            node.style.transform='translateY('+dy+'px)';
+        });
+        void stack.offsetHeight;
+        await nextFrame();
+        survivors.forEach(function(node){
+            if(!node.isConnected)return;
+            node.style.transition='transform '+MOVE_MS+'ms '+MOVE_EASE;
+            node.style.transform='translateY(0)';
+        });
+        await wait(MOVE_MS+18);
+        survivors.forEach(function(node){
+            if(!node.isConnected)return;
+            node.style.transition='';node.style.transform='';
+        });
+
+        await resizeWindow(contentHeight(Array.from(stack.children).slice(-MAX_CARDS)));
+        if(cards.size===0)window.notifBridge.sendEmpty();
+    }
+
+    async function addCard(data){
         const id=data.id;
         const dur=(data.duration||6)*1000;
         const el=document.createElement('div'); el.className='card';
@@ -186,32 +271,42 @@ function buildHtml() {
         const tx=document.createElement('div'); tx.className='text'; tx.textContent=text;
         bd.appendChild(tt); bd.appendChild(tx);
         const cx=document.createElement('button'); cx.className='close-x'; cx.textContent='✕';
-        cx.onclick=function(){removeCard(id);};
+        cx.onclick=function(){enqueue(function(){return removeCardNow(id);});};
         top.appendChild(av); top.appendChild(bd); top.appendChild(cx);
 
         const acts=document.createElement('div'); acts.className='actions';
         const reply=document.createElement('button'); reply.className='btn reply'; reply.textContent=data.btnOpen||'Открыть';
-        reply.onclick=function(){window.notifBridge.sendAction('open', data.peerId);removeCard(id);};
+        reply.onclick=function(){window.notifBridge.sendAction('open', data.peerId);enqueue(function(){return removeCardNow(id);});};
         const read=document.createElement('button'); read.className='btn read'; read.textContent=data.btnRead||'Прочитано';
-        read.onclick=function(){window.notifBridge.sendAction('read', data.peerId);removeCard(id);};
+        read.onclick=function(){window.notifBridge.sendAction('read', data.peerId);enqueue(function(){return removeCardNow(id);});};
         acts.appendChild(reply); acts.appendChild(read);
 
         const prog=document.createElement('div'); prog.className='progress';
         const bar=document.createElement('div'); bar.className='bar'; prog.appendChild(bar);
-
         el.appendChild(top); el.appendChild(acts); el.appendChild(prog);
 
-        // FLIP the existing stack. New notifications are appended at the BOTTOM.
-        // The BrowserWindow is bottom-anchored, so after it grows upward every old card
-        // would otherwise jump. The inverse translate holds each card at its old screen
-        // position; releasing that translate makes the new card physically push it up.
+        const newHeight=measureCard(el);
         const oldEls=Array.from(stack.children);
+        const futureVisible=oldEls.slice(-(MAX_CARDS-1));
+        const futureHeight=Math.ceil(
+            futureVisible.reduce(function(sum,node){return sum+node.getBoundingClientRect().height;},0)
+            +newHeight
+            +GAP*Math.max(0,futureVisible.length)
+            +4
+        );
+
+        // Critical ordering: resize FIRST while only the old stack exists. Since both the
+        // window and stack are bottom-anchored, this changes only transparent space above
+        // the cards and cannot move them on screen. The previous implementation appended
+        // first and resized second, which is what made 1→2 and 2→3 jump in the wrong way.
+        if(futureHeight>window.innerHeight+1)await resizeWindow(futureHeight);
+
         const oldRects=new Map();
         oldEls.forEach(function(node){oldRects.set(node,node.getBoundingClientRect());});
         stack.appendChild(el);
-
         const afterRects=new Map();
         oldEls.forEach(function(node){afterRects.set(node,node.getBoundingClientRect());});
+
         oldEls.forEach(function(node){
             const before=oldRects.get(node),after=afterRects.get(node);
             const dy=before.top-after.top;
@@ -219,71 +314,59 @@ function buildHtml() {
             node.style.transform='translateY('+dy+'px)';
         });
 
-        // Start completely below the bottom edge. body/window clipping makes it look as
-        // if the card rises from under the desktop corner, while opacity comes up with it.
-        const enterOffset=Math.ceil(el.getBoundingClientRect().height)+GAP;
+        // The newcomer begins completely below the bottom clip and rises into the corner.
+        const enterOffset=newHeight+GAP;
         el.style.transition='none';
         el.style.opacity='0';
         el.style.transform='translateY('+enterOffset+'px)';
 
-        cards.set(id,{el:el,timer:null});
+        cards.set(id,{el:el,bar:bar,timer:null,remaining:dur,startedAt:0});
 
-        // Keep the fourth card in the DOM only for the exit animation. Because the stack
-        // is bottom-anchored and the window height is capped to the last three cards, the
-        // oldest card's final layout position is already above the clipping edge.
         let evicted=null,evictedId=null;
-        if(stack.children.length>MAX_CARDS){
-            evicted=stack.firstElementChild;
+        if(oldEls.length>=MAX_CARDS){
+            evicted=oldEls[0];
             cards.forEach(function(v,k){if(v.el===evicted)evictedId=k;});
             if(evictedId!=null){
-                const ec=cards.get(evictedId);if(ec)clearTimeout(ec.timer);
+                const ec=cards.get(evictedId);
+                if(ec)clearTimeout(ec.timer);
                 cards.delete(evictedId);
             }
         }
 
-        // Flush the inverse transforms before asking Electron to resize the transparent
-        // BrowserWindow. Start on its resize event; at the three-card cap there is no
-        // resize, so a short fallback starts the same animation.
         void stack.offsetHeight;
-        let started=false;
-        const start=function(){
-            if(started||!el.isConnected)return;
-            started=true;window.removeEventListener('resize',onResize);
-            requestAnimationFrame(function(){
-                if(!el.isConnected)return;
-                oldEls.forEach(function(node){
-                    if(!node.isConnected)return;
-                    node.style.transition='transform '+MOVE_MS+'ms '+MOVE_EASE+(node===evicted?', opacity '+FADE_MS+'ms ease-out':'');
-                    node.style.transform='translateY(0)';
-                    if(node===evicted)node.style.opacity='0';
-                });
-                el.style.transition='transform '+MOVE_MS+'ms '+MOVE_EASE+', opacity '+FADE_MS+'ms ease-out';
-                el.style.transform='translateY(0)';
-                el.style.opacity='1';
-                bar.style.animation='barshrink '+dur+'ms linear forwards';
-                arm(id,dur);
-            });
-            setTimeout(function(){
-                oldEls.forEach(function(node){
-                    if(node===evicted||!node.isConnected)return;
-                    node.style.transition='';node.style.transform='';node.style.opacity='';
-                });
-                if(el.isConnected){el.style.transition='';el.style.transform='';el.style.opacity='';}
-                if(evicted&&evicted.parentNode)evicted.parentNode.removeChild(evicted);
-                reportSize();
-            },MOVE_MS+30);
-        };
-        const onResize=function(){start();};
-        window.addEventListener('resize',onResize);
-        reportSize();
-        setTimeout(start,70);
+        await nextFrame();
 
-        el.onmouseenter=function(){const c=cards.get(id);if(c)clearTimeout(c.timer);bar.style.animationPlayState='paused';};
-        el.onmouseleave=function(){
-            bar.style.animation='none'; void bar.offsetWidth;          // restart animation
-            bar.style.animation='barshrink '+dur+'ms linear forwards';
-            arm(id,dur);
-        };
+        oldEls.forEach(function(node){
+            if(!node.isConnected)return;
+            node.style.transition='transform '+MOVE_MS+'ms '+MOVE_EASE+(node===evicted?', opacity '+FADE_MS+'ms ease-out':'');
+            node.style.transform='translateY(0)';
+            if(node===evicted)node.style.opacity='0';
+        });
+        el.style.transition='transform '+MOVE_MS+'ms '+MOVE_EASE+', opacity '+FADE_MS+'ms ease-out';
+        el.style.transform='translateY(0)';
+        el.style.opacity='1';
+        bar.style.animation='barshrink '+dur+'ms linear forwards';
+        arm(id,dur);
+
+        await wait(MOVE_MS+25);
+
+        oldEls.forEach(function(node){
+            if(node===evicted||!node.isConnected)return;
+            node.style.transition='';node.style.transform='';node.style.opacity='';
+        });
+        if(el.isConnected){el.style.transition='';el.style.transform='';el.style.opacity='';}
+        if(evicted&&evicted.parentNode)evicted.parentNode.removeChild(evicted);
+
+        // When the incoming card is shorter than the evicted one, defer the shrink until
+        // after the top card has finished leaving, otherwise it would be clipped too early.
+        if(Math.abs(window.innerHeight-futureHeight)>1)await resizeWindow(futureHeight);
+
+        el.onmouseenter=function(){pauseCard(id);};
+        el.onmouseleave=function(){resumeCard(id);};
+    }
+
+    window.notifBridge.onAdd(function(data){
+        enqueue(function(){return addCard(data);});
     });
 </script>
 </body></html>`;
