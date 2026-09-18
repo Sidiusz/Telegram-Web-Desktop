@@ -117,13 +117,13 @@ if (document.readyState === 'loading') document.addEventListener('DOMContentLoad
 else _tgInstallForegroundObserver();
 
 const TWD_ALLOWED_INVOKE = new Set([
-    'get_settings','get_app_info','get_proxy_status','set_proxy_mode','reset_proxy_auto','save_proxy_options',
-    'refresh_proxy_domains','test_proxy_connectivity','show_notification','save_settings','toggle_devtools','open_url',
+    'get_settings','get_app_info','get_proxy_status','set_proxy_mode','reset_proxy_auto','reconnect_proxy','save_proxy_options',
+    'refresh_proxy_domains','test_proxy_connectivity','show_notification','preview_notification','save_settings','toggle_devtools','open_url','open_default_apps',
     'open_folder_dialog','get_downloads','bind_download','forget_download','delete_download','cancel_download',
     'open_download_folder','open_download_file','clear_cache','fetch_changelog','fetch_changelog_structured',
     'check_update_manual','skip_version','download_update','get_addons','delete_addon','toggle_addon','apply_addons',
     'show_image_context_menu','save_blob','open_addons_folder','report_lang','set_tray_image','get_tray_base',
-    'get_hint_img_url','set_notifications_count','set_window_title'
+    'set_notifications_count'
 ]);
 function twdInvoke(cmd, args) {
     if (!TWD_ALLOWED_INVOKE.has(cmd)) return Promise.reject(new Error('IPC command is not allowed'));

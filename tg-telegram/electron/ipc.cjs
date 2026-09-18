@@ -1,12 +1,12 @@
 'use strict';
 const { ipcMain, shell, dialog, app, Menu, MenuItem } = require('electron');
-const { pathToFileURL } = require('url');
 const { init: initNotifications, queueNotification } = require('./notification.cjs');
 const { loadSettings, saveSettings } = require('./settings.cjs');
-const { configureProxySettings, setProxyMode, resetAutoProxy, updateProxyOptions, getProxyStatus, getProxyBootstrap, refreshFlowsealDomains, testProxyConnectivity } = require('./tg-flowseal-route.cjs');
+const { configureProxySettings, setProxyMode, resetAutoProxy, forceProxyReconnect, updateProxyOptions, getProxyStatus, getProxyBootstrap, refreshFlowsealDomains, testProxyConnectivity } = require('./tg-flowseal-route.cjs');
 const { getFallbackInfo } = require('./telegram-web-fallback.cjs');
 const { loadDownloads, saveDownloads, deleteDownload, cancelActive } = require('./downloads.cjs');
 const { getAddons, deleteAddon, openAddonsFolder, toggleAddon } = require('./addons.cjs');
+const { uniquePath, sanitizeFilename } = require('./utils.cjs');
 const path = require('path');
 const fs = require('fs');
 const { updateTrayBadge, setTrayLang, setTrayImageFromDataURL, getTrayBaseDataURL } = require('./tray.cjs');
@@ -28,18 +28,17 @@ function isSafeExternalUrl(raw) {
     try { const u = new URL(String(raw || '')); return u.protocol === 'https:' || u.protocol === 'http:'; }
     catch (_) { return false; }
 }
-
-// Windows-style dedup: turns "file.jpg" into "file (1).jpg", like Explorer.
-function uniquePath(p) {
-    if (!fs.existsSync(p)) return p;
-    const dir = path.dirname(p);
-    const ext = path.extname(p);
-    const base = path.basename(p, ext);
-    for (let i = 1; i < 10000; i++) {
-        const cand = path.join(dir, `${base} (${i})${ext}`);
-        if (!fs.existsSync(cand)) return cand;
-    }
-    return p;
+function isSafeImageResourceUrl(raw) {
+    const s = String(raw || '');
+    if (/^data:image\/(?:png|jpe?g|webp|gif|avif|bmp);base64,/i.test(s)) return s.length <= 32 * 1024 * 1024;
+    try {
+        const u = new URL(s);
+        return u.protocol === 'https:' || u.protocol === 'http:' || u.protocol === 'blob:';
+    } catch (_) { return false; }
+}
+function normalizeDownloadId(value) {
+    const n = Number(value);
+    return Number.isInteger(n) && n > 0 && n <= Number.MAX_SAFE_INTEGER ? n : null;
 }
 
 // UI language (set via report_lang) — used for notification strings in main, where the renderer's T() isn't available.
@@ -110,6 +109,7 @@ function registerIpc(getWindow) {
     handle('reset_proxy_auto', () => {
         const status = resetAutoProxy(); state.settings = loadSettings(); return status;
     });
+    handle('reconnect_proxy', () => forceProxyReconnect('renderer-network-stall'));
     handle('save_proxy_options', (e, options) => {
         const status = updateProxyOptions(options || {}); state.settings = loadSettings(); return status;
     });
@@ -137,6 +137,30 @@ function registerIpc(getWindow) {
         });
     });
 
+    // UI Lab-only visual previews. These intentionally bypass the user's notification
+    // privacy toggles so every popup state can be inspected without mutating settings.
+    handle('preview_notification', (e, { mode, icon, peerId, title, body } = {}) => {
+        const allowed = new Set(['normal','hidden-text','hidden-sender','hidden-all','no-avatar','long-text']);
+        const variant = allowed.has(mode) ? mode : 'normal';
+        const hideSender = variant === 'hidden-sender' || variant === 'hidden-all';
+        const hideText = variant === 'hidden-text' || variant === 'hidden-all';
+        const previewBody = variant === 'long-text'
+            ? (body || 'Длинный тестовый текст уведомления для проверки переноса строк, высоты карточки и поведения кнопок в расширенном desktop popup.')
+            : (body || 'Тестовое сообщение для проверки desktop popup.');
+        queueNotification({
+            title: hideSender ? ntr('anon') : (title || 'UI Lab'),
+            body: hideText ? ntr('new_msg_hidden') : previewBody,
+            icon: (hideSender || variant === 'no-avatar') ? '' : icon,
+            anon: hideSender,
+            peerId,
+            btnOpen: ntr('open'),
+            btnRead: ntr('read'),
+            playSound: false,
+            duration: 12,
+        });
+        return { ok: true, mode: variant };
+    });
+
     handle('save_settings', (e, { settings }) => {
         const current = state.settings || loadSettings();
         const next = Object.assign({}, settings || {});
@@ -154,19 +178,40 @@ function registerIpc(getWindow) {
         state.settings = loadSettings();
         configureProxySettings(state.settings);
         scheduleChecks();
+        if (state.settings.devtools_enabled !== true) {
+            const win = getWindow();
+            if (win && !win.isDestroyed() && win.webContents.isDevToolsOpened()) {
+                win.webContents.closeDevTools();
+            }
+        }
     });
 
-    // Open/close DevTools instantly without a reload
+    // DevTools may only be opened after the persisted setting has been enabled.
+    // Closing is always allowed so disabling the setting takes effect immediately.
     handle('toggle_devtools', (e, { open }) => {
         const win = getWindow();
         if (!win) return;
-        if (open) win.webContents.openDevTools();
-        else win.webContents.closeDevTools();
+        if (!open) {
+            win.webContents.closeDevTools();
+            return { open: false };
+        }
+        const settings = state.settings || loadSettings();
+        if (settings.devtools_enabled !== true) return { error: 'disabled', open: false };
+        win.webContents.openDevTools();
+        return { open: true };
     });
 
     handle('open_url', (e, { url }) => {
         if (!isSafeExternalUrl(url)) return { error: 'invalid-url' };
         return shell.openExternal(String(url));
+    });
+
+    // Windows owns the default-app decision. We only open our per-user entry;
+    // never try to write the protected UserChoice association ourselves.
+    handle('open_default_apps', () => {
+        if (process.platform !== 'win32') return { error: 'unsupported' };
+        const appName = encodeURIComponent('Telegram Web Desktop');
+        return shell.openExternal('ms-settings:defaultapps?registeredAppUser=' + appName);
     });
 
     handle('open_folder_dialog', async (e) => {
@@ -180,45 +225,69 @@ function registerIpc(getWindow) {
 
     // Check existence on the fly — the filesystem is the source of truth, since a saved
     // 'completed' status can be stale; exists===false tells the renderer to skip the checkmark (see restoreForChat).
+    // Renderer only needs presentation/binding metadata. Do not expose absolute
+    // local paths or source URLs from the desktop filesystem to the Telegram page.
     handle('get_downloads', () => state.downloads.map(d => ({
-        ...d,
+        id: d.id,
+        filename: d.filename,
+        status: d.status,
+        mid: d.mid,
+        peerId: d.peerId,
         exists: d.path ? fs.existsSync(d.path) : false,
     })));
 
-    // Bind a download to a message (to restore status after restart)
-    handle('bind_download', (e, { id, mid, peerId }) => {
-        const item = state.downloads.find(d => d.id === id);
-        if (item) {
-            if (mid != null) item.mid = String(mid);
-            if (peerId != null) item.peerId = String(peerId);
-            saveDownloads(state.downloads);
-        }
+    // Bind a download to a message (to restore status after restart).
+    handle('bind_download', (e, { id, mid, peerId } = {}) => {
+        const safeId = Number(id);
+        const safeMid = String(mid == null ? '' : mid);
+        const safePeer = String(peerId == null ? '' : peerId);
+        if (!Number.isInteger(safeId) || safeId <= 0) return { error: 'invalid-id' };
+        if (!/^-?\d{1,32}$/.test(safeMid) || !/^-?\d{1,32}$/.test(safePeer)) return { error: 'invalid-binding' };
+        const item = state.downloads.find(d => d.id === safeId);
+        if (!item) return { error: 'missing' };
+        item.mid = safeMid;
+        item.peerId = safePeer;
+        saveDownloads(state.downloads);
+        return { ok: true };
     });
 
     // File gone: drop the binding for this mid so "downloaded" isn't restored after restart.
-    handle('forget_download', (e, { mid }) => {
-        if (mid == null) return;
+    handle('forget_download', (e, { mid } = {}) => {
+        const safeMid = String(mid == null ? '' : mid);
+        if (!/^-?\d{1,32}$/.test(safeMid)) return { error: 'invalid-mid' };
         let changed = false;
         for (const d of state.downloads) {
-            if (String(d.mid) === String(mid)) { delete d.mid; delete d.peerId; changed = true; }
+            if (String(d.mid) === safeMid) { delete d.mid; delete d.peerId; changed = true; }
         }
         if (changed) saveDownloads(state.downloads);
+        return { ok: true };
     });
 
-    handle('delete_download', (e, { id }) => {
-        state.downloads = deleteDownload(state.downloads, id);
+    handle('delete_download', (e, { id } = {}) => {
+        const safeId = normalizeDownloadId(id);
+        if (safeId == null) return { error: 'invalid-id' };
+        state.downloads = deleteDownload(state.downloads, safeId);
+        return { ok: true };
     });
 
-    handle('cancel_download', (e, { id }) => ({ ok: cancelActive(id) }));
+    handle('cancel_download', (e, { id } = {}) => {
+        const safeId = normalizeDownloadId(id);
+        if (safeId == null) return { error: 'invalid-id' };
+        return { ok: cancelActive(safeId) };
+    });
 
-    handle('open_download_folder', (e, { id }) => {
-        const item = state.downloads.find(d => d.id === id);
+    handle('open_download_folder', (e, { id } = {}) => {
+        const safeId = normalizeDownloadId(id);
+        if (safeId == null) return { error: 'invalid-id' };
+        const item = state.downloads.find(d => d.id === safeId);
         if (item && item.path && fs.existsSync(item.path)) shell.showItemInFolder(item.path);
         else return { error: 'missing' };
     });
 
-    handle('open_download_file', async (e, { id }) => {
-        const item = state.downloads.find(d => d.id === id);
+    handle('open_download_file', async (e, { id } = {}) => {
+        const safeId = normalizeDownloadId(id);
+        if (safeId == null) return { error: 'invalid-id' };
+        const item = state.downloads.find(d => d.id === safeId);
         if (!item || !item.path || !fs.existsSync(item.path)) return { error: 'missing' };
         if (!isSafeToOpenPath(item.path)) {
             shell.showItemInFolder(item.path);
@@ -270,9 +339,12 @@ function registerIpc(getWindow) {
         }
     });
 
-    handle('skip_version', (e, { version }) => {
+    handle('skip_version', (e, { version } = {}) => {
+        const v = String(version == null ? '' : version).trim();
+        if (!/^[0-9A-Za-z.+_-]{1,64}$/.test(v)) return { error: 'invalid-version' };
         const s = loadSettings();
-        saveSettings(Object.assign({}, s, { skipped_version: version }));
+        saveSettings(Object.assign({}, s, { skipped_version: v }));
+        return { ok: true };
     });
 
     handle('download_update', async () => {
@@ -287,7 +359,7 @@ function registerIpc(getWindow) {
             });
 
             if (win && !win.isDestroyed()) {
-                win.webContents.send('update-download-done', { path: destPath });
+                win.webContents.send('update-download-done', { ok: true });
             }
             const openError = await shell.openPath(destPath);
             if (openError) throw new Error(openError);
@@ -317,19 +389,24 @@ function registerIpc(getWindow) {
         if (!win) return;
         const menu = new Menu();
         const ru = _uiLang === 'ru';
-        if (srcURL) {
+        const safeSrcURL = isSafeImageResourceUrl(srcURL) ? String(srcURL) : '';
+        if (safeSrcURL) {
             menu.append(new MenuItem({
                 label: ru ? 'Сохранить изображение' : 'Save image',
-                click: () => win.webContents.downloadURL(srcURL),
+                click: () => win.webContents.downloadURL(safeSrcURL),
             }));
+            const bx = win.getContentBounds();
+            const safeX = Number.isFinite(Number(x)) ? Math.max(0, Math.min(bx.width - 1, Math.round(Number(x)))) : 0;
+            const safeY = Number.isFinite(Number(y)) ? Math.max(0, Math.min(bx.height - 1, Math.round(Number(y)))) : 0;
             menu.append(new MenuItem({
                 label: ru ? 'Копировать изображение' : 'Copy image',
-                click: () => win.webContents.copyImageAt(x, y),
+                click: () => win.webContents.copyImageAt(safeX, safeY),
             }));
         }
         // "Open folder" for already-downloaded media — same as .File documents.
-        if (downloadId != null) {
-            const item = state.downloads.find(d => d.id === downloadId);
+        const safeDownloadId = normalizeDownloadId(downloadId);
+        if (safeDownloadId != null) {
+            const item = state.downloads.find(d => d.id === safeDownloadId);
             if (item && item.path && fs.existsSync(item.path)) {
                 if (menu.items.length) menu.append(new MenuItem({ type: 'separator' }));
                 menu.append(new MenuItem({
@@ -343,18 +420,20 @@ function registerIpc(getWindow) {
 
     // webContents.downloadURL(blob:) doesn't work in Electron (blob lives in the renderer,
     // unreachable from main), so the renderer fetches it to a dataURL and sends the bytes here to be written and registered.
-    handle('save_blob', (e, { dataUrl, filename }) => {
+    handle('save_blob', async (e, { dataUrl, filename } = {}) => {
         try {
             const rawData = String(dataUrl || '');
             if (rawData.length > 384 * 1024 * 1024) return { error: 'too-large' };
             const m = /^data:([^;,]*)?(;base64)?,([\s\S]*)$/.exec(rawData);
             if (!m) return { error: 'bad-data' };
             const buf = m[2] ? Buffer.from(m[3], 'base64') : Buffer.from(decodeURIComponent(m[3]));
+            if (buf.length > 384 * 1024 * 1024) return { error: 'too-large' };
             const settings = state.settings || loadSettings();
             const dir = settings.save_path || app.getPath('downloads');
-            const safeName = String(filename || 'file').replace(/[\/:*?"<>|]/g, '_').trim() || 'file';
+            const safeName = sanitizeFilename(filename || 'file');
             const dest = uniquePath(path.join(dir, safeName));
-            fs.writeFileSync(dest, buf);
+            // Large viewer media must not block Electron's main loop while being written.
+            await fs.promises.writeFile(dest, buf);
 
             state.downloadCounter += 1;
             const id = state.downloadCounter;
@@ -368,7 +447,8 @@ function registerIpc(getWindow) {
                 win.webContents.send('download-event', { type: 'start', id, filename: savedName, origName: safeName });
                 win.webContents.send('download-event', { type: 'done', id, status: 'completed' });
             }
-            return { ok: true, id, path: dest };
+            // Do not disclose the absolute filesystem path back into the Telegram renderer.
+            return { ok: true, id };
         } catch (err) {
             return { error: err.message };
         }
@@ -383,20 +463,20 @@ function registerIpc(getWindow) {
     });
 
     // Tray icon PNG drawn on a canvas in the renderer (SVG→nativeImage fails here).
-    handle('set_tray_image', (e, { dataURL }) => {
-        setTrayImageFromDataURL(dataURL);
+    handle('set_tray_image', (e, { dataURL } = {}) => {
+        const raw = String(dataURL || '');
+        if (!raw) { setTrayImageFromDataURL(''); return { ok: true }; }
+        if (raw.length > 1024 * 1024 || !/^data:image\/png;base64,/i.test(raw)) return { error: 'invalid-image' };
+        setTrayImageFromDataURL(raw);
+        return { ok: true };
     });
 
     // Base tray logo (PNG data URL) so the renderer can composite logo + badge.
     handle('get_tray_base', () => getTrayBaseDataURL());
 
-    handle('get_hint_img_url', () => {
-        const imgPath = path.join(__dirname, 'assets', 'webnotif-hint.png');
-        return pathToFileURL(imgPath).href;
-    });
-
-    handle('set_notifications_count', (e, { count }) => {
-        const n = parseInt(count) || 0;
+    handle('set_notifications_count', (e, { count } = {}) => {
+        const parsed = Number.parseInt(count, 10);
+        const n = Number.isFinite(parsed) ? Math.max(0, Math.min(9999, parsed)) : 0;
         state.lastNotificationCount = n;
         // Electron's native taskbar badge (self-drawn, no "attention" flash). On cold start/
         // restore-from-tray the button doesn't exist yet — window.cjs reapplies it on show/restore.
@@ -404,10 +484,6 @@ function registerIpc(getWindow) {
         updateTrayBadge(n);
     });
 
-    handle('set_window_title', (e, { title }) => {
-        const win = getWindow();
-        if (win) win.setTitle(title);
-    });
 }
 
 module.exports = { initState, getState, registerIpc };

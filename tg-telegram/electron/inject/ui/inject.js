@@ -109,54 +109,9 @@ function injectSettingsRows(){
 
     // Clone live native row — keep exact card styling.
     const tmpl = anchorEl.closest('.ListItem.narrow') || anchorEl;
-    function makeRow(id, iconName, label, sub){
-        const row = tmpl.cloneNode(true);
-        row.removeAttribute('id'); row.id = id;
-        const btn = row.querySelector('.ListItem-button');
-        // New design: title/subtitle inside .multiline-item, not direct text nodes.
-        const multi = btn.querySelector('.multiline-item');
-        if(multi){
-            const titleEl = multi.querySelector('.title');
-            if(titleEl) titleEl.textContent = label;
-            let subEl = multi.querySelector('.subtitle');
-            if(sub){
-                if(subEl) subEl.textContent = sub;
-                else {
-                    subEl = document.createElement('span');
-                    subEl.className = 'subtitle';
-                    multi.appendChild(subEl);
-                    subEl.textContent = sub;
-                }
-            } else if(subEl) subEl.remove();
-            // remove stray value badges if any
-            multi.querySelectorAll('.settings-item__current-value').forEach(el=>el.remove());
-            Array.from(btn.childNodes).forEach(n=>{
-                if(n.nodeType===3) btn.removeChild(n);
-            });
-        } else {
-            Array.from(btn.childNodes).forEach(n=>{
-                if(n.nodeType===3 || (n.nodeType===1 && /settings-item__current-value/.test(n.className||''))) btn.removeChild(n);
-            });
-            btn.appendChild(document.createTextNode(label));
-            if(sub){
-                const subEl = document.createElement('span');
-                subEl.className = 'subtitle';
-                subEl.textContent = sub;
-                btn.appendChild(subEl);
-            }
-        }
-        const ico = btn.querySelector('i.icon');
-        if(ico){
-            // keep hash classes (v0eXS-8f etc), only swap icon name
-            ico.className = ico.className.replace(/icon-[^\s]+/, 'icon-'+iconName);
-            ico.setAttribute('aria-hidden','true');
-            // Color the wrapper to match new design (cloned row was notifications pink)
-            const wrap = ico.closest('.ListItem-main-icon');
-            if(wrap){
-                const bgMap = {bots:'#8774e1', data:'#5288c1', download:'#4caf50', info:'#5288c1', reload:'#4caf50'};
-                wrap.style.background = bgMap[iconName] || '#8774e1';
-            }
-        }
+    function makeRow(id, iconName, label, sub, tone, onClick){
+        const row=_genDecoratedRow(iconName,label,'',onClick||null,tone,sub,false);
+        row.id=id;
         return row;
     }
 
@@ -165,10 +120,8 @@ function injectSettingsRows(){
     // списке оставляем «Дополнения», а «Проверить обновления» кладём в самый низ.
 
     // «Дополнения» — сразу под «Общие настройки» (первая строка списка), иначе в начало.
-    const adRow = makeRow('_tgst_ad_', 'bots', T('addons'), T('addons_desc'));
-    adRow.querySelector('.ListItem-button').addEventListener('click', () => openAddonsNative());
-    const proxyRow = makeRow('_tgst_proxy_', 'data', T('proxy'), T('proxy_desc'));
-    proxyRow.querySelector('.ListItem-button').addEventListener('click', () => openProxyNative());
+    const adRow = makeRow('_tgst_ad_', 'twd-addons', T('addons'), T('addons_desc'), 'purple', () => openAddonsNative());
+    const proxyRow = makeRow('_tgst_proxy_', 'twd-proxy', T('proxy'), T('proxy_desc'), 'blue', () => openProxyNative());
     let generalAnchor = null;
     for(const r of list.querySelectorAll('.ListItem')){
         if(/Общие настройки|General Settings/i.test(r.textContent||'')){ generalAnchor = r; break; }

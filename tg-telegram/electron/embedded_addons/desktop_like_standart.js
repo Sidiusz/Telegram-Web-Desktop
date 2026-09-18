@@ -61,6 +61,15 @@
             #MiddleColumn.tgdl-private .MessageList.no-avatars .Message { padding-left: 44px !important; position: relative !important; }
             #MiddleColumn.tgdl-private .MessageList.no-avatars .Message.own { justify-content: flex-start !important; }
             #MiddleColumn.tgdl-private .MessageList.no-avatars .Message.own .message-content-wrapper { margin-left: 0 !important; margin-right: auto !important; }
+            /* Adaptive video/media can keep a wider wrapper after Telegram's own
+               sizing pass. When own messages are flipped left, pin the actual media
+               to the wrapper's left edge so it lines up with text messages. */
+            #MiddleColumn.tgdl-private .MessageList.no-avatars .Message.own:not(.is-in-document-group):has(.message-content.media) .message-content-wrapper {
+                display: flex !important; justify-content: flex-start !important; align-items: flex-start !important;
+            }
+            #MiddleColumn.tgdl-private .MessageList.no-avatars .Message.own:not(.is-in-document-group):has(.message-content.media) .message-content {
+                margin-left: 0 !important; margin-right: auto !important;
+            }
             #MiddleColumn.tgdl-private .MessageList.no-avatars .Message.own > .Avatar { display: none !important; }
 
             /* Mirror own message's tail to the left; bottom corners match incoming style. */
@@ -90,6 +99,12 @@
             /* Groups (avatars shown): flip only OWN messages left with own avatar, like private; others stay native. */
             #MiddleColumn .MessageList:not(.no-avatars) .Message.own { padding-left: 44px !important; position: relative !important; justify-content: flex-start !important; }
             #MiddleColumn .MessageList:not(.no-avatars) .Message.own .message-content-wrapper { margin-left: 0 !important; margin-right: auto !important; }
+            #MiddleColumn .MessageList:not(.no-avatars) .Message.own:not(.is-in-document-group):has(.message-content.media) .message-content-wrapper {
+                display: flex !important; justify-content: flex-start !important; align-items: flex-start !important;
+            }
+            #MiddleColumn .MessageList:not(.no-avatars) .Message.own:not(.is-in-document-group):has(.message-content.media) .message-content {
+                margin-left: 0 !important; margin-right: auto !important;
+            }
             #MiddleColumn .MessageList:not(.no-avatars) .Message.own > .Avatar { display: none !important; }
             #MiddleColumn .MessageList:not(.no-avatars) .Message.own .svg-appendix { transform: scaleX(-1) !important; left: -8px !important; right: auto !important; }
             #MiddleColumn .MessageList:not(.no-avatars) .Message.own.last-in-group .message-content {
@@ -116,11 +131,11 @@
             /* Own messages (flipped left in private chats) get their forward button on the right. */
             #MiddleColumn.tgdl-private .MessageList.no-avatars .Message.own .message-action-buttons-container { left: auto !important; right: -3rem !important; }
 
-            /* Stacked audio/docs (document-group) break their content out to the message's
-               left edge, ignoring our 44px avatar gutter → the bubble overlapped the avatar.
-               Shift it back by the gutter so it lines up with the other own bubbles. */
-            #MiddleColumn.tgdl-private .MessageList.no-avatars .Message.own.is-in-document-group .message-content,
-            #MiddleColumn .MessageList:not(.no-avatars) .Message.own.is-in-document-group .message-content {
+            /* TG's grouped audio bubble is 45px wider than its wrapper and otherwise
+               breaks left across our avatar gutter. Grouped files/videos already match
+               the wrapper width, so shifting those creates the visible 45px empty gap. */
+            #MiddleColumn.tgdl-private .MessageList.no-avatars .Message.own.is-in-document-group .message-content.audio,
+            #MiddleColumn .MessageList:not(.no-avatars) .Message.own.is-in-document-group .message-content.audio {
                 transform: translateX(45px) !important;
             }
 

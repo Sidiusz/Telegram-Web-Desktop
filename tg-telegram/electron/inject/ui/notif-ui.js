@@ -1,42 +1,54 @@
 function ensureCornerWrap(){
     if(document.getElementById('_cnw_')||!document.body)return;
-    const w=document.createElement('div');w.id='_cnw_';w.className='_cnotif_wrap_';
-    document.body.appendChild(w);
+    const w=document.createElement('div');w.id='_cnw_';w.className='_cnotif_wrap_';document.body.appendChild(w);
+}
+function _makeNativeNotice(opts){
+    opts=opts||{};ensureCornerWrap();const w=document.getElementById('_cnw_');if(!w)return null;
+    const shell=document.createElement('div');shell.className='Notification-container'+(opts.shellClass?' '+opts.shellClass:'');
+    const el=document.createElement('div');el.className='Notification'+(opts.noticeClass?' '+opts.noticeClass:'');
+    let av=null;
+    if(opts.avatarUrl||opts.avatarText){
+        av=document.createElement('div');av.className='_twd_notice_avatar_';
+        if(opts.avatarUrl){const img=document.createElement('img');img.src=opts.avatarUrl;img.onerror=function(){this.remove();av.textContent=opts.avatarText||'?';};av.appendChild(img);}else av.textContent=opts.avatarText||'?';
+        el.appendChild(av);
+    }else if(opts.iconClass){
+        av=document.createElement('div');av.className='_twd_notice_iconhost_';
+        const i=document.createElement('i');i.className='icon '+(String(opts.iconClass).startsWith('icon-')?opts.iconClass:'icon-'+opts.iconClass)+' notification-icon';i.setAttribute('aria-hidden','true');av.appendChild(i);el.appendChild(av);
+    }
+    const body=document.createElement('div');body.className='content';
+    let title=null;if(opts.title){title=document.createElement('div');title.className='notification-title';title.textContent=opts.title;body.appendChild(title);}
+    const text=document.createElement('div');text.className='_twd_notice_text_';text.textContent=opts.text||'';body.appendChild(text);el.appendChild(body);
+    let close=null;if(opts.close!==false){
+        close=typeof _genIconButton==='function'?_genIconButton('close','Close','tiny',false):document.createElement('button');
+        if(!close.classList.contains('_twd_notice_close_'))close.classList.add('_twd_notice_close_');
+        if(!close.querySelector('i.icon')){close.type='button';close.classList.add('Button','tiny','translucent','round');close.setAttribute('aria-label','Close');close.title='Close';close.innerHTML='<i class="icon icon-close" aria-hidden="true"></i>';}
+        el.appendChild(close);
+    }
+    shell.appendChild(el);w.appendChild(shell);requestAnimationFrame(()=>shell.classList.add('_in_'));
+    let closed=false;const dismiss=()=>{if(closed)return;closed=true;shell.classList.remove('_in_');shell.classList.add('_out_');setTimeout(()=>shell.remove(),220);};
+    if(close)close.addEventListener('click',e=>{e.stopPropagation();if(opts.onClose)opts.onClose(e,dismiss);else dismiss();});
+    return {shell,el,av,body,title,text,close,dismiss};
+}
+function showNativeToast(msg,icon){
+    const n=_makeNativeNotice({text:String(msg||''),iconClass:icon||'',close:false,shellClass:'_twd_toast_'});if(!n)return;
+    setTimeout(n.dismiss,2000);return n;
 }
 function showCornerNotif(data){
-    ensureCornerWrap();
-    const w=document.getElementById('_cnw_');if(!w)return;
     const titleText=(data&&data.title?String(data.title).trim():'')||'Telegram';
     const bodyText=(data&&data.body?String(data.body).trim():'')||T('new_message');
-    const el=document.createElement('div');el.className='_cnotif_';
-    const av=document.createElement('div');av.className='_cnotif_av_';
-    if(data&&data.icon){const _img=document.createElement('img');_img.src=data.icon;_img.onerror=function(){this.style.display='none';};av.appendChild(_img);}
-    else{av.textContent=(titleText||'?')[0].toUpperCase();}
-    const body=document.createElement('div');body.className='_cnotif_body_';
-    const title=document.createElement('div');title.className='_cnotif_title_';title.textContent=titleText;
-    const text=document.createElement('div');text.className='_cnotif_text_';text.textContent=bodyText;
-    const prog=document.createElement('div');prog.className='_cnotif_prog_';prog.innerHTML='<span></span>';
-    body.appendChild(title);body.appendChild(text);body.appendChild(prog);
-    const cls=document.createElement('button');cls.className='_cnotif_close_';cls.textContent='✕';
-    el.appendChild(av);el.appendChild(body);el.appendChild(cls);
-    w.appendChild(el);
-    function dismiss(){el.classList.add('out');setTimeout(()=>el.remove(),220);}
-    cls.addEventListener('click',dismiss);
-    const t=setTimeout(dismiss,5000);
-    cls.addEventListener('click',()=>clearTimeout(t));
+    const n=_makeNativeNotice({title:titleText,text:bodyText,avatarUrl:data&&data.icon||'',avatarText:(titleText||'?')[0].toUpperCase(),close:true});if(!n)return;
+    const t=setTimeout(n.dismiss,5000);if(n.close)n.close.addEventListener('click',()=>clearTimeout(t),{once:true});
 }
-if(window.tgBridge){
-    window.tgBridge.onNotification(function(data){showCornerNotif(data);});
-}
+if(window.tgBridge){window.tgBridge.onNotification(function(data){showCornerNotif(data);});}
 
 // ── Обновления ────────────────────────────────────────────────────────────
 async function showUpdateModal(data){
-    const verLine=T('upd_avail')+' <b>v'+data.version+'</b>'+(data.current?' ('+T('upd_now')+': v'+data.current+')':'');
-    const clBox='<div id="_upd_cl_" style="margin-top:12px;background:#1a1a1a;border-radius:12px;padding:12px 14px;font-size:14px;color:#ccc;line-height:1.6;white-space:pre-wrap;max-height:220px;overflow-y:auto;">'+T('loading')+'</div>';
+    const verLine=_escHtml(T('upd_avail'))+' <b>v'+_escHtml(data.version)+'</b>'+(data.current?' ('+_escHtml(T('upd_now'))+': v'+_escHtml(data.current)+')':'');
+    const clBox='<div id="_upd_cl_" class="_upd_cl_ custom-scroll">'+_escHtml(T('loading'))+'</div>';
     const fname=data.filename||('Telegram Web Desktop Setup '+data.version+'.exe');
     showModal({
         title:T('upd_title'),
-        msg:verLine+'<br>'+clBox,
+        msgHtml:verLine+'<br>'+clBox,
         okText:T('upd_download'),
         cancelText:T('upd_later'),
         extraBtn:{label:T('upd_skip'),danger:false},
@@ -55,23 +67,18 @@ async function showUpdateModal(data){
     }
 }
 function showUpdateProgress(filename,version){
-    ensureCornerWrap();
-    const w=document.getElementById('_cnw_');if(!w)return;
-    const el=document.createElement('div');el.className='_cnotif_';el.style.minWidth='280px';
-    const av=document.createElement('div');av.className='_cnotif_av_';av.innerHTML='<i class="icon icon-download" style="font-size:18px;color:#5288c1"></i>';
-    const body=document.createElement('div');body.className='_cnotif_body_';
-    const title=document.createElement('div');title.className='_cnotif_title_';title.textContent=T('upd_dl')+' v'+version;
-    const text=document.createElement('div');text.className='_cnotif_text_';text.textContent=T('upd_preparing');
+    const n=_makeNativeNotice({title:T('upd_dl')+' v'+version,text:T('upd_preparing'),iconClass:'icon-download',close:false});if(!n)return;
+    const el=n.el,av=n.av,body=n.body,text=n.text,title=n.title;
     const bar=document.createElement('div');bar.className='_upd_bar_';
-    const barInner=document.createElement('div');barInner.className='_upd_prog_';barInner.innerHTML='<span></span>';
-    bar.appendChild(barInner);
-    body.appendChild(title);body.appendChild(text);body.appendChild(bar);
-    el.appendChild(av);el.appendChild(body);w.appendChild(el);
+    const barInner=document.createElement('div');barInner.className='_upd_prog_';barInner.innerHTML='<span></span>';bar.appendChild(barInner);body.appendChild(bar);
     function fmtBytes(b){if(b<1048576)return (b/1024).toFixed(0)+'KB';return (b/1048576).toFixed(1)+'MB';}
     el._setProgress=function(r,t){text.textContent=fmtBytes(r)+(t?' / '+fmtBytes(t):'');const sp=barInner.querySelector('span');if(sp&&t)sp.style.width=Math.round(r/t*100)+'%';};
-    el._setDone=function(err){if(err){title.textContent=T('error');text.textContent=err;av.innerHTML='<i class="icon icon-close" style="color:#e53935"></i>';}else{title.textContent=T('upd_downloaded');text.textContent=T('upd_installing');av.innerHTML='<i class="icon icon-check" style="color:#4caf50"></i>';}setTimeout(()=>{el.classList.add('out');setTimeout(()=>el.remove(),220);},3000);};
-    window._updEl=el;
-    INV('download_update',{}).catch(()=>{});
+    el._setDone=function(err){
+        if(err){title.textContent=T('error');text.textContent=err;if(av)av.innerHTML='<i class="icon icon-close notification-icon" style="color:var(--color-error,#e53935)"></i>';}
+        else{title.textContent=T('upd_downloaded');text.textContent=T('upd_installing');if(av)av.innerHTML='<i class="icon icon-check notification-icon" style="color:var(--color-success,#00c73e)"></i>';}
+        setTimeout(n.dismiss,3000);
+    };
+    window._updEl=el;INV('download_update',{}).catch(()=>{});
 }
 function setupUpdateListeners(){
     if(!window.tgBridge)return;
@@ -93,10 +100,9 @@ var _dlCards = {};
 var _dlClaimable = [];
 var _tmpDlId = 0;
 function _dlRemoveCard(id){
-    var c=_dlCards[id]; if(!c)return;
-    delete _dlCards[id];
+    var c=_dlCards[id];if(!c)return;delete _dlCards[id];
     _dlClaimable=_dlClaimable.filter(function(x){return x.id!==id;});
-    c.el.classList.add('out'); setTimeout(function(){ if(c.el.parentNode)c.el.remove(); },220);
+    if(c.dismiss)c.dismiss();else if(c.shell)c.shell.remove();
 }
 // Текущий открытый чат (peerId) — для выбора визуала карточки (в чате / фоновая).
 function _dlCurrentPeer(){
@@ -105,9 +111,9 @@ function _dlCurrentPeer(){
 }
 // Компакт-режим карточки, если её загрузка из другого чата (или чат неизвестен-фоновый).
 function _dlApplyStyle(c){
-    if(!c||!c.el)return;
-    var bg = c.peerId && String(c.peerId)!==String(_dlCurrentPeer());
-    c.el.classList.toggle('dl_compact', !!bg);
+    if(!c||!c.shell)return;
+    var bg=c.peerId&&String(c.peerId)!==String(_dlCurrentPeer());
+    c.shell.classList.toggle('dl_compact',!!bg);
 }
 // Пересчитать визуал всех карточек при смене чата.
 function _dlReflow(){ for(var id in _dlCards) _dlApplyStyle(_dlCards[id]); }
@@ -120,38 +126,18 @@ function startImmediateDownloadCard(origName, peerId){
     _makeDlCard(id, origName, peerId, true);
     return id;
 }
-function _makeDlCard(id, origName, peerId, claimable){
-    ensureCornerWrap();
-    var w=document.getElementById('_cnw_'); if(!w) return null;
-    if(_dlCards[id]) return _dlCards[id];
-    var el=document.createElement('div'); el.className='_cnotif_ dl_card'; el.style.minWidth='280px';
-    var av=document.createElement('div'); av.className='_cnotif_av_';
-    av.innerHTML='<i class="icon icon-download" style="font-size:18px;color:#5288c1"></i>';
-    var body=document.createElement('div'); body.className='_cnotif_body_';
-    var title=document.createElement('div'); title.className='_cnotif_title_';
-    title.textContent=origName||T('dl_card_file');
-    var text=document.createElement('div'); text.className='_cnotif_text_'; text.textContent=T('dl_card_downloading');
-    var bar=document.createElement('div'); bar.className='_upd_bar_';
-    var barInner=document.createElement('div'); barInner.className='_upd_prog_'; barInner.innerHTML='<span></span>';
-    bar.appendChild(barInner);
-    body.appendChild(title); body.appendChild(text); body.appendChild(bar);
-    var cls=document.createElement('button'); cls.className='_cnotif_close_'; cls.textContent='✕';
-    el.appendChild(av); el.appendChild(body); el.appendChild(cls);
-    w.appendChild(el);
-    var c={el:el, av:av, title:title, text:text, span:barInner.querySelector('span'), timer:null, peerId:peerId||'', origName:origName||''};
-    // ✕ на живой загрузке отменяет её в main (для temp-id отменять нечего — просто скрыть).
-    cls.addEventListener('click',function(e){
-        e.stopPropagation();
-        if(String(id).indexOf('__tmp')!==0) INV('cancel_download',{id:id}).catch(function(){});
-        _dlRemoveCard(id);
+function _makeDlCard(id,origName,peerId,claimable){
+    if(_dlCards[id])return _dlCards[id];
+    var n=_makeNativeNotice({
+        title:origName||T('dl_card_file'),text:T('dl_card_downloading'),iconClass:'icon-download',close:true,shellClass:'dl_card',
+        onClose:function(){if(String(id).indexOf('__tmp')!==0)INV('cancel_download',{id:id}).catch(function(){});_dlRemoveCard(id);}
     });
-    _dlCards[id]=c;
-    _dlApplyStyle(c);
-    // Страховка: осиротевшую temp-карточку (will-download так и не пришёл — клик был
-    // не по загрузке, либо файл уже скачан) убираем через 60с. Большой запас, чтобы
-    // «Скачивание…» жило пока TG тянет крупное видео по MTProto до will-download.
-    if(claimable){ _dlClaimable.push({id:id, ts:Date.now(), origName:origName||''});
-        c.timer=setTimeout(function(){ _dlRemoveCard(id); }, 60000); }
+    if(!n)return null;
+    var bar=document.createElement('div');bar.className='_upd_bar_';
+    var barInner=document.createElement('div');barInner.className='_upd_prog_';barInner.innerHTML='<span></span>';bar.appendChild(barInner);n.body.appendChild(bar);
+    var c={el:n.el,shell:n.shell,av:n.av,title:n.title,text:n.text,span:barInner.querySelector('span'),timer:null,peerId:peerId||'',origName:origName||'',dismiss:n.dismiss};
+    _dlCards[id]=c;_dlApplyStyle(c);
+    if(claimable){_dlClaimable.push({id:id,ts:Date.now(),origName:origName||''});c.timer=setTimeout(function(){_dlRemoveCard(id);},60000);}
     return c;
 }
 // start пришёл из main — усыновляем самую свежую temp-карточку (по имени, иначе старейшую).
@@ -222,14 +208,11 @@ async function showWhatsNewIfNeeded(){
         if(ver!==WHATSNEW_VERSION)return;                     // текст не про эту версию
         const s=await INV('get_settings');
         if(s&&s.whatsnew_shown_version===ver)return;          // уже показывали для этой версии
-        const item=t=>'<div style="display:flex;gap:10px;align-items:flex-start;margin-top:12px;">'
-            +'<span style="color:var(--color-primary,#8774e1);font-size:18px;line-height:1.3;flex-shrink:0;">•</span>'
-            +'<span style="line-height:1.4;">'+t+'</span></div>';
-        const body='<div style="color:rgba(255,255,255,.55);font-size:13px;margin-bottom:2px;">'+T('wn_intro')+'</div>'
-            +item(T('wn_1'))+item(T('wn_2'))+item(T('wn_3'));
+        const item=t=>'<div class="_wn_item_"><span class="_wn_bullet_">•</span><span>'+_escHtml(t)+'</span></div>';
+        const body='<div class="_wn_intro_">'+_escHtml(T('wn_intro'))+'</div>'+item(T('wn_1'))+item(T('wn_2'))+item(T('wn_3'));
         showModal({
             title:T('wn_title'),
-            msg:body,
+            msgHtml:body,
             okText:T('wn_ok'),
             cancelText:null,
             onOk:async()=>{

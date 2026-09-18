@@ -195,6 +195,14 @@ function resetAutoProxy() {
     state.lastRoute = 'direct';
     return getProxyStatus();
 }
+function forceProxyReconnect(reason = 'renderer-network-stall') {
+    if (!isProxyActive()) return getProxyStatus();
+    state.reconnectEpoch++;
+    state.lastError = '';
+    console.warn(`[TG-PROXY] forcing Telegram socket reconnect (${reason})`);
+    broadcastProxyState();
+    return getProxyStatus();
+}
 function updateProxyOptions(options) {
     const o = options || {};
     const patch = {};
@@ -246,6 +254,7 @@ function getProxyStatus() {
         customDomains: state.customDomains.slice(), pinnedDomain: state.pinnedDomain,
         workerEnabled: state.workerEnabled, workerDomains: state.workerDomains.slice(),
         autoFailures: state.autoFailures, autoWindowSec: state.autoWindowSec,
+        reconnectEpoch: state.reconnectEpoch,
         webFallback: state.webFallback, webFallbackLatched: state.webFallbackLatched,
         dcIps: { ...state.dcIps },
     };
@@ -361,7 +370,7 @@ function noteTelegramLoadFailure(error) {
 }
 
 module.exports = {
-    installFlowsealWsRoute, configureProxySettings, setProxyMode, resetAutoProxy,
+    installFlowsealWsRoute, configureProxySettings, setProxyMode, resetAutoProxy, forceProxyReconnect,
     updateProxyOptions, getProxyStatus, getProxyBootstrap, noteTelegramLoadFailure,
     refreshFlowsealDomains, testProxyConnectivity, isWebFallbackEnabled,
     dcFromTelegramWsHost, DEFAULT_CF_BASE_DOMAINS, DC_IPS,

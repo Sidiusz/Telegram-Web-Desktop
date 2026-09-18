@@ -5,10 +5,8 @@ const store = new Store({ name: 'settings' });
 
 const DEFAULTS = {
     save_path: null,
-    minimize_to_tray: false,
+    minimize_to_tray: true,
     popup_notifications: true,
-    background_notifications_enabled: false,
-
 
     notif_sound: true,
     notif_duration: 6,
@@ -19,7 +17,6 @@ const DEFAULTS = {
     notif_cat_channel: true, 
     notif_hide_text: false,  
     notif_hide_sender: false,
-    webnotif_hint_shown: false,
     whatsnew_shown_version: null,
     devtools_enabled: false,
     update_check_interval: '1h',
@@ -38,48 +35,94 @@ const DEFAULTS = {
     proxy_dc_ips: { 1: '149.154.175.50', 2: '149.154.167.51', 3: '149.154.175.100', 4: '149.154.167.91', 5: '149.154.171.5', 203: '91.105.192.100' },
 };
 
+function cloneDefault(value) {
+    if (Array.isArray(value)) return value.slice();
+    if (value && typeof value === 'object') return { ...value };
+    return value;
+}
+
 function loadSettings() {
-    return {
-        save_path: store.get('save_path', DEFAULTS.save_path),
-        minimize_to_tray: store.get('minimize_to_tray', DEFAULTS.minimize_to_tray),
-        popup_notifications: store.get('popup_notifications', DEFAULTS.popup_notifications),
-        background_notifications_enabled: store.get('background_notifications_enabled', DEFAULTS.background_notifications_enabled),
-        notif_sound: store.get('notif_sound', DEFAULTS.notif_sound),
-        notif_duration: store.get('notif_duration', DEFAULTS.notif_duration),
-        notif_volume: store.get('notif_volume', DEFAULTS.notif_volume),
-        notif_cat_private: store.get('notif_cat_private', DEFAULTS.notif_cat_private),
-        notif_cat_group: store.get('notif_cat_group', DEFAULTS.notif_cat_group),
-        notif_cat_channel: store.get('notif_cat_channel', DEFAULTS.notif_cat_channel),
-        notif_hide_text: store.get('notif_hide_text', DEFAULTS.notif_hide_text),
-        notif_hide_sender: store.get('notif_hide_sender', DEFAULTS.notif_hide_sender),
-        webnotif_hint_shown: store.get('webnotif_hint_shown', DEFAULTS.webnotif_hint_shown),
-        whatsnew_shown_version: store.get('whatsnew_shown_version', DEFAULTS.whatsnew_shown_version),
-        devtools_enabled: store.get('devtools_enabled', DEFAULTS.devtools_enabled),
-        update_check_interval: store.get('update_check_interval', DEFAULTS.update_check_interval),
-        skipped_version: store.get('skipped_version', DEFAULTS.skipped_version),
-        proxy_mode: store.get('proxy_mode', DEFAULTS.proxy_mode),
-        proxy_auto_latched: store.get('proxy_auto_latched', DEFAULTS.proxy_auto_latched),
-        proxy_domain_source: store.get('proxy_domain_source', DEFAULTS.proxy_domain_source),
-        proxy_custom_domains: store.get('proxy_custom_domains', DEFAULTS.proxy_custom_domains),
-        proxy_pinned_domain: store.get('proxy_pinned_domain', DEFAULTS.proxy_pinned_domain),
-        proxy_worker_enabled: store.get('proxy_worker_enabled', DEFAULTS.proxy_worker_enabled),
-        proxy_worker_domains: store.get('proxy_worker_domains', DEFAULTS.proxy_worker_domains),
-        proxy_auto_failures: store.get('proxy_auto_failures', DEFAULTS.proxy_auto_failures),
-        proxy_auto_window_sec: store.get('proxy_auto_window_sec', DEFAULTS.proxy_auto_window_sec),
-        proxy_web_fallback: store.get('proxy_web_fallback', DEFAULTS.proxy_web_fallback),
-        proxy_web_fallback_latched: store.get('proxy_web_fallback_latched', DEFAULTS.proxy_web_fallback_latched),
-        proxy_dc_ips: store.get('proxy_dc_ips', DEFAULTS.proxy_dc_ips),
-    };
+    const out = {};
+    for (const key of Object.keys(DEFAULTS)) {
+        const fallback = DEFAULTS[key];
+        const raw = store.get(key, fallback);
+        if (raw === null || raw === undefined) {
+            out[key] = cloneDefault(fallback);
+            continue;
+        }
+        const normalized = normalizeSetting(key, raw);
+        out[key] = normalized === INVALID ? cloneDefault(fallback) : normalized;
+    }
+    return out;
+}
+
+const BOOL_KEYS = new Set([
+    'minimize_to_tray','popup_notifications','notif_sound','notif_cat_private',
+    'notif_cat_group','notif_cat_channel','notif_hide_text','notif_hide_sender',
+    'devtools_enabled','proxy_auto_latched','proxy_worker_enabled',
+    'proxy_web_fallback','proxy_web_fallback_latched',
+]);
+const UPDATE_INTERVALS = new Set(['30m','1h','12h','24h','3d','7d','30d','never']);
+const PROXY_MODES = new Set(['auto','always','off']);
+const PROXY_DOMAIN_SOURCES = new Set(['flowseal','custom']);
+const INVALID = Symbol('invalid-setting');
+
+function normalizeSetting(k, v) {
+    if (BOOL_KEYS.has(k)) return typeof v === 'boolean' ? v : INVALID;
+    if (k === 'notif_duration') {
+        const n = Number(v); return Number.isFinite(n) ? Math.max(2, Math.min(30, Math.round(n))) : INVALID;
+    }
+    if (k === 'notif_volume') {
+        const n = Number(v); return Number.isFinite(n) ? Math.max(0, Math.min(1, n)) : INVALID;
+    }
+    if (k === 'proxy_auto_failures') {
+        const n = Number(v); return Number.isFinite(n) ? Math.max(1, Math.min(10, Math.round(n))) : INVALID;
+    }
+    if (k === 'proxy_auto_window_sec') {
+        const n = Number(v); return Number.isFinite(n) ? Math.max(3, Math.min(120, Math.round(n))) : INVALID;
+    }
+    if (k === 'update_check_interval') return UPDATE_INTERVALS.has(v) ? v : INVALID;
+    if (k === 'proxy_mode') return PROXY_MODES.has(v) ? v : INVALID;
+    if (k === 'proxy_domain_source') return PROXY_DOMAIN_SOURCES.has(v) ? v : INVALID;
+    if (k === 'save_path') return typeof v === 'string' && v.length <= 32767 ? v : INVALID;
+    if (k === 'whatsnew_shown_version' || k === 'skipped_version') {
+        return typeof v === 'string' && v.length <= 64 ? v : INVALID;
+    }
+    if (k === 'proxy_pinned_domain') {
+        return typeof v === 'string' && v.length <= 253 ? v : INVALID;
+    }
+    if (k === 'proxy_custom_domains' || k === 'proxy_worker_domains') {
+        if (!Array.isArray(v) || v.length > 64) return INVALID;
+        const out = [];
+        for (const item of v) {
+            if (typeof item !== 'string' || item.length > 253) return INVALID;
+            out.push(item);
+        }
+        return out;
+    }
+    if (k === 'proxy_dc_ips') {
+        if (!v || typeof v !== 'object' || Array.isArray(v)) return INVALID;
+        const entries = Object.entries(v);
+        if (entries.length > 16) return INVALID;
+        const out = {};
+        for (const [dc, ip] of entries) {
+            if (!/^\d{1,3}$/.test(dc) || typeof ip !== 'string' || ip.length > 64) return INVALID;
+            out[dc] = ip;
+        }
+        return out;
+    }
+    return v;
 }
 
 function saveSettings(settings) {
     if (!settings || typeof settings !== 'object' || Array.isArray(settings)) return;
     for (const [k, v] of Object.entries(settings)) {
         // Renderer settings are intentionally constrained to the schema above.
-        // Never let arbitrary IPC input create new electron-store keys.
+        // Never let arbitrary IPC input create new keys or poison expected types.
         if (!Object.prototype.hasOwnProperty.call(DEFAULTS, k)) continue;
-        if (v === null || v === undefined) store.delete(k);
-        else store.set(k, v);
+        if (v === null || v === undefined) { store.delete(k); continue; }
+        const normalized = normalizeSetting(k, v);
+        if (normalized !== INVALID) store.set(k, normalized);
     }
 }
 

@@ -7,6 +7,7 @@ const path = require('node:path');
 const root = path.resolve(__dirname, '..');
 const read = rel => fs.readFileSync(path.join(root, rel), 'utf8');
 const { normalizeToTg, getTgUrlFromArgs, isTelegramWebLink } = require('../electron/deep-links.cjs');
+const { sanitizeFilename } = require('../electron/utils.cjs');
 
 test('Telegram deep links normalize without launching anything', () => {
     assert.equal(normalizeToTg('tg://resolve?domain=microsoft_help_bot'), 'tg://resolve?domain=microsoft_help_bot');
@@ -26,12 +27,55 @@ test('deep-link argv parser ignores unrelated arguments', () => {
     assert.equal(isTelegramWebLink('https://example.com/'), false);
 });
 
+test('download filenames cannot address Windows device files', () => {
+    assert.equal(sanitizeFilename('CON'), '_CON');
+    assert.equal(sanitizeFilename('nul.txt'), '_nul.txt');
+    assert.equal(sanitizeFilename('COM9.jpg'), '_COM9.jpg');
+    assert.equal(sanitizeFilename('normal file.pdf...   '), 'normal file.pdf');
+    assert.equal(sanitizeFilename('../folder/file.txt'), '_folder_file.txt');
+});
+
+test('Windows installer registers tg:// as a Default Apps contender without hijacking test builds', () => {
+    const nsis = read('build/installer.nsh');
+    const main = read('main.cjs');
+    assert.match(nsis, /Software\\Classes\\TelegramWebDesktop\.tg/);
+    assert.match(nsis, /Capabilities\\UrlAssociations/);
+    assert.match(nsis, /Software\\RegisteredApplications/);
+    assert.match(nsis, /Software\\Classes\\Applications\\\$\{APP_EXECUTABLE_FILENAME\}\\SupportedProtocols/);
+    assert.match(nsis, /SHChangeNotify/);
+    assert.match(nsis, /ReadRegStr \$0 HKCU "Software\\Classes\\tg\\shell\\open\\command"/);
+    assert.match(main, /function isInstalledBuildPath\(\)/);
+    assert.match(main, /app\.isPackaged/);
+    assert.match(main, /app\.setAsDefaultProtocolClient\('tg'\)/);
+
+    const ipc = read('electron/ipc.cjs');
+    const preload = read('electron/preload.js');
+    const settingsUi = read('electron/inject/ui/settings-render.js');
+    assert.match(ipc, /handle\('open_default_apps'/);
+    assert.match(ipc, /ms-settings:defaultapps\?registeredAppUser=/);
+    assert.match(preload, /'open_default_apps'/);
+    assert.match(settingsUi, /T\('st_tg_links'\)/);
+    assert.match(settingsUi, /INV\('open_default_apps'\)/);
+});
+
 test('IPC boundary still validates sender and blocks arbitrary commands', () => {
     const ipc = read('electron/ipc.cjs');
     const preload = read('electron/preload.js');
+    const settings = read('electron/settings.cjs');
     assert.match(ipc, /event\.sender !== win\.webContents/);
     assert.match(ipc, /u\.hostname === 'web\.telegram\.org'/);
     assert.match(ipc, /throw new Error\('Forbidden IPC sender'\)/);
+    assert.match(ipc, /function isSafeImageResourceUrl/);
+    assert.doesNotMatch(ipc, /get_hint_img_url|set_window_title|sanitizeWindowTitle/);
+    assert.doesNotMatch(preload, /get_hint_img_url|set_window_title/);
+    assert.match(ipc, /invalid-version/);
+    assert.match(ipc, /data:image\\\/png;base64/);
+    assert.match(settings, /function normalizeSetting/);
+    assert.match(settings, /function loadSettings\(\)[\s\S]*normalizeSetting\(key, raw\)/);
+    assert.match(settings, /normalized === INVALID \? cloneDefault\(fallback\) : normalized/);
+    assert.match(settings, /BOOL_KEYS/);
+    assert.match(settings, /UPDATE_INTERVALS/);
+    assert.match(settings, /normalized !== INVALID/);
     assert.match(preload, /const TWD_ALLOWED_INVOKE = new Set/);
     assert.match(preload, /IPC command is not allowed/);
 });
@@ -44,6 +88,29 @@ test('navigation and renderer-crash recovery guards remain installed', () => {
     assert.match(src, /render-process-gone/);
     assert.match(src, /rendererRecoveries\.length >= 3/);
     assert.match(src, /minimize_to_tray/);
+    assert.match(src, /function isMainTelegramContents/);
+    assert.match(src, /webContents === mainWindow\.webContents/);
+    assert.match(src, /u\.hostname === 'web\.telegram\.org'/);
+    assert.match(src, /__tgNotifIntercept/);
+    assert.match(src, /__twdNotifHealthTimer/);
+    assert.match(src, /__twdNotifRepair/);
+    assert.doesNotMatch(src, /h === 't\.me'.*ALLOWED_PERMS/s);
+});
+
+test('developer tools stay locked until the setting is enabled', () => {
+    const win = read('electron/window.cjs');
+    const ipc = read('electron/ipc.cjs');
+    const settingsUi = read('electron/inject/ui/settings-render.js');
+
+    assert.ok(win.includes('const devToolsAllowed = () =>'));
+    assert.ok(win.includes("webContents.on('devtools-opened'"));
+    assert.ok(win.includes('event.preventDefault()'));
+    assert.ok(win.includes("key === 'f12'"));
+    assert.ok(win.includes("key === 'i' || key === 'j' || key === 'c'"));
+    assert.ok(ipc.includes("if (settings.devtools_enabled !== true) return { error: 'disabled', open: false };"));
+    assert.ok(ipc.includes('win.webContents.isDevToolsOpened()'));
+    assert.ok(settingsUi.includes('function _setDevtoolsEnabled(v)'));
+    assert.match(settingsUi, /_saveOne\(\{devtools_enabled:!!v\}\)[\s\S]*toggle_devtools/);
 });
 
 test('download and addon safety regressions stay covered', () => {
@@ -54,8 +121,23 @@ test('download and addon safety regressions stay covered', () => {
     assert.match(ipc, /invalid-url/);
     assert.match(downloads, /\.tmp/);
     assert.match(downloads, /renameSync/);
+    assert.match(downloads, /normalizeDownloadRecord/);
+    assert.match(downloads, /status === 'downloading'.*status = 'failed'/s);
+    assert.match(downloads, /downloads\.slice\(-5000\)/);
+    assert.match(ipc, /handle\('get_downloads'[\s\S]*filename: d\.filename[\s\S]*exists:/);
+    assert.doesNotMatch(ipc, /handle\('get_downloads'[\s\S]{0,350}\.\.\.d/);
+    assert.match(ipc, /normalizeDownloadId/);
     assert.match(addons, /GROUP_DEFAULTS/);
+    assert.match(addons, /function normalizeAddonKey/);
+    assert.match(addons, /MAX_JS_BYTES/);
+    assert.match(addons, /MAX_CRX_TOTAL_SCRIPT_BYTES/);
+    assert.match(addons, /addonFileWithinLimit/);
+    assert.match(addons, /scripts\.length >= MAX_CRX_SCRIPTS/);
+    assert.match(addons, /manifestEntry\.header\.size > MAX_CRX_MANIFEST_BYTES/);
     assert.match(addons, /\^\[a-zA-Z0-9\._-\]\+\\\.\(js\|crx\)\$/);
+    assert.match(ipc, /await fs\.promises\.writeFile\(dest, buf\)/);
+    assert.match(ipc, /return \{ ok: true, id \}/);
+    assert.doesNotMatch(ipc, /return \{ ok: true, id, path: dest \}/);
 });
 
 test('notification interception and popup crash recovery are present', () => {
@@ -79,6 +161,23 @@ test('release hardening fuses stay enabled', () => {
     assert.equal(f.enableEmbeddedAsarIntegrityValidation, true);
     assert.equal(f.onlyLoadAppFromAsar, true);
     assert.equal(f.grantFileProtocolExtraPrivileges, false);
+});
+
+test('updater selects only our installer and never changes versions silently', () => {
+    const updater = read('electron/updater.cjs');
+    assert.match(updater, /function isInstallerAssetName/);
+    assert.ok(updater.includes("return /^Telegram[ ._-]+Web[ ._-]+Desktop[ ._-]+Setup"));
+    assert.match(updater, /trusted update digest is unavailable/);
+    assert.match(updater, /release digest mismatch - update rejected/);
+    assert.match(updater, /The available update changed; check for updates again/);
+    assert.match(updater, /normVer\(fresh\.version\) !== expectedVersion/);
+});
+
+test('Telegram Web fallback is release-pinned and never follows master at runtime', () => {
+    const fallback = read('electron/telegram-web-fallback.cjs');
+    assert.match(fallback, /const FALLBACK_REF = '[0-9a-f]{40}'/);
+    assert.match(fallback, /const ref = FALLBACK_REF/);
+    assert.doesNotMatch(fallback, /commits\/master|git\/info\/refs|resolveRemoteRef|startRefRefreshForNextSession/);
 });
 
 test('embedded desktop addons exist', () => {
@@ -115,6 +214,7 @@ test('proxy health does not add heartbeat traffic', () => {
 test('manual launch maximizes while autostart stays hidden', () => {
     const main = read('main.cjs');
     const win = read('electron/window.cjs');
+    const settings = read('electron/settings.cjs');
     assert.match(main, /isAutostartLaunch/);
     assert.match(main, /--autostart/);
     assert.match(main, /--hidden/);
@@ -124,4 +224,161 @@ test('manual launch maximizes while autostart stays hidden', () => {
     assert.match(win, /ready-to-show/);
     assert.match(win, /mainWindow\.maximize\(\)/);
     assert.match(win, /process\.env\.TWD_SMOKE_HIDDEN === '1' \|\| startHidden/);
+    assert.match(settings, /minimize_to_tray:\s*true/);
+    assert.match(win, /if \(settings\.minimize_to_tray\) \{[\s\S]*e\.preventDefault\(\);[\s\S]*mainWindow\.hide\(\)/);
+});
+
+test('custom UI keeps Telegram-native interaction semantics', () => {
+    const core = read('electron/inject/ui/core.js');
+    const inject = read('electron/inject/ui/inject.js');
+    const panels = read('electron/inject/ui/native-panels.js');
+    const settings = read('electron/inject/ui/settings-render.js');
+    const wide = read('electron/embedded_addons/desktop_like_wide.js');
+
+    assert.match(inject, /'twd-addons'/);
+    assert.match(inject, /'twd-proxy'/);
+    assert.doesNotMatch(inject, /makeRow\('_tgst_ad_',\s*'animations-filled'/);
+    assert.doesNotMatch(inject, /makeRow\('_tgst_proxy_',\s*'web-filled'/);
+    assert.match(settings, /_TWD_FILLED_GLYPHS/);
+    const bootstrap = read('electron/inject/ui/bootstrap.js');
+    assert.match(bootstrap, /t\.closest\('#Settings,\._tgpanel_,\._mo_,\[id\^="_tgmi_"\]'\)/);
+
+    assert.match(core, /Measured from a live Telegram settings category transition/);
+    assert.match(core, /\.3s cubic-bezier\(\.25,1,\.5,1\)/);
+    assert.match(core, /@keyframes _twd-settings-in-move_\{from\{transform:translateX\(1\.5rem\)\}to\{transform:translateX\(0\)\}\}/);
+    assert.match(core, /@keyframes _twd-settings-out-move_\{from\{transform:translateX\(0\)\}to\{transform:translateX\(-1\.5rem\)\}\}/);
+    assert.match(core, /@keyframes _twd-settings-back-out-move_\{from\{transform:translateX\(0\)\}to\{transform:translateX\(1\.5rem\)\}\}/);
+    assert.doesNotMatch(core, /_tgpanel_\._in_\{animation:slide-in-200|_twd-under_[^{]*push-out/);
+    assert.match(core, /\.Notification-container\.dl_card\{margin-left:auto;margin-right:\.5rem/);
+    assert.doesNotMatch(core, /\._p_\{|\._ph_\{|\._cbx_\{|\._dli_\{/);
+    assert.match(panels, /_clPlainMarkdown/);
+    assert.doesNotMatch(panels, /Object\.keys\(groups\)\.forEach\(g=>radioGroup/);
+    const modal = read('electron/inject/ui/modal.js');
+    assert.doesNotMatch(modal, /function makePanel\(|function openPanel\(/);
+    assert.match(modal, /function _escHtml\(/);
+    assert.match(modal, /msgHtml!=null\?String\(msgHtml\):_escHtml\(msg\)/);
+    assert.match(modal, /_escHtml\(checkLabel\)/);
+    assert.match(modal, /_escHtml\(o\.label\)/);
+    assert.doesNotMatch(settings, /innerHTML\s*=\s*['"][^'"]*['"]\s*\+\s*e\b/);
+    assert.doesNotMatch(panels, /innerHTML\s*=.*r\.error/);
+
+    assert.match(wide, /width: calc\(100% - 2rem\) !important/);
+    assert.doesNotMatch(wide, /messages-container[\s\S]{0,700}width: calc\(100% - 2rem - var\(--tgdl-rc/);
+    assert.match(wide, /align-self: center !important/);
+    assert.match(wide, /#MiddleColumn \.MiddleHeader[\s\S]{0,350}width: calc\(100% - 2rem - var\(--tgdl-rc, 0px\)\)/);
+    assert.match(wide, /margin-left: 1rem !important/);
+    assert.doesNotMatch(wide, /is-in-document-group \.message-content\s*\{[\s\S]{0,120}translateX\(/);
+    assert.match(wide, /is-in-document-group \.message-content\.audio[\s\S]{0,240}translateX\(45px\)/);
+    assert.doesNotMatch(wide, /is-in-document-group \.message-content,\s*\n/);
+    const standard = read('electron/embedded_addons/desktop_like_standart.js');
+    assert.match(standard, /is-in-document-group \.message-content\.audio[\s\S]{0,240}translateX\(45px\)/);
+    assert.doesNotMatch(standard, /is-in-document-group \.message-content,\s*\n/);
+    assert.match(wide, /Message\.own:not\(\.is-in-document-group\):has\(\.message-content\.media\) \.message-content-wrapper[\s\S]{0,220}justify-content: flex-start/);
+    assert.match(wide, /Message\.own:not\(\.is-in-document-group\):has\(\.message-content\.media\) \.message-content[\s\S]{0,180}margin-left: 0/);
+});
+
+test('service UI Lab stays hidden and reuses native builders', () => {
+    const scripts = read('electron/scripts.cjs');
+    const lab = read('electron/inject/ui/ui-lab.js');
+    const inject = read('electron/inject/ui/inject.js');
+    const panels = read('electron/inject/ui/native-panels.js');
+    const settings = read('electron/inject/ui/settings-render.js');
+
+    assert.match(scripts, /'ui-lab\.js'/);
+    assert.match(lab, /window\.__twdUiLab/);
+    assert.match(lab, /_genNativeSettingRow/);
+    assert.match(lab, /_genToggle/);
+    assert.match(lab, /_genRadioGroup/);
+    assert.match(lab, /_genInput/);
+    assert.match(lab, /_genButton/);
+    assert.match(lab, /_nativeDlRow/);
+    assert.match(settings, /function _appendNativeSection\(/);
+    assert.match(settings, /hasVisibleBefore=Array\.prototype\.some\.call/);
+    assert.match(settings, /h\.style\.marginTop=hasVisibleBefore\?'16px':'0px'/);
+    assert.match(settings, /if\(found\.header\)return found/);
+    assert.doesNotMatch(lab, /style\.marginTop='16px'/);
+    assert.match(lab, /INV\('get_proxy_status'\)/);
+    assert.match(lab, /_uiLabAvatarDataUrl/);
+    assert.match(lab, /INV\('preview_notification'/);
+    assert.match(lab, /hidden-text/);
+    assert.match(lab, /hidden-sender/);
+    assert.match(lab, /hidden-all/);
+    assert.match(lab, /no-avatar/);
+    assert.doesNotMatch(inject, /ui_lab|__twdUiLab/i);
+    assert.match(panels, /function _withSettingsReady\(/);
+    assert.match(settings, /function _genButton\(/);
+    assert.match(settings, /const chkBtn=_genButton\(/);
+    assert.match(settings, /function _wireUiLabUnlock\(/);
+    assert.match(settings, /count>=7&&count<10/);
+    assert.match(settings, /10-count/);
+    assert.match(settings, /openUiLabNative\(\)/);
+    assert.match(settings, /_wireUiLabUnlock\(unRow\)/);
+    assert.match(panels, /const ab=_genButton\(/);
+});
+
+test('desktop notification popup follows Telegram toast geometry and has no dead settings flags', () => {
+    const notif = read('electron/notification.cjs');
+    const intercept = read('electron/inject/notif-intercept.js');
+    const settings = read('electron/settings.cjs');
+    const notifSettings = read('electron/inject/ui/notifications-settings.js');
+    const ipc = read('electron/ipc.cjs');
+    const preload = read('electron/preload.js');
+
+    assert.match(notif, /const WIDTH = 384/);
+    assert.match(notif, /#stack\{position:absolute;left:0;right:0;bottom:0;display:flex;flex-direction:column;gap:8px;padding:0 8px/);
+    assert.match(notif, /background:rgba\(33,33,33,\.94\)/);
+    assert.match(notif, /backdrop-filter:blur\(8px\)/);
+    assert.match(notif, /border:1px solid rgba\(255,255,255,\.14\)/);
+    assert.match(notif, /border-radius:16px;padding:17px;min-height:132px/);
+    assert.match(notif, /font-size:15px;line-height:1\.25/);
+    assert.match(notif, /event\.sender === _win\.webContents/);
+    assert.match(notif, /img-src data:;/);
+    assert.doesNotMatch(notif, /img-src[^;]*https:/);
+    assert.match(notif, /sanitizePopupIcon/);
+    assert.match(notif, /const MAX_CARDS=3/);
+    assert.match(notif, /const MOVE_MS=280/);
+    assert.match(notif, /stack\.appendChild\(el\)/);
+    assert.match(notif, /const enterOffset=Math\.ceil\(el\.getBoundingClientRect\(\)\.height\)\+GAP/);
+    assert.match(notif, /node\.style\.transform='translateY\('\+dy\+'px\)'/);
+    assert.match(notif, /shown=all\.slice\(-MAX_CARDS\)/);
+    assert.match(notif, /evicted=stack\.firstElementChild/);
+    assert.match(notif, /node===evicted\?', opacity '\+FADE_MS\+'ms ease-out'/);
+    assert.ok(notif.includes("window.addEventListener('resize',onResize)"));
+    assert.ok(notif.includes('setTimeout(start,70)'));
+    assert.match(ipc, /handle\('preview_notification'/);
+    assert.match(ipc, /hidden-text/);
+    assert.match(ipc, /hidden-sender/);
+    assert.match(ipc, /hidden-all/);
+    assert.match(preload, /'preview_notification'/);
+    assert.match(intercept, /__twdNotifHealthTimer/);
+    assert.match(intercept, /__twdNotifStateRepairTimer/);
+    assert.match(intercept, /__twdNotifRepair/);
+    assert.match(intercept, /repairNotificationInterception/);
+    assert.match(intercept, /__twdNotifPostMessageHook/);
+    assert.match(intercept, /proto\.postMessage !== installedHook/);
+    assert.match(intercept, /hookServiceWorker\(\)/);
+    assert.doesNotMatch(settings, /background_notifications_enabled|webnotif_hint_shown/);
+    assert.doesNotMatch(notifSettings, /function bindRow\(|function unlockRow\(|background_notifications_enabled/);
+});
+
+test('notification category filter distinguishes Telegram channels from groups', () => {
+    const bootstrap = read('electron/inject/ui/bootstrap.js');
+    assert.match(bootstrap, /indexedDB\.open\('tt-data'\)/);
+    assert.match(bootstrap, /\^tt-global-state\(\?:_\\d\+\)\?\$/);
+    assert.match(bootstrap, /type==='chatTypeChannel'.*return 'channel'/s);
+    assert.match(bootstrap, /type==='chatTypeBasicGroup'\|\|type==='chatTypeSuperGroup'.*return 'group'/s);
+    assert.match(bootstrap, /resolveChatCategory\(pid\)\.then/);
+    assert.doesNotMatch(bootstrap, /var cat = \(pid\.charAt\(0\)==='-'\) \? 'group' : 'private'/);
+});
+
+test('proxy stall recovery reconnects without heartbeat traffic', () => {
+    const bootstrap = read('electron/inject/ui/bootstrap.js');
+    const preload = read('electron/preload.js');
+    const route = read('electron/tg-flowseal-route.cjs');
+    assert.match(bootstrap, /installProxyStallRecovery/);
+    assert.match(bootstrap, /now-waitingSince<12000/);
+    assert.match(bootstrap, /INV\('reconnect_proxy'\)/);
+    assert.match(preload, /'reconnect_proxy'/);
+    assert.match(route, /function forceProxyReconnect/);
+    assert.match(route, /state\.reconnectEpoch\+\+/);
 });

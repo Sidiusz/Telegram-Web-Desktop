@@ -18,4 +18,3 @@ tg-telegram/.proxy_cdp_probe.mjs
 tg-telegram/.push_probe*
 tg-telegram/.set_mintray_*.mjs
 tg-telegram/.*.out
-tg-telegram/{if*

@@ -80,28 +80,30 @@ function createWindow(state, onTelegramLink, options = {}) {
         'clipboard-read', 'clipboard-sanitized-write',
         'display-capture', 'window-management',
     ]);
-    function isTelegramHost(hostname) {
-        if (!hostname) return false;
-        const h = hostname.toLowerCase().replace(/^www\./, '');
-        return h === 'web.telegram.org' || h === 'telegram.org' ||
-               h === 't.me' || h.endsWith('.telegram.org') || h.endsWith('.telesco.pe');
+    function isTrustedPermissionOrigin(raw) {
+        try {
+            const u = new URL(String(raw || ''));
+            return u.protocol === 'https:' && u.hostname === 'web.telegram.org' &&
+                   (u.pathname === '/a' || u.pathname.startsWith('/a/') || u.pathname === '/');
+        } catch (_) { return false; }
+    }
+    function isMainTelegramContents(webContents) {
+        return !!(mainWindow && !mainWindow.isDestroyed() && webContents === mainWindow.webContents);
     }
     session.defaultSession.setPermissionRequestHandler((webContents, permission, callback, details) => {
         try {
-            const url = (details && (details.requestingUrl || details.embeddingUrl)) || '';
-            const host = url ? new URL(url).hostname : '';
-            if (!isTelegramHost(host)) return callback(false);
+            if (!isMainTelegramContents(webContents)) return callback(false);
+            const url = (details && (details.requestingUrl || details.embeddingUrl)) || webContents.getURL() || '';
+            if (!isTrustedPermissionOrigin(url)) return callback(false);
             if (!ALLOWED_PERMS.has(permission)) return callback(false);
             return callback(true);
         } catch (_) { return callback(false); }
     });
     session.defaultSession.setPermissionCheckHandler((webContents, permission, requestingOrigin, details) => {
         try {
-            if (!isTelegramHost(requestingOrigin ? new URL(requestingOrigin).hostname : '')) {
-                const u = details && (details.requestingUrl || details.embeddingUrl);
-                if (!isTelegramHost(u ? new URL(u).hostname : '')) return false;
-            }
-            return ALLOWED_PERMS.has(permission);
+            if (!isMainTelegramContents(webContents)) return false;
+            const raw = requestingOrigin || (details && (details.requestingUrl || details.embeddingUrl)) || webContents.getURL() || '';
+            return isTrustedPermissionOrigin(raw) && ALLOWED_PERMS.has(permission);
         } catch (_) { return false; }
     });
 
@@ -256,25 +258,48 @@ function createWindow(state, onTelegramLink, options = {}) {
 
     // Watchdog: TG's self-reload ("Reload" in the chat list) goes through a service
     // worker, and did-finish-load can fire on an intermediate load and miss the final page.
+    // Verify the notification interceptor independently from the UI marker: a long-lived
+    // page can keep our UI while Telegram restores browser notification globals underneath it.
     setInterval(() => {
         if (!mainWindow || mainWindow.isDestroyed() || mainWindow.webContents.isLoading() || injectPromise) return;
-        mainWindow.webContents.executeJavaScript('!!window.__tgUIInjected', true)
+        mainWindow.webContents.executeJavaScript(
+            '!!window.__tgUIInjected && !!window.__tgNotifIntercept && !!window.__twdNotifHealthTimer && typeof window.__twdNotifRepair === "function"',
+            true
+        )
             .then(ok => { if (!ok) void injectAll(); })
             .catch(() => {});
     }, 3000);
 
+    // Developer tools are a user-controlled capability. When disabled, consume every
+    // common DevTools accelerator and also close any DevTools window opened through
+    // another Electron path. This keeps the setting authoritative rather than merely
+    // controlling whether DevTools auto-open at startup.
+    const devToolsAllowed = () => {
+        try { return loadSettings().devtools_enabled === true; }
+        catch (_) { return false; }
+    };
+    mainWindow.webContents.on('devtools-opened', () => {
+        if (!devToolsAllowed() && mainWindow && !mainWindow.isDestroyed()) {
+            mainWindow.webContents.closeDevTools();
+        }
+    });
     mainWindow.webContents.on('before-input-event', (event, input) => {
         if (input.type !== 'keyDown') return;
-        const isF12 = input.key === 'F12';
-        const isCtrlShiftI = (input.control || input.meta) && input.shift &&
-                             (input.key === 'I' || input.key === 'i');
-        if (isF12 || isCtrlShiftI) {
-            if (mainWindow.webContents.isDevToolsOpened()) {
-                mainWindow.webContents.closeDevTools();
-            } else {
-                mainWindow.webContents.openDevTools();
-            }
+        const key = String(input.key || '').toLowerCase();
+        const command = !!(input.control || input.meta);
+        const devToolsShortcut =
+            key === 'f12' ||
+            (command && input.shift && (key === 'i' || key === 'j' || key === 'c')) ||
+            (input.meta && input.alt && (key === 'i' || key === 'j' || key === 'c'));
+        if (!devToolsShortcut) return;
+
+        event.preventDefault();
+        if (!devToolsAllowed()) {
+            if (mainWindow.webContents.isDevToolsOpened()) mainWindow.webContents.closeDevTools();
+            return;
         }
+        if (mainWindow.webContents.isDevToolsOpened()) mainWindow.webContents.closeDevTools();
+        else mainWindow.webContents.openDevTools();
     });
 
     mainWindow.webContents.on('context-menu', (e, params) => {

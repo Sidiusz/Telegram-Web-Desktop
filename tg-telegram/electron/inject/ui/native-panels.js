@@ -8,10 +8,20 @@ function closeNativePanel(animate){
     if(window.__tgdlNativeRefresh) delete window.__tgdlNativeRefresh;
     if(!_nativePanel) return;
     var p=_nativePanel; _nativePanel=null;
-    var st=document.getElementById('Settings'); if(st) st.classList.remove('_tgpush_');  // вернуть экран
-    if(animate===false){ p.remove(); return; }
-    p.classList.remove('_in_');
-    setTimeout(function(){ if(p&&p.parentNode) p.remove(); }, 280);
+    var st=document.getElementById('Settings'); if(st) st.classList.remove('_tgpush_');
+    if(animate===false){
+        if(p._under)p._under.classList.remove('_twd-under_','_twd-under-back_');
+        p.remove(); return;
+    }
+    p.classList.remove('_in_'); p.classList.add('_out_');
+    if(p._under){
+        p._under.classList.remove('_twd-under_');
+        p._under.classList.add('_twd-under-back_');
+    }
+    setTimeout(function(){
+        if(p._under)p._under.classList.remove('_twd-under-back_');
+        if(p&&p.parentNode)p.remove();
+    },250);
 }
 
 // Открывает нативный экран Настроек TG (клик по пункту «Настройки» в сайд-меню).
@@ -26,6 +36,16 @@ function tgOpenSettings(){
         item.dispatchEvent(new MouseEvent('click',opt));
     }
 }
+function _withSettingsReady(openFn){
+    if(document.getElementById('Settings')) return openFn();
+    tgOpenSettings();
+    const tries=setInterval(()=>{
+        if(!document.getElementById('Settings'))return;
+        clearInterval(tries);openFn();
+    },80);
+    setTimeout(()=>clearInterval(tries),4000);
+    return null;
+}
 function openNativePanel(opts){
     opts=opts||{};
     closeNativePanel(false);
@@ -38,11 +58,7 @@ function openNativePanel(opts){
     // Шапка — клон нативной: оставляем только кнопку «Назад» + h3.
     if(srcHdr){
         const hdr=srcHdr.cloneNode(false);          // только классы, без детей
-        const back=document.createElement('button');
-        back.type='button';
-        back.className='Button smaller translucent round';
-        back.setAttribute('aria-label',T('back')); back.title=T('back');
-        back.innerHTML='<i class="icon icon-arrow-left" aria-hidden="true"></i>';
+        const back=_genIconButton('arrow-left',T('back'),'small',false);
         const h3=document.createElement('h3'); h3.textContent=opts.title||'';
         hdr.appendChild(back); hdr.appendChild(h3);
         if(opts.renderHeader) opts.renderHeader(hdr);
@@ -57,37 +73,26 @@ function openNativePanel(opts){
     panel.appendChild(content);
     // Кладём поверх колонки настроек (та же геометрия, что у слайдов).
     settings.style.position=settings.style.position||'relative';
+    panel._under=settings.querySelector('.Transition_slide-active, .Transition__slide--active');
     settings.appendChild(panel);
     _nativePanel=panel;
     if(opts.renderContent) opts.renderContent(content);
-    // Push-анимация: текущий экран назад + наша панель наезжает поверх.
-    requestAnimationFrame(()=>{ settings.classList.add('_tgpush_'); panel.classList.add('_in_'); });
+    // Commit the off-screen initial state before starting Telegram's push animation.
+    // requestAnimationFrame may be suspended for an occluded Electron window.
+    void panel.offsetWidth;
+    settings.classList.add('_tgpush_');
+    if(panel._under)panel._under.classList.add('_twd-under_');
+    panel.classList.add('_in_');
     return panel;
 }
 
 // ── «Настройки приложения» как нативный раздел (#5) ────────────────────────
 // Контент — renderSt (настройки приложения), шапка без доп.кнопок.
 function openAppSettingsNative(){
-    // Нативная панель рисуется внутри #Settings (его колонки). Если экран настроек
-    // закрыт (вызвали из гамбургер-меню) — сначала откроем его, затем покажем панель.
-    if(!document.getElementById('Settings')){
-        tgOpenSettings();
-        // ждём появления #Settings (React монтирует асинхронно), потом открываем
-        const tries=setInterval(()=>{
-            if(document.getElementById('Settings')){ clearInterval(tries); openAppSettingsNative(); }
-        },80);
-        setTimeout(()=>clearInterval(tries),4000);  // страховка от вечного поллинга
-        return;
-    }
-    openNativePanel({
+    return _withSettingsReady(()=>openNativePanel({
         title:T('app_settings'),
-        renderHeader(hdr){
-            // ничего лишнего в шапку не кладём (нативный раздел обычно без доп.кнопок)
-        },
-        renderContent(content){
-            renderSt(content);
-        },
-    });
+        renderContent(content){ renderSt(content); },
+    }));
 }
 
 // ── «Загрузки» как нативный раздел (#5) ────────────────────────────────────
@@ -95,24 +100,12 @@ function openAppSettingsNative(){
 // иконка по расширению, справа — действия Открыть/Папа/Удалить. Свой Назад.
 let _dlNativeTimer=null;
 function openDownloadsNative(){
-    // Нативная панель рисуется внутри #Settings (его колонки). Если экран настроек
-    // закрыт (вызвали из гамбургер-меню) — сначала откроем его, затем покажем панель.
-    if(!document.getElementById('Settings')){
-        tgOpenSettings();
-        // ждём появления #Settings (React монтирует асинхронно), потом открываем
-        const tries=setInterval(()=>{
-            if(document.getElementById('Settings')){ clearInterval(tries); openDownloadsNative(); }
-        },80);
-        setTimeout(()=>clearInterval(tries),4000);  // страховка от вечного поллинга
-        return;
-    }
+    if(!document.getElementById('Settings')) return _withSettingsReady(openDownloadsNative);
     const refresh=()=>{ const c=document.getElementById('_tgpc_'); if(c) renderDownloadsNative(c); };
     const panel=openNativePanel({
         title:T('downloads'),
         renderHeader(hdr){
-            const clr=document.createElement('button');
-            clr.className='_tpclr_';
-            clr.innerHTML='<svg width="14" height="14" viewBox="0 0 24 24" fill="none"><path d="M3 6h18M8 6V4h8v2M19 6l-1 14H6L5 6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>'+T('dl_clear');
+            const clr=_genIconButton('delete',T('dl_clear'),'small',true);
             clr.addEventListener('click',()=>{
                 showModal({
                     title:T('dl_clear_t'),msg:T('dl_clear_m'),
@@ -149,18 +142,10 @@ function closeNativeDlPanel(){
 
 // ── «Прокси» ────────────────────────────────────────────────────────────────
 function openProxyNative(){
-    if(!document.getElementById('Settings')){
-        tgOpenSettings();
-        const tries=setInterval(()=>{
-            if(document.getElementById('Settings')){ clearInterval(tries); openProxyNative(); }
-        },80);
-        setTimeout(()=>clearInterval(tries),4000);
-        return;
-    }
-    openNativePanel({
+    return _withSettingsReady(()=>openNativePanel({
         title:T('proxy'),
         renderContent(content){ renderProxyNative(content); },
-    });
+    }));
 }
 
 async function renderProxyNative(content){
@@ -289,20 +274,11 @@ async function renderProxyNative(content){
 }
 
 function openAddonsNative(){
-    if(!document.getElementById('Settings')){
-        tgOpenSettings();
-        const tries=setInterval(()=>{
-            if(document.getElementById('Settings')){ clearInterval(tries); openAddonsNative(); }
-        },80);
-        setTimeout(()=>clearInterval(tries),4000);
-        return;
-    }
+    if(!document.getElementById('Settings')) return _withSettingsReady(openAddonsNative);
     openNativePanel({
         title:T('addons'),
         renderHeader(hdr){
-            const fb=document.createElement('button');
-            fb.className='_tpclr_'; fb.style.background='rgba(255,255,255,.08)'; fb.style.color='#fff';
-            fb.innerHTML='<svg width="14" height="14" viewBox="0 0 24 24" fill="none"><path d="M3 7a2 2 0 012-2h4l2 2h8a2 2 0 012 2v7a2 2 0 01-2 2H5a2 2 0 01-2-2V7z" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/></svg>'+T('ad_folder');
+            const fb=_genIconButton('folder',T('ad_folder'),'small',false);
             fb.addEventListener('click',()=>INV('open_addons_folder'));
             hdr.appendChild(fb);
         },
@@ -310,212 +286,122 @@ function openAddonsNative(){
     });
 }
 
-var GROUP_NAMES={ desktop_like_chat:{ru:'Оформление сообщений',en:'Message layout'} };
-function groupName(g){ var e=GROUP_NAMES[g]; return e?(e[curLang()]||e.en):g; }
 
 async function renderAddonsNative(content){
     if(!content)return;
     content.innerHTML='<div class="_tpempty_">'+T('loading')+'</div>';
     let addons=[];
-    try{ addons=await INV('get_addons'); }
-    catch(e){ content.innerHTML='<div class="_tpempty_">'+T('load_error')+'</div>'; return; }
+    try{addons=await INV('get_addons');}catch(e){content.innerHTML='<div class="_tpempty_">'+T('load_error')+'</div>';return;}
+    captureWidgetTpl();
+    const cardCls=_genCardCls(),headerTpl=_genHeaderTpl();
+    const liEl=document.querySelector('#Settings .ListItem.narrow')||document.querySelector('#Settings .ListItem');
+    if(!cardCls||!liEl){setTimeout(()=>{if(content.isConnected)renderAddonsNative(content);},120);return;}
     content.innerHTML='';
-
     let applyBar=null;
-    const markDirty=()=>{ if(applyBar) applyBar.style.display='flex'; };
-    const ce=cls=>{const d=document.createElement('div');if(cls)d.className=cls;return d;};
-    const lbl=t=>{const d=ce('_ns_lbl_');d.textContent=t;content.appendChild(d);};
-    const card=()=>{const d=ce('_ns_card_');content.appendChild(d);return d;};
-    const main=(title,sub)=>{const m=ce('_ns_main_');const t=ce('_ns_title_');t.textContent=title;m.appendChild(t);if(sub){const x=ce('_ns_sub_');x.textContent=sub;m.appendChild(x);}return m;};
-
-    // ungrouped add-on → toggle row (+delete for custom)
+    const addSection=(title,cd)=>_appendNativeSection(content,headerTpl,title,cd);
+    const card=()=>_genCard(cardCls);
+    const baseRow=(title,sub)=>{const r=_genNativeSettingRow(liEl,title,sub||'','',null);if(r._value)r._value.remove();const b=r.querySelector('.ListItem-button');if(b)b.querySelectorAll('.Switcher,.Switch,.Toggle,.icon-next,.icon-arrow-right').forEach(x=>x.remove());return r;};
+    const markDirty=()=>{if(applyBar)applyBar.hidden=false;};
+    const groupMembers={};addons.forEach(a=>{if(a.group)(groupMembers[a.group]=groupMembers[a.group]||[]).push(a);});
     function toggleRow(cd,a){
-        const r=ce('_ns_row_'); cd.appendChild(r);
-        r.appendChild(main(a.display_name||a.name, a.version?('v'+a.version):null));
+        const r=baseRow(a.display_name||a.name,a.version?('v'+a.version):''),b=r.querySelector('.ListItem-button');
         if(!a.embedded){
-            const del=document.createElement('button'); del.className='_addon_del_'; del.title=T('dl_delete');
-            del.innerHTML='<svg viewBox="0 0 24 24" width="16" height="16" fill="none"><path d="M3 6h18M8 6V4h8v2M19 6l-1 14H6L5 6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>';
-            del.addEventListener('click',()=>showModal({title:T('ad_del_t'),msg:'«'+(a.display_name||a.name)+'»?',okText:T('del_upper'),okDanger:true,onOk:async()=>{await INV('delete_addon',{name:a.name});renderAddonsNative(content);}}));
-            r.appendChild(del);
+            const del=_genIconButton('delete',T('dl_delete'),'tiny',true);
+            del.addEventListener('click',e=>{e.stopPropagation();showModal({title:T('ad_del_t'),msg:'«'+(a.display_name||a.name)+'»?',okText:T('del_upper'),okDanger:true,onOk:async()=>{await INV('delete_addon',{name:a.name});renderAddonsNative(content);}});});
+            b.appendChild(del);
         }
-        const sw=document.createElement('label'); sw.className='_ns_swt_';
-        const chk=document.createElement('input'); chk.type='checkbox'; chk.checked=!!a.enabled;
-        sw.appendChild(chk); sw.appendChild(document.createElement('i'));
-        chk.addEventListener('change',async()=>{ a.enabled=chk.checked; await INV('toggle_addon',{key:a.key,enabled:chk.checked}); markDirty(); });
-        r.appendChild(sw);
+        const sw=_genSwitcher(!!a.enabled,async v=>{
+            if(v&&a.group){
+                for(const other of (groupMembers[a.group]||[])){
+                    if(other===a||!other.enabled)continue;
+                    other.enabled=false;
+                    if(other._uiSwitch)other._uiSwitch.checked=false;
+                    await INV('toggle_addon',{key:other.key,enabled:false});
+                }
+            }
+            a.enabled=v;
+            await INV('toggle_addon',{key:a.key,enabled:v});
+            markDirty();
+        },a.display_name||a.name);
+        a._uiSwitch=sw.querySelector('input[type=checkbox]');
+        b.appendChild(sw);cd.appendChild(r);
     }
-
-    // same-group add-ons are mutually exclusive → radio (incl. "Off")
-    function radioGroup(g,list){
-        lbl(groupName(g));
-        const cd=card(); const radios=[];
-        const refresh=()=>{ const anyOn=list.some(a=>a.enabled); radios.forEach(rd=>rd.el.classList.toggle('_on_', rd.a?rd.a.enabled:!anyOn)); };
-        const pick=(addon)=>{ list.forEach(a=>{ const want=(a===addon); if(a.enabled!==want){ a.enabled=want; INV('toggle_addon',{key:a.key,enabled:want}); } }); refresh(); markDirty(); };
-        const addRadio=(label,addon)=>{
-            const r=ce('_ns_row_'); r.style.cursor='pointer'; cd.appendChild(r);
-            r.appendChild(main(label, addon?('v'+(addon.version||'')):null));
-            const rad=ce('_ns_radio_'); r.appendChild(rad);
-            radios.push({el:rad,a:addon});
-            r.addEventListener('click',()=>pick(addon));
-        };
-        addRadio(T('addon_off'),null);
-        list.forEach(a=>addRadio(a.display_name||a.name,a));
-        refresh();
-    }
-
-    const groups={};
-    addons.forEach(a=>{ if(a.group)(groups[a.group]=groups[a.group]||[]).push(a); });
-    const embSingle=addons.filter(a=>a.embedded && !a.group);
-    const userSingle=addons.filter(a=>!a.embedded && !a.group);
-
-    Object.keys(groups).forEach(g=>radioGroup(g,groups[g]));
-    if(embSingle.length){ lbl(T('ad_builtin')); const cd=card(); embSingle.forEach(a=>toggleRow(cd,a)); }
-    lbl(T('ad_user'));
-    if(userSingle.length){ const cd=card(); userSingle.forEach(a=>toggleRow(cd,a)); }
-    else { const em=ce('_tpempty_'); em.style.padding='16px'; em.textContent=T('ad_none'); content.appendChild(em); }
-
-    applyBar=ce('_addons_apply_'); applyBar.style.display='none';
-    const ab=document.createElement('button');
-    ab.innerHTML='<i class="icon icon-reload"></i> '+T('ad_apply');
-    ab.addEventListener('click',()=>INV('apply_addons'));
-    applyBar.appendChild(ab);
-    content.appendChild(applyBar);
+    const embedded=addons.filter(a=>a.embedded),user=addons.filter(a=>!a.embedded);
+    if(embedded.length){const cd=card();embedded.forEach(a=>toggleRow(cd,a));addSection(T('ad_builtin'),cd);}
+    if(user.length){const cd=card();user.forEach(a=>toggleRow(cd,a));addSection(T('ad_user'),cd);}
+    else{const cd=card();const note=document.createElement('p');note.className='settings-item-description';note.textContent=T('ad_none');cd.appendChild(note);addSection(T('ad_user'),cd);}
+    applyBar=document.createElement('div');applyBar.className='_twd-apply-bar_';applyBar.hidden=true;
+    const ab=_genButton(T('ad_apply'),'reload','primary');
+    ab.addEventListener('click',async()=>{ab.disabled=true;try{await INV('apply_addons');applyBar.hidden=true;}finally{ab.disabled=false;}});
+    applyBar.appendChild(ab);content.appendChild(applyBar);
 }
 
 // ── «Список изменений» как нативный раздел ──────────────────────────────────
 function openChangelogNative(){
-    if(!document.getElementById('Settings')){
-        tgOpenSettings();
-        const tries=setInterval(()=>{
-            if(document.getElementById('Settings')){ clearInterval(tries); openChangelogNative(); }
-        },80);
-        setTimeout(()=>clearInterval(tries),4000);
-        return;
-    }
+    if(!document.getElementById('Settings')) return _withSettingsReady(openChangelogNative);
     openNativePanel({
         title:T('changelog'),
         renderContent(content){ renderChangelogNative(content); },
     });
 }
 // Сравнение версий "a.b.c" → -1/0/1.
-function _clCmpVer(a,b){
-    var pa=String(a).split('.').map(Number), pb=String(b).split('.').map(Number);
-    for(var i=0;i<Math.max(pa.length,pb.length);i++){ var x=pa[i]||0,y=pb[i]||0; if(x>y)return 1; if(x<y)return -1; }
-    return 0;
+function _clCmpVer(a,b){var pa=String(a).split('.').map(Number),pb=String(b).split('.').map(Number);for(var i=0;i<Math.max(pa.length,pb.length);i++){var x=pa[i]||0,y=pb[i]||0;if(x>y)return 1;if(x<y)return -1;}return 0;}
+function _clPlainMarkdown(s){
+    return String(s||'').replace(/\[([^\]]+)\]\([^\)]+\)/g,'$1').replace(/\*\*([^*]+)\*\*/g,'$1').replace(/__([^_]+)__/g,'$1').replace(/\*([^*]+)\*/g,'$1').replace(/_([^_]+)_/g,'$1').replace(/~~([^~]+)~~/g,'$1').replace(/`([^`]+)`/g,'$1');
 }
-// Строит карточку версии: заголовок с номером (текущая — цветом) + пункты.
-function _clVerBlock(v, isCur){
-    var card=document.createElement('div'); card.className='_cl_ver_'+(isCur?' _cur_':'');
-    var hdr=document.createElement('div'); hdr.className='_cl_ver_hdr_';
-    var num=document.createElement('span'); num.className='_cl_vnum_'; num.textContent=(/^\d/.test(v.version)?'v':'')+v.version;
-    hdr.appendChild(num);
-    if(isCur){ var b=document.createElement('span'); b.className='_cl_cur_badge_'; b.textContent=T('cl_current'); hdr.appendChild(b); }
-    card.appendChild(hdr);
-    var lines=String(v.notes||'').split(/\r?\n/).map(function(l){return l.trim();}).filter(Boolean);
-    if(!lines.length){ var em=document.createElement('div'); em.className='_cl_item_'; em.textContent=T('cl_nodesc'); card.appendChild(em); return card; }
-    lines.forEach(function(line){
-        if(/^[_\-—]{3,}$/.test(line)){ var d=document.createElement('div'); d.className='_cl_div_'; card.appendChild(d); return; }
-        var item=document.createElement('div'); item.className='_cl_item_';
-        var txt=line.replace(/^[-•*]\s*/,'');
-        var m=txt.match(/^([^:]{2,24}):\s*(.+)$/);
-        if(m){ var t=document.createElement('span'); t.className='_cl_tag_'; t.textContent=m[1]+':'; var sp=document.createTextNode(' '+m[2]); item.appendChild(t); item.appendChild(sp); }
-        else { item.textContent=txt; }
-        card.appendChild(item);
-    });
-    return card;
+function _clNativeRow(liEl,line){
+    var raw=String(line||'').trim().replace(/^[-•]\s*/,'');
+    var strong=raw.match(/^\*\*(.+?)\*\*\s*(.*)$/),title='',sub='';
+    if(strong){title=_clPlainMarkdown(strong[1]);sub=_clPlainMarkdown(strong[2]);}
+    else{var txt=_clPlainMarkdown(raw),m=txt.match(/^([^:]{2,24}):\s*(.+)$/);title=m?m[1]+':':txt;sub=m?m[2]:'';}
+    var r=_genNativeSettingRow(liEl,title,sub,'',null);if(r._value)r._value.remove();r.classList.add('is-static');
+    if(strong&&r._title)r._title.style.fontWeight='var(--font-weight-medium,500)';
+    var b=r.querySelector('.ListItem-button');if(b){b.removeAttribute('role');b.removeAttribute('tabindex');}return r;
+}
+function _clAppendVersion(content,v,isCur,cardCls,headerTpl,liEl){
+    var title=(/^\d/.test(v.version)?'v':'')+v.version+(isCur?' · '+T('cl_current'):'');
+    var card=_genCard(cardCls);
+    var lines=String(v.notes||'').split(/\r?\n/).map(x=>x.trim()).filter(x=>x&&!/^[_\-—]{3,}$/.test(x));if(!lines.length)lines=[T('cl_nodesc')];
+    lines.forEach(line=>card.appendChild(_clNativeRow(liEl,line)));_appendNativeSection(content,headerTpl,title,card);
 }
 async function renderChangelogNative(content){
-    if(!content)return;
-    content.innerHTML='<div class="_tpempty_">'+T('loading')+'</div>';
-    var data=null;
-    try{ data=await INV('fetch_changelog_structured'); }catch(e){ data={error:String(e)}; }
-    // Есть структура по версиям — рисуем блоками.
-    if(data && !data.error && data.versions && data.versions.length){
-        content.innerHTML='';
-        var cur=data.current;
-        var versions=data.versions.slice().sort(function(a,b){ return _clCmpVer(b.version,a.version); });
-        var ci=versions.findIndex(function(v){ return v.version===cur; });
-        if(ci>0){ versions.unshift(versions.splice(ci,1)[0]); }  // текущую — в самый верх
-        versions.forEach(function(v){ content.appendChild(_clVerBlock(v, v.version===cur)); });
-        return;
-    }
-    // Fallback (API недоступен — напр. из РФ): плоский changelog.txt.
+    if(!content)return;content.innerHTML='<div class="_tpempty_">'+T('loading')+'</div>';captureWidgetTpl();
+    var cardCls=_genCardCls(),headerTpl=_genHeaderTpl(),liEl=document.querySelector('#Settings .ListItem.narrow')||document.querySelector('#Settings .ListItem');
+    if(!cardCls||!liEl){setTimeout(()=>{if(content.isConnected)renderChangelogNative(content);},120);return;}
+    var data=null;try{data=await INV('fetch_changelog_structured');}catch(e){data={error:String(e)};}content.innerHTML='';
+    if(data&&!data.error&&data.versions&&data.versions.length){var cur=data.current,versions=data.versions.slice().sort((a,b)=>_clCmpVer(b.version,a.version));var ci=versions.findIndex(v=>v.version===cur);if(ci>0)versions.unshift(versions.splice(ci,1)[0]);versions.forEach(v=>_clAppendVersion(content,v,v.version===cur,cardCls,headerTpl,liEl));return;}
     try{
         var r=await INV('fetch_changelog');
-        content.innerHTML='';
-        if(r&&r.error){ content.innerHTML='<div class="_tpempty_">'+T('error')+': '+r.error+'</div>'; return; }
-        var pre=document.createElement('div'); pre.className='_cl_content_';
-        pre.textContent=(r&&r.text)||T('cl_empty');
-        content.appendChild(pre);
-    }catch(e){ content.innerHTML='<div class="_tpempty_">'+T('load_error')+'</div>'; }
+        if(r&&r.error){var err=document.createElement('div');err.className='_tpempty_';err.textContent=T('error')+': '+String(r.error);content.appendChild(err);return;}
+        var card=_genCard(cardCls);card.classList.add('_twd-panel-card_');String((r&&r.text)||T('cl_empty')).split(/\r?\n/).map(x=>x.trim()).filter(Boolean).forEach(line=>card.appendChild(_clNativeRow(liEl,line)));content.appendChild(card);
+    }catch(e){var err2=document.createElement('div');err2.className='_tpempty_';err2.textContent=T('load_error');content.appendChild(err2);}
 }
 
 // Рисует список загрузок в переданный контент-контейнер (нативная панель).
 // Эталон строки: <div class="ListItem multiline"><div class="ListItem-button">…</div></div>.
 async function renderDownloadsNative(content){
-    if(!content)return;
-    const merged=await collectDownloads();
-    content.innerHTML='';
-    if(!merged.length){
-        const empty=document.createElement('div');
-        empty.className='_tpempty_';
-        empty.textContent=T('dl_empty');
-        content.appendChild(empty);
-        return;
-    }
-    const card=document.createElement('div'); card.className='_ns_card_'; card.style.marginTop='10px';
-    merged.forEach(d=>card.appendChild(_nativeDlRow(d, ()=>renderDownloadsNative(content))));
-    content.appendChild(card);
+    if(!content)return;captureWidgetTpl();
+    const cardCls=_genCardCls(),liEl=document.querySelector('#Settings .ListItem.narrow')||document.querySelector('#Settings .ListItem');
+    if(!cardCls||!liEl){setTimeout(()=>{if(content.isConnected)renderDownloadsNative(content);},120);return;}
+    const merged=await collectDownloads();content.innerHTML='';
+    if(!merged.length){const empty=document.createElement('div');empty.className='_tpempty_';empty.textContent=T('dl_empty');content.appendChild(empty);return;}
+    const card=_genCard(cardCls);card.classList.add('_twd-panel-card_');merged.forEach(d=>card.appendChild(_nativeDlRow(d,()=>renderDownloadsNative(content),liEl)));content.appendChild(card);
 }
-
-// Строка-загрузка в стиле _ns_ (как настройки/дополнения). cb — перерисовка.
-function _nativeDlRow(d, cb){
-    const done=d.status==='completed';
-    const active=d.status==='downloading'||d.status==='pending';
-    const row=document.createElement('div'); row.className='_ns_row_';
-    const ext=_fileExt(d.filename);
-    const ico=document.createElement('div');
-    ico.style.cssText='display:flex;align-items:center;justify-content:center;font-size:10px;font-weight:700;color:#fff;border-radius:8px;width:34px;height:34px;flex-shrink:0;background:'+_extColor(ext)+';';
-    ico.textContent=(ext||'?').slice(0,4).toUpperCase();
-    row.appendChild(ico);
-    const m=document.createElement('div'); m.className='_ns_main_';
-    const title=document.createElement('div'); title.className='_ns_title_';
-    title.textContent=d.filename||'—';
-    title.style.cssText+='overflow:hidden;text-overflow:ellipsis;white-space:nowrap;';
-    const sub=document.createElement('div'); sub.className='_ns_sub_'; sub.style.color=sColor(d.status);
-    if(active){
-        const fmt=window.__tgdl&&window.__tgdl.fmtProgress||function(){return '';};
-        sub.textContent=d.status==='pending'?T('dl_waiting'):fmt(d.recv,d.total);
-    } else if(done){
-        const fb=window.__tgdl?window.__tgdl.fmtBytes:function(){return '';};
-        sub.textContent=T('dl_done')+(d.total?(' · '+fb(d.total)):'');
-    } else {
-        sub.textContent=sLabel(d.status);
-    }
-    m.appendChild(title); m.appendChild(sub); row.appendChild(m);
-    const right=document.createElement('div'); right.className='_tpright_';
-    if(done&&d.id!=null){
-        const fld=document.createElement('button'); fld.title=T('dl_show_folder');
-        fld.innerHTML='<svg viewBox="0 0 24 24" fill="none"><path d="M3 7a2 2 0 012-2h4l2 2h8a2 2 0 012 2v7a2 2 0 01-2 2H5a2 2 0 01-2-2V7z" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/></svg>';
-        fld.addEventListener('click',e=>{e.stopPropagation();INV('open_download_folder',{id:d.id}).then(r=>{if(r&&r.error)toast(T('dl_not_found'));}).catch(()=>{});});
-        right.appendChild(fld);
-    }
-    if(d.id!=null){
-        const del=document.createElement('button'); del.className='danger'; del.title=T('dl_delete');
-        del.innerHTML='<svg viewBox="0 0 24 24" fill="none"><path d="M3 6h18M8 6V4h8v2M19 6l-1 14H6L5 6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>';
-        del.addEventListener('click',e=>{
-            e.stopPropagation();
-            showModal({title:T('dl_del_t'),msg:'«'+(d.filename||'')+'»?',okText:T('del_upper'),okDanger:true,onOk:async()=>{await INV('delete_download',{id:d.id});cb();}});
-        });
-        right.appendChild(del);
-    }
-    row.appendChild(right);
-    if(done&&d.id!=null){
-        row.style.cursor='pointer';
-        row.addEventListener('click',()=>INV('open_download_file',{id:d.id}).then(r=>{if(r&&r.error){toast(T('dl_not_found'));cb();}}).catch(()=>{}));
-    }
+function _nativeDlRow(d,cb,liEl){
+    const done=d.status==='completed',active=d.status==='downloading'||d.status==='pending';
+    const fmt=window.__tgdl&&window.__tgdl.fmtProgress||function(){return '';},fb=window.__tgdl&&window.__tgdl.fmtBytes||function(){return '';};
+    let sub=active?(d.status==='pending'?T('dl_waiting'):fmt(d.recv,d.total)):(done?(T('dl_done')+(d.total?(' · '+fb(d.total)):'')):sLabel(d.status));
+    const row=_genNativeSettingRow(liEl,d.filename||'—',sub,'',null);if(row._value)row._value.remove();const btn=row.querySelector('.ListItem-button');btn.querySelectorAll('.Switcher,.Switch,.Toggle,.icon-next,.icon-arrow-right').forEach(x=>x.remove());
+    const ext=_fileExt(d.filename),ico=document.createElement('div');ico.className='ListItem-main-icon _twd-filetype_';ico.style.background=_extColor(ext);ico.textContent=(ext||'?').slice(0,4);btn.prepend(ico);
+    const actions=document.createElement('div');actions.className='_twd-row-actions_';
+    if(done&&d.id!=null){const fld=_genIconButton('folder',T('dl_show_folder'),'tiny',false);fld.addEventListener('click',e=>{e.stopPropagation();INV('open_download_folder',{id:d.id}).then(r=>{if(r&&r.error)toast(T('dl_not_found'));}).catch(()=>{});});actions.appendChild(fld);}
+    if(d.id!=null){const del=_genIconButton('delete',T('dl_delete'),'tiny',true);del.addEventListener('click',e=>{e.stopPropagation();showModal({title:T('dl_del_t'),msg:'«'+(d.filename||'')+'»?',okText:T('del_upper'),okDanger:true,onOk:async()=>{await INV('delete_download',{id:d.id});cb();}});});actions.appendChild(del);}
+    if(actions.childNodes.length)btn.appendChild(actions);
+    if(done&&d.id!=null){row.classList.remove('is-static');btn.setAttribute('role','button');btn.setAttribute('tabindex','0');btn.addEventListener('click',()=>INV('open_download_file',{id:d.id}).then(r=>{if(r&&r.error){toast(T('dl_not_found'));cb();}}).catch(()=>{}));}
+    else{row.classList.add('is-static');btn.removeAttribute('role');btn.removeAttribute('tabindex');}
     return row;
 }
+
 
 function sLabel(s){return{pending:T('dl_st_pending'),downloading:T('dl_st_downloading'),completed:T('dl_st_completed'),failed:T('dl_st_failed'),cancelled:T('dl_st_cancelled')}[s]||s;}
 function sColor(s){return{pending:'#aaa',downloading:'var(--color-primary,#5288c1)',completed:'#4caf50',failed:'#e53935',cancelled:'#aaa'}[s]||'#aaa';}
@@ -552,6 +438,6 @@ async function collectDownloads(){
     saved=saved||[];
     const merged=[];
     saved.slice().reverse().forEach(d=>{ if(!seenIds[d.id]) merged.push(Object.assign({},d,{live:false})); });
-    active.forEach(d=>{ const s=saved.find(x=>x.id===d.id); if(s) d.path=s.path; merged.unshift(d); });
+    active.forEach(d=>{ merged.unshift(d); });
     return merged;
 }

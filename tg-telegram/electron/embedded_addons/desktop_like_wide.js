@@ -1,5 +1,5 @@
 // @name Desktop-like - Wide Messages
-// @version 2.3.1
+// @version 2.3.3
 // @description Left-aligned messages + avatars, plus wide bubbles and footer panel.
 // @group desktop_like_chat
 
@@ -20,19 +20,18 @@
             }
             /* TG centers the shrunk list and slides it back with a transform; we anchor it left instead. */
             ._tg_right_open #MiddleColumn .MessageList { transform: none !important; }
-            /* Widen + left-align in ALL chats, set at load (not live) so virtualization counts it from the start; 7rem gutter clears scrollbar + down-arrow. */
+            /* Widen + center in all chats. MessageList itself handles the right-column width; this container keeps only the normal 1rem gutters. */
             html #MiddleColumn .MessageList .messages-container,
             body #MiddleColumn .MessageList .messages-container,
             #MiddleColumn .MessageList .messages-container {
-                max-width: calc(100% - 7rem) !important; width: calc(100% - 7rem) !important;
-                margin-left: 0 !important; margin-right: auto !important;
+                /* MessageList itself already shrinks by --tgdl-rc when the
+                   Telegram right column opens. Subtracting it again here
+                   collapsed Wide to ~330px. Keep only the normal 1rem gutters. */
+                max-width: calc(100% - 2rem) !important;
+                width: calc(100% - 2rem) !important;
+                margin-left: auto !important; margin-right: auto !important;
                 box-sizing: border-box !important;
-                align-self: flex-start !important;
-            }
-            html #MiddleColumn .MessageList,
-            body #MiddleColumn .MessageList {
-                justify-content: flex-start !important;
-                align-items: flex-start !important;
+                align-self: center !important;
             }
             /* Remove top fade that becomes visible under header when right panel opens, keep bottom */
             #MiddleColumn .MessageList {
@@ -67,6 +66,16 @@
             #MiddleColumn.tgdl-private .MessageList.no-avatars .Message { padding-left: 44px !important; position: relative !important; }
             #MiddleColumn.tgdl-private .MessageList.no-avatars .Message.own { justify-content: flex-start !important; }
             #MiddleColumn.tgdl-private .MessageList.no-avatars .Message.own .message-content-wrapper { margin-left: 0 !important; margin-right: auto !important; }
+            /* Telegram can expand the wrapper of adaptive video/media while the
+               media itself remains fixed-width. After flipping own messages left,
+               that leaves the media aligned to the wrapper's far edge and creates
+               an extra visible indent compared with normal text bubbles. */
+            #MiddleColumn.tgdl-private .MessageList.no-avatars .Message.own:not(.is-in-document-group):has(.message-content.media) .message-content-wrapper {
+                display: flex !important; justify-content: flex-start !important; align-items: flex-start !important;
+            }
+            #MiddleColumn.tgdl-private .MessageList.no-avatars .Message.own:not(.is-in-document-group):has(.message-content.media) .message-content {
+                margin-left: 0 !important; margin-right: auto !important;
+            }
             #MiddleColumn.tgdl-private .MessageList.no-avatars .Message.own > .Avatar { display: none !important; }
 
             /* Mirror own message's tail to the left; bottom corners match incoming style. */
@@ -106,6 +115,12 @@
             /* Groups (avatars shown): flip only OWN messages left with own avatar, like private; others stay native. */
             #MiddleColumn .MessageList:not(.no-avatars) .Message.own { padding-left: 44px !important; position: relative !important; justify-content: flex-start !important; }
             #MiddleColumn .MessageList:not(.no-avatars) .Message.own .message-content-wrapper { margin-left: 0 !important; margin-right: auto !important; }
+            #MiddleColumn .MessageList:not(.no-avatars) .Message.own:not(.is-in-document-group):has(.message-content.media) .message-content-wrapper {
+                display: flex !important; justify-content: flex-start !important; align-items: flex-start !important;
+            }
+            #MiddleColumn .MessageList:not(.no-avatars) .Message.own:not(.is-in-document-group):has(.message-content.media) .message-content {
+                margin-left: 0 !important; margin-right: auto !important;
+            }
             #MiddleColumn .MessageList:not(.no-avatars) .Message.own > .Avatar { display: none !important; }
             #MiddleColumn .MessageList:not(.no-avatars) .Message.own .svg-appendix { transform: scaleX(-1) !important; left: -8px !important; right: auto !important; }
             #MiddleColumn .MessageList:not(.no-avatars) .Message.own.last-in-group .message-content {
@@ -132,11 +147,11 @@
             /* Own messages (flipped left in private chats) get their forward button on the right. */
             #MiddleColumn.tgdl-private .MessageList.no-avatars .Message.own .message-action-buttons-container { left: auto !important; right: -3rem !important; }
 
-            /* Stacked audio/docs (document-group) break their content out to the message's
-               left edge, ignoring our 44px avatar gutter → the bubble overlapped the avatar.
-               Shift it back by the gutter so it lines up with the other own bubbles. */
-            #MiddleColumn.tgdl-private .MessageList.no-avatars .Message.own.is-in-document-group .message-content,
-            #MiddleColumn .MessageList:not(.no-avatars) .Message.own.is-in-document-group .message-content {
+            /* TG's grouped audio bubble is 45px wider than its wrapper and otherwise
+               breaks left across our avatar gutter. Grouped files/videos already match
+               the wrapper width, so shifting those creates the visible 45px empty gap. */
+            #MiddleColumn.tgdl-private .MessageList.no-avatars .Message.own.is-in-document-group .message-content.audio,
+            #MiddleColumn .MessageList:not(.no-avatars) .Message.own.is-in-document-group .message-content.audio {
                 transform: translateX(45px) !important;
             }
 
@@ -149,9 +164,9 @@
 
             /* New TG header island — stretch wide with equal side gaps; keep TG's rounding + top gap. */
             #MiddleColumn .MiddleHeader {
-                width: calc(100% - 7rem - var(--tgdl-rc, 0px)) !important;
-                max-width: calc(100% - 7rem - var(--tgdl-rc, 0px)) !important;
-                margin-left: 3.5rem !important; margin-right: auto !important;
+                width: calc(100% - 2rem - var(--tgdl-rc, 0px)) !important;
+                max-width: calc(100% - 2rem - var(--tgdl-rc, 0px)) !important;
+                margin-left: 1rem !important; margin-right: auto !important;
                 box-sizing:border-box !important;
             }
             ._tg_right_open #MiddleColumn .MiddleHeader { transform: none !important; }

@@ -27,6 +27,7 @@ const FETCH_ATTEMPTS    = 3;
 const DOWNLOAD_ATTEMPTS = 4;
 const RETRY_AFTER_FAIL  = 10 * 60 * 1000;
 const PROGRESS_INTERVAL = 150;
+const MAX_METADATA_BYTES = 5 * 1024 * 1024;
 
 let _getWindow = null;
 let _checkTimer = null;
@@ -126,7 +127,13 @@ function fetchTextOnce(targetUrl, headers, timeout) {
                 return fail(e);
             }
             let data = '';
-            res.on('data', chunk => { data += chunk.toString(); });
+            let bytes = 0;
+            res.on('data', chunk => {
+                if (settled) return;
+                bytes += chunk.length;
+                if (bytes > MAX_METADATA_BYTES) return fail(new Error('metadata response is too large'));
+                data += chunk.toString();
+            });
             res.on('end', () => done(data));
             res.on('error', fail);
             res.on('aborted', () => fail(new Error('response aborted')));
@@ -158,16 +165,19 @@ function fetchJSON(url, headers) {
 }
 
 function normVer(v) { return String(v == null ? '' : v).replace(/^v/i, '').trim(); }
+function isInstallerAssetName(name) {
+    return /^Telegram[ ._-]+Web[ ._-]+Desktop[ ._-]+Setup[ ._-]+.+\.exe$/i.test(String(name || ''));
+}
 
 // Primary path — GitHub Releases API. Returns {version,url,filename,notes} or
-// throws (if API is down / no .exe asset) so the caller falls back.
+// throws (if API is down / no expected installer asset) so the caller falls back.
 async function fetchLatestRelease() {
     const rel = await fetchJSON(RELEASES_API_URL, { 'Accept': 'application/vnd.github+json' });
     if (!rel || !rel.tag_name) throw new Error('release without tag_name');
     const version = normVer(rel.tag_name);
     const assets  = Array.isArray(rel.assets) ? rel.assets : [];
-    const exe = assets.find(a => /\.exe$/i.test(a.name || ''));
-    if (!version || !exe || !exe.browser_download_url) throw new Error('no .exe asset in release');
+    const exe = assets.find(a => isInstallerAssetName(a.name));
+    if (!version || !exe || !exe.browser_download_url) throw new Error('no Telegram Web Desktop installer asset in release');
     return {
         version, url: exe.browser_download_url, filename: exe.name,
         notes: rel.body || '', size: exe.size || 0,
@@ -199,9 +209,14 @@ async function fetchLatestReleaseWeb() {
     const best = entries.reduce((a, b) => (compareVersions(b.version, a.version) > 0 ? b : a));
 
     const html = await fetchText(assetsUrl(best.rawTag));
-    const exeM = html.match(/href="([^"]*releases\/download\/[^"]*\.exe)"/i);
-    if (!exeM) throw new Error('no .exe asset on release page');
-    const url = 'https://github.com' + exeM[1].replace(/&amp;/g, '&');
+    const links = Array.from(html.matchAll(/href="([^"]*releases\/download\/[^"]*\.exe)"/ig))
+        .map(m => m[1].replace(/&amp;/g, '&'));
+    const exePath = links.find(link => {
+        try { return isInstallerAssetName(decodeURIComponent(link.split('/').pop())); }
+        catch (_) { return false; }
+    });
+    if (!exePath) throw new Error('no Telegram Web Desktop installer asset on release page');
+    const url = 'https://github.com' + exePath;
     return { version: best.version, url, filename: decodeURIComponent(url.split('/').pop()), notes: best.notes };
 }
 
@@ -485,9 +500,21 @@ async function downloadUpdate(url, filename, onProgress, releaseDigest) {
 async function downloadPendingUpdate(onProgress) {
     let info = _pendingUpdate;
     const current = app.getVersion();
-    if (!info || compareVersions(info.version, current) <= 0 || !/^sha256:[0-9a-f]{64}$/i.test(String(info.digest || ''))) {
+    if (!info || compareVersions(info.version, current) <= 0) {
         const fresh = await fetchLatestRelease();
         if (!fresh || compareVersions(fresh.version, current) <= 0) throw new Error('No update is available');
+        info = fresh;
+        _pendingUpdate = fresh;
+    } else if (!/^sha256:[0-9a-f]{64}$/i.test(String(info.digest || ''))) {
+        // A fallback metadata source can announce an update, but installation still
+        // requires GitHub's trusted asset digest. Do not silently switch to a different
+        // version if the latest release changed between "check" and "download".
+        const expectedVersion = normVer(info.version);
+        const fresh = await fetchLatestRelease();
+        if (!fresh || normVer(fresh.version) !== expectedVersion) {
+            _pendingUpdate = fresh || null;
+            throw new Error('The available update changed; check for updates again');
+        }
         info = fresh;
         _pendingUpdate = fresh;
     }

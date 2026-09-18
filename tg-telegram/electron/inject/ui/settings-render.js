@@ -1,24 +1,11 @@
 
-let _saveTimer=null;
-function scheduleSave(){
-    clearTimeout(_saveTimer);
-    _saveTimer=setTimeout(async()=>{
-        const sp=document.getElementById('_sp_'); if(!sp) return;
-        const chk=id=>{const e=document.getElementById(id);return !!(e&&e.checked);};
-        const settings={
-            save_path:sp.value||null,
-            minimize_to_tray:chk('_tr_'),
-            devtools_enabled:chk('_dv_'),
-        };
-        try{await INV('save_settings',{settings});toast(T('st_saved'),'icon-check');}catch(e){toast(T('st_save_err'),'icon-close');}
-    },600);
-}
-
 async function renderSt(target){
     const c=target||document.getElementById('_tgpc_');if(!c)return;
     c.innerHTML='<div class="_empty_">'+T('loading')+'</div>';
     let s={};
-    try{s=await INV('get_settings');}catch(e){c.innerHTML='<div class="_empty_">'+T('error')+': '+e+'</div>';return;}
+    try{s=await INV('get_settings');}catch(e){
+        c.innerHTML='';const err=document.createElement('div');err.className='_empty_';err.textContent=T('error')+': '+String(e);c.appendChild(err);return;
+    }
     c.innerHTML='';
     buildSettingsSections(c, s);
 }
@@ -26,94 +13,126 @@ async function renderSt(target){
 // Строит секции настроек приложения в переданный контейнер. Используется и
 // кастомной панелью (renderSt), и инжектом в нативные «Общие настройки» (#3).
 function buildSettingsSections(c, s){
-    const ce=cls=>{const d=document.createElement('div');if(cls)d.className=cls;return d;};
-    const lbl=t=>{const d=ce('_ns_lbl_');d.textContent=t;c.appendChild(d);};
-    const card=()=>{const d=ce('_ns_card_');c.appendChild(d);return d;};
-    const row=cd=>{const d=ce('_ns_row_');cd.appendChild(d);return d;};
-    const ico=name=>{const i=document.createElement('i');i.className='icon icon-'+name+' _ns_ico_';i.setAttribute('aria-hidden','true');return i;};
-    const main=(title,sub)=>{const m=ce('_ns_main_');const t=ce('_ns_title_');t.textContent=title;m.appendChild(t);if(sub){const x=ce('_ns_sub_');x.textContent=sub;m.appendChild(x);}return m;};
-    const swt=(id,checked)=>{const l=document.createElement('label');l.className='_ns_swt_';l.innerHTML='<input type="checkbox" id="'+id+'"'+(checked?' checked':'')+'><i></i>';return l;};
-    const numInp=(id,val,min)=>{const i=document.createElement('input');i.className='_ns_inp_ _num_';i.id=id;i.type='number';i.value=val;if(min)i.min=min;return i;};
-    const toggleRow=(cd,title,sub,id,checked)=>{const r=row(cd);r.appendChild(main(title,sub));r.appendChild(swt(id,checked));return r;};
+    captureWidgetTpl();
+    const cardCls=_genCardCls(), headerTpl=_genHeaderTpl();
+    const liEl=document.querySelector('#Settings .ListItem.narrow')||document.querySelector('#Settings .ListItem');
+    if(!cardCls||!liEl){
+        c.innerHTML='<div class="_tpempty_">'+T('loading')+'</div>';
+        setTimeout(()=>{if(c.isConnected)buildSettingsSections(c,s);},120);
+        return;
+    }
+    c.innerHTML='';
+    const card=()=>_genCard(cardCls);
+    const addSection=(title,cd)=>_appendNativeSection(c,headerTpl,title,cd);
+    const nativeRow=(title,sub,value,onClick)=>{
+        const r=_genNativeSettingRow(liEl,title,sub,value,onClick);
+        const b=r.querySelector('.ListItem-button');
+        if(b)b.querySelectorAll('.Switcher,.Switch,.Toggle,.icon-next,.icon-arrow-right').forEach(x=>x.remove());
+        return r;
+    };
+        const switchRow=(title,sub,checked,onChange)=>{
+        const r=nativeRow(title,sub,'',null),b=r.querySelector('.ListItem-button');
+        if(r._value)r._value.remove();if(b)b.appendChild(_genSwitcher(checked,onChange,title));return r;
+    };
+    const actionRow=(title,sub,onClick,danger)=>{
+        const r=nativeRow(title,sub,'',onClick),b=r.querySelector('.ListItem-button');
+        if(r._value)r._value.remove();
+        if(danger&&b){r.classList.add('destructive');b.style.color='var(--color-error,#e53935)';}
+        return r;
+    };
 
-    // ── Загрузки ──
-    lbl(T('sec_downloads'));
-    const c1=card();
-    const r1=row(c1); r1.appendChild(ico('folder')); r1.appendChild(main(T('st_folder')));
-    const r1b=row(c1);
-    const sp=document.createElement('input'); sp.className='_ns_inp_'; sp.id='_sp_'; sp.type='text'; sp.value=s.save_path||''; sp.style.flex='1';
-    const pick=document.createElement('button'); pick.className='_ns_btn_ sec'; pick.id='_pp_'; pick.textContent=T('choose');
-    r1b.appendChild(sp); r1b.appendChild(pick);
+    const c1=card();c1.style.position='relative';
+    const folder=_genInput(T('st_folder'),s.save_path||'',false,()=>{});
+    folder.node.style.width='100%';folder.node.style.marginBottom='0';folder.node.classList.toggle('touched',!!folder.input.value);
+    folder.input.readOnly=true;folder.input.style.paddingRight='3.25rem';folder.input.style.cursor='default';
+    c1.appendChild(folder.node);
+    const pick=_genIconButton('folder',T('choose'),'small',false);
+    pick.style.cssText='position:absolute;right:1.25rem;top:50%;transform:translateY(-50%);z-index:2;';
+    pick.addEventListener('click',async()=>{const p=await INV('open_folder_dialog');if(p){folder.input.value=p;folder.node.classList.add('touched');_saveOne({save_path:p});}});
+    c1.appendChild(pick);addSection(T('sec_downloads'),c1);
 
-    // ── Окно ──
-    lbl(T('sec_window'));
+    const c2=card();
+    c2.appendChild(switchRow(T('st_tray'),T('st_tray_sub'),!!s.minimize_to_tray,v=>_saveOne({minimize_to_tray:v})));
+    c2.appendChild(switchRow(T('st_devtools'),'Ctrl+Shift+I / F12',!!s.devtools_enabled,v=>_setDevtoolsEnabled(v)));
+    addSection(T('sec_window'),c2);
+
     const c3=card();
-    toggleRow(c3,T('st_tray'),null,'_tr_',s.minimize_to_tray);
-    toggleRow(c3,T('st_devtools'),'Ctrl+Shift+I / F12','_dv_',s.devtools_enabled);
+    c3.appendChild(nativeRow(T('st_tg_links'),T('st_tg_links_sub'),T('st_open_defaults'),()=>INV('open_default_apps').catch(()=>{})));
+    addSection(T('sec_integration'),c3);
 
-    // ── Обновления ──
-    lbl(T('sec_updates'));
+    const ivKeys=['30m','1h','12h','24h','3d','7d','30d','never'];
+    const ivLbl={'30m':'iv_30m','1h':'iv_1h','12h':'iv_12h','24h':'iv_24h','3d':'iv_3d','7d':'iv_7d','30d':'iv_30d','never':'iv_never'};
+    let ivCur=s.update_check_interval||'1h';
     const c4=card();
-    const r4=row(c4); r4.appendChild(main(T('st_auto_check')));
-    const sel=document.createElement('select'); sel.className='_ns_sel_';
-    [['30m','iv_30m'],['1h','iv_1h'],['12h','iv_12h'],['24h','iv_24h'],['3d','iv_3d'],['7d','iv_7d'],['30d','iv_30d'],['never','iv_never']]
-        .forEach(([v,k])=>{const o=document.createElement('option');o.value=v;o.textContent=T(k);if((s.update_check_interval||'1h')===v)o.selected=true;sel.appendChild(o);});
-    sel.addEventListener('change',async()=>{const ns=await INV('get_settings');await INV('save_settings',{settings:Object.assign({},ns,{update_check_interval:sel.value})});toast(T('st_saved_short'),'icon-check');});
-    r4.appendChild(sel);
-    const r4b=row(c4);
-    const chkBtn=document.createElement('button'); chkBtn.className='_ns_btn_'; chkBtn.style.margin='0 auto 0 0'; chkBtn.innerHTML='<i class="icon icon-reload"></i> '+T('st_check_now');
-    chkBtn.addEventListener('click',async()=>{
-        chkBtn.disabled=true; const o=chkBtn.innerHTML; chkBtn.textContent=T('st_checking');
-        try{const r=await INV('check_update_manual');if(!r||r.upToDate)toast(T('st_uptodate'),'icon-check');else if(r.error)toast(T('error')+': '+r.error,'icon-close');}
-        catch(e){toast(T('st_check_err'),'icon-close');}
-        finally{chkBtn.disabled=false;chkBtn.innerHTML=o;}
+    const ivRow=nativeRow(T('st_auto_check'),' ',T(ivLbl[ivCur]||'iv_1h'),()=>{
+        pickModal({title:T('st_auto_check'),current:ivCur,options:ivKeys.map(k=>({value:k,label:T(ivLbl[k])})),onSave:v=>{ivCur=v;ivRow._value.textContent=T(ivLbl[v]);_saveOne({update_check_interval:v});}});
     });
-    r4b.appendChild(chkBtn);
+    c4.appendChild(ivRow);
+    const checkWrap=document.createElement('div');checkWrap.style.padding='.5rem 1rem 1rem';
+    const chkBtn=_genButton(T('st_check_now'),'reload','primary');
+    chkBtn.addEventListener('click',async()=>{
+        if(chkBtn.disabled)return;chkBtn.disabled=true;const old=chkBtn.innerHTML;chkBtn.textContent=T('st_checking');
+        try{const r=await INV('check_update_manual');if(!r||r.upToDate)toast(T('st_uptodate'),'icon-check');else if(r.error)toast(T('error')+': '+r.error,'icon-close');}
+        catch(e){toast(T('st_check_err'),'icon-close');}finally{chkBtn.disabled=false;chkBtn.innerHTML=old;}
+    });
+    checkWrap.appendChild(chkBtn);c4.appendChild(checkWrap);addSection(T('sec_updates'),c4);
 
-    // ── Данные ──
-    lbl(T('sec_data'));
     const c5=card();
-    const r5=row(c5); r5.style.cursor='pointer'; r5.appendChild(ico('delete'));
-    r5.appendChild(main(T('st_clear_cache'),T('st_clear_cache_sub')));
-    r5.querySelector('._ns_ico_').style.color='#ff5c5c';
-    r5.querySelector('._ns_title_').style.color='#ff5c5c';
-    r5.addEventListener('click',()=>INV('clear_cache'));
-
-    // ── О приложении ──
-    lbl(T('sec_about'));
+    const clearRow=actionRow(T('st_clear_cache'),T('st_clear_cache_sub'),()=>INV('clear_cache').catch(()=>{}),true);
+    const clearBtn=clearRow.querySelector('.ListItem-button');
+    if(clearBtn){const ic=document.createElement('i');ic.className='icon icon-delete ListItem-main-icon';ic.style.color='inherit';ic.setAttribute('aria-hidden','true');clearBtn.prepend(ic);}
+    c5.appendChild(clearRow);addSection(T('sec_data'),c5);
     const c6=card();
-    const addInfo=(label,val)=>{const r=row(c6);r.appendChild(main(label));const v=ce('_ns_val_');v.textContent=val;v.style.userSelect='text';v.style.cursor='text';r.appendChild(v);return v;};
-    const vVer=addInfo(T('st_version'),'—'); const vId=addInfo(T('st_your_id'),'—'); const vUn=addInfo(T('st_username'),'—');
+    const addInfo=(label,val)=>{const r=nativeRow(label,'',val,null);c6.appendChild(r);return r._value;};
+    const vVer=addInfo(T('st_version'),'—'),vId=addInfo(T('st_your_id'),'—'),vUn=addInfo(T('st_username'),'—');
+    _wireUiLabUnlock(vUn.closest('.ListItem'));
+    addSection(T('sec_about'),c6);
     (async()=>{
-        try{const info=await INV('get_app_info');vVer.textContent=info.version||'—';}catch(e){}
+        try{const info=await INV('get_app_info');vVer.textContent=(info&&info.version)||'—';}catch(e){}
         try{
             const pa=document.querySelector('#Settings .ProfileInfo .Avatar[data-peer-id]')||document.querySelector('#Settings .Avatar[data-peer-id]');
             if(pa)vId.textContent=pa.getAttribute('data-peer-id')||'—';
-            const mn=document.querySelector('#Settings .icon-mention');
-            const li=mn&&mn.closest('.ListItem');
-            const t=li&&li.querySelector('.title');
+            const mn=document.querySelector('#Settings .icon-mention'),li=mn&&mn.closest('.ListItem'),t=li&&li.querySelector('.title');
             if(t)vUn.textContent=t.textContent.trim();
         }catch(e){}
     })();
-
-    // wire up
-    const pp=document.getElementById('_pp_'); const sp_i=document.getElementById('_sp_');
-    if(pp)pp.addEventListener('click',async()=>{const p=await INV('open_folder_dialog');if(p&&sp_i){sp_i.value=p;scheduleSave();}});
-    c.querySelectorAll('input[type=checkbox],input[type=number],input[type=text]').forEach(el=>{
-        el.addEventListener('change',scheduleSave);
-        if(el.type==='number'||el.type==='text')el.addEventListener('input',scheduleSave);
-    });
-    const dvEl=document.getElementById('_dv_');
-    if(dvEl)dvEl.addEventListener('change',async()=>{try{await INV('toggle_devtools',{open:dvEl.checked});}catch(e){}});
 }
 
 // ── #3: общие нативные строители виджетов (клонируем живые виджеты TG) ───────
-function _saveOne(patch){ INV('get_settings').then(function(s){ INV('save_settings',{settings:Object.assign({},s||{},patch)}); }).catch(function(){}); }
+function _saveOne(patch){
+    return INV('get_settings').then(function(s){
+        return INV('save_settings',{settings:Object.assign({},s||{},patch)});
+    });
+}
+function _setDevtoolsEnabled(v){
+    _saveOne({devtools_enabled:!!v})
+        .then(function(){ return INV('toggle_devtools',{open:!!v}); })
+        .catch(function(){});
+}
+function _wireUiLabUnlock(row){
+    if(!row||row.__twdUiLabUnlock)return;
+    row.__twdUiLabUnlock=true;
+    var btn=row.querySelector('.ListItem-button')||row;
+    var count=0;
+    btn.addEventListener('click',function(){
+        count++;
+        if(count>=7&&count<10) toast(T('ui_lab_unlock_left')+(10-count),'icon-info-filled');
+        if(count>=10){
+            count=0;
+            try{ openUiLabNative(); }catch(e){}
+        }
+    });
+}
 // Заголовок секции — предыдущий сосед карточки, если он сам не карточка.
 function _cardHeader(card){
     var h=card.previousElementSibling;
     if(!h||h.hasAttribute('data-tggen')||h.hasAttribute('data-tgabout')) return null;
     if(h.querySelector&&h.querySelector('.ListItem')) return null;
+    // Native category headers are simple text-only 14/20px labels with 16px side
+    // padding. Reject profile headers, descriptions and other structural siblings.
+    if(h.children&&h.children.length)return null;
+    var cs=getComputedStyle(h);
+    if(parseFloat(cs.fontSize)!==14||parseFloat(cs.lineHeight)!==20||parseFloat(cs.paddingLeft)<15)return null;
     return h;
 }
 // Ищет ЖИВОЙ шаблон секции по СТИЛЮ (фон+радиус, держит .ListItem), а не по
@@ -121,16 +140,20 @@ function _cardHeader(card){
 // элемент с фоном — самый внутренний держатель карточек (обёртки прозрачны).
 function _findNativeCardTpl(){
     var st=document.getElementById('Settings'); if(!st) return null;
-    var els=st.querySelectorAll('div[class]');
+    var els=st.querySelectorAll('div[class]'), fallback=null;
     for(var i=0;i<els.length;i++){
         var e=els[i];
-        if(e.hasAttribute('data-tggen')||e.hasAttribute('data-tgabout')) continue;
+        if(e.hasAttribute('data-tggen')||e.hasAttribute('data-tgabout')||e.closest('._tgpanel_')) continue;
         if(!e.querySelector('.ListItem')) continue;
         var cs=getComputedStyle(e);
         if(cs.backgroundColor==='rgba(0, 0, 0, 0)'||parseFloat(cs.borderTopLeftRadius)<=0) continue;
-        return { cardCls:e.className, header:_cardHeader(e) };
+        var found={cardCls:e.className,header:_cardHeader(e)};
+        if(!fallback)fallback=found;
+        // Prefer a card that has Telegram's real category header before it. The main
+        // settings page has cards without headers, while native sub-pages do have them.
+        if(found.header)return found;
     }
-    return null;
+    return fallback;
 }
 function _genCardCls(){ var t=_findNativeCardTpl(); return (t&&t.cardCls)||_tgWidgetTpl.cardCls||null; }
 function _genHeaderTpl(){ var t=_findNativeCardTpl(); return (t&&t.header)||_tgWidgetTpl.header; }
@@ -141,6 +164,18 @@ function _genHeader(headerTpl,text){
     var h=headerTpl?headerTpl.cloneNode(false):document.createElement('div');
     if(!headerTpl) h.style.cssText='font-size:14px;font-weight:500;line-height:20px;color:rgb(170,170,170);padding:0 16px;';
     h.textContent=text; return h;
+}
+function _appendNativeSection(host,headerTpl,title,card){
+    var h=_genHeader(headerTpl,title);
+    // Exact measured Telegram rhythm. Hidden sentinels/locks do not count as content:
+    // the first visible category is 0px from the top, all following ones are 16px.
+    var hasVisibleBefore=Array.prototype.some.call(host.children,function(n){
+        return !n.hidden && (!n.style || n.style.display!=='none');
+    });
+    h.style.marginTop=hasVisibleBefore?'16px':'0px';
+    card.style.marginTop='8px';
+    host.append(h,card);
+    return {header:h,card:card};
 }
 function _genToggle(labelText, checked, onChange, subText){
     var base=_tgWidgetTpl.toggle||document.querySelector('#Settings label.Checkbox');
@@ -222,37 +257,98 @@ function _genNativeActionRow(liEl){
     if(!btn){btn=document.createElement('div');btn.className='ListItem-button';r.appendChild(btn);}
     btn.innerHTML=''; r._content=btn; return r;
 }
-// Native value row (like “Language — Russian”): single line with colored icon.
-function _genRow(liEl, icon, title, value, onClick, danger){
-    var r=liEl.cloneNode(true); r.removeAttribute('id'); r.removeAttribute('style'); r.className='ListItem narrow';
-    var btn=r.querySelector('.ListItem-button'); if(!btn){ btn=document.createElement('div'); btn.className='ListItem-button'; r.appendChild(btn); }
-    btn.innerHTML=''; btn.setAttribute('role','button'); btn.setAttribute('tabindex','0');
-    btn.style.display='flex'; btn.style.alignItems='center'; btn.style.gap='12px';
-    if(icon){
-        var wrap=document.createElement('div');
-        wrap.className='ListItem-main-icon';
-        wrap.style.width='32px'; wrap.style.height='32px'; wrap.style.borderRadius='8px';
-        wrap.style.display='flex'; wrap.style.alignItems='center'; wrap.style.justifyContent='center';
-        wrap.style.flexShrink='0';
-        var bg={info:'#5288c1', 'info-filled':'#5288c1', user:'#f5a623', 'user-filled':'#f5a623', mention:'#8774e1', 'mention-filled':'#8774e1', reload:'#4caf50', 'reload-filled':'#4caf50', delete:'#ff5c5c'}[icon] || '#5288c1';
-        if(danger) bg='#ff5c5c';
-        wrap.style.background=bg;
-        var ic=document.createElement('i');
-        ic.className='icon icon-'+icon;
-        ic.style.fontSize='18px'; ic.style.color='#fff';
-        ic.setAttribute('aria-hidden','true');
-        wrap.appendChild(ic);
-        btn.appendChild(wrap);
-    }
-    var titleEl=document.createElement('span'); titleEl.textContent=title; titleEl.style.flex='1'; titleEl.style.fontSize='15px';
-    btn.appendChild(titleEl);
-    var v=document.createElement('span'); v.className='settings-item__current-value'; v.textContent=value==null?'':value; v.style.marginLeft='auto';
-    btn.appendChild(v);
-    if(danger) btn.style.color='#ff5c5c';
-    if(onClick){ btn.addEventListener('click',function(e){ e.stopPropagation(); onClick(v); }); }
-    r._v=v;
-    return r;
+function _genSwitcher(checked,onChange,label){
+    var sw=document.createElement('label'); sw.className='Switcher'; sw.title=label||'';
+    var inp=document.createElement('input'); inp.type='checkbox'; inp.checked=!!checked;
+    var widget=document.createElement('span'); widget.className='widget'; sw.append(inp,widget);
+    inp.addEventListener('change',function(){if(onChange)onChange(inp.checked);}); return sw;
 }
+function _genButton(text,icon,variant,size){
+    variant=variant||'primary';
+    var sel='.Button.'+variant, live=document.querySelector('#Settings '+sel)||document.querySelector(sel);
+    var b=live?live.cloneNode(true):document.createElement('button');
+    b.type='button';b.removeAttribute('id');b.removeAttribute('disabled');
+    b.className='Button '+variant+(size?' '+size:'')+(live&&live.classList.contains('has-ripple')?' has-ripple':'');
+    var ripple=b.querySelector('.ripple-container');
+    Array.from(b.childNodes).forEach(function(n){if(n!==ripple)n.remove();});
+    if(icon){
+        var wrap=document.createElement('span');wrap.className='with-icon-start';
+        var i=document.createElement('i');i.className='icon icon-'+icon;i.setAttribute('aria-hidden','true');
+        var t=document.createElement('span');t.textContent=text||'';wrap.append(i,t);b.insertBefore(wrap,ripple||null);
+    }else b.insertBefore(document.createTextNode(text||''),ripple||null);
+    return b;
+}
+function _genIconButton(icon,title,size,danger){
+    var sel=size==='tiny'?'.Button.tiny.round':'.Button.smaller.translucent.round';
+    var live=document.querySelector('#Settings '+sel)||document.querySelector(sel);
+    var b=live?live.cloneNode(true):document.createElement('button');
+    b.type='button';b.removeAttribute('id');b.removeAttribute('disabled');
+    b.className='Button '+(size==='tiny'?'tiny':'smaller')+' translucent round'+(live&&live.classList.contains('has-ripple')?' has-ripple':'');
+    b.title=title||'';if(title)b.setAttribute('aria-label',title);else b.removeAttribute('aria-label');
+    var i=b.querySelector('i.icon');
+    if(!i){i=document.createElement('i');i.className='icon';var rp=b.querySelector('.ripple-container');b.insertBefore(i,rp||b.firstChild);}
+    Array.from(i.classList).filter(function(c){return /^icon-/.test(c);}).forEach(function(c){i.classList.remove(c);});
+    i.classList.add('icon-'+icon);i.setAttribute('aria-hidden','true');i.removeAttribute('style');
+    if(danger)i.style.color='var(--color-error,#e53935)';
+    return b;
+}
+function _nativeDecoratedTemplate(tone,multiline){
+    var st=document.getElementById('Settings');if(!st)return null;
+    var single={red:'support-filled',blue:'help-filled',green:'privacy-policy-filled',orange:'gift-filled',purple:'premium-filled',gray:'lock-filled'};
+    var multi={red:'notifications-filled',blue:'account-filled',green:'piechart-filled',orange:'settings-filled',purple:'animations-filled',gray:'lock-filled'};
+    var name=(multiline?multi:single)[tone]||(multiline?'account-filled':'help-filled');
+    var hit=st.querySelector('.ListItem.narrow .icon-'+name),row=hit&&hit.closest('.ListItem.narrow');
+    if(row&&!row.closest('[data-tgabout],[data-tggen],._tgpanel_')&&!/^_tg/.test(row.id||''))return row;
+    return Array.from(st.querySelectorAll('.ListItem.narrow')).find(function(r){
+        if(r.closest('[data-tgabout],[data-tggen],._tgpanel_')||/^_tg/.test(r.id||''))return false;
+        var w=r.querySelector('.ListItem-main-icon'),i=w&&w.querySelector('i.icon');if(!w||!i)return false;
+        return multiline?!!r.querySelector('.multiline-item'):!r.querySelector('.multiline-item');
+    })||null;
+}
+function _filledIconName(icon){var map={info:'info-filled',user:'account-filled',mention:'mention-filled',delete:'delete-filled',folder:'folder-filled'};return map[icon]||icon;}
+// Filled Material Icons (round, Apache-2.0) used only where Telegram has no semantic glyph.
+// extension = add-ons; device_hub = proxy/network route. The native colored tile is still cloned from Telegram.
+var _TWD_FILLED_GLYPHS={
+    'twd-addons':'M20.5 11H19V7c0-1.1-.9-2-2-2h-4V3.5a2.5 2.5 0 0 0-5 0V5H4c-1.1 0-1.99.9-1.99 2v3.8H3.5c1.49 0 2.7 1.21 2.7 2.7s-1.21 2.7-2.7 2.7H2V20c0 1.1.9 2 2 2h3.8v-1.5c0-1.49 1.21-2.7 2.7-2.7s2.7 1.21 2.7 2.7V22H17c1.1 0 2-.9 2-2v-4h1.5a2.5 2.5 0 0 0 0-5z',
+    'twd-proxy':'M17 16l-4-4V8.82c1.35-.49 2.26-1.89 1.93-3.46a3.013 3.013 0 0 0-2.42-2.32A3.001 3.001 0 0 0 9 6c0 1.3.84 2.4 2 2.82V12l-4 4H4c-.55 0-1 .45-1 1v3c0 .55.45 1 1 1h3c.55 0 1-.45 1-1v-2.05l4-4.2 4 4.2V20c0 .55.45 1 1 1h3c.55 0 1-.45 1-1v-3c0-.55-.45-1-1-1h-3z',
+    'twd-link':'M3.9 12c0-1.71 1.39-3.1 3.1-3.1h4V7H7a5 5 0 0 0 0 10h4v-1.9H7c-1.71 0-3.1-1.39-3.1-3.1zM8 13h8v-2H8v2zm9-6h-4v1.9h4c1.71 0 3.1 1.39 3.1 3.1s-1.39 3.1-3.1 3.1h-4V17h4a5 5 0 0 0 0-10z',
+    'twd-update':'M12.35 15.65l2.79-2.79a.5.5 0 0 0-.35-.85H13V4c0-.55-.45-1-1-1s-1 .45-1 1v8H9.21c-.45 0-.67.54-.35.85l2.79 2.79c.19.2.51.2.7.01zM21 3h-5.01c-.54 0-.99.45-.99.99c0 .55.45.99.99.99H20c.55 0 1 .45 1 1v12.03c0 .55-.45 1-1 1H4c-.55 0-1-.45-1-1V5.99c0-.55.45-1 1-1h4.01c.54 0 .99-.45.99-.99a1 1 0 0 0-.99-1H3c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h18c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2z'
+};
+function _setDecoratedGlyph(wrap,icon){
+    if(!wrap)return;
+    var old=wrap.querySelector('i.icon,svg._twd-filled-glyph_');
+    var path=_TWD_FILLED_GLYPHS[icon];
+    if(path){
+        if(old)old.remove();
+        var svg=document.createElementNS('http://www.w3.org/2000/svg','svg');svg.setAttribute('viewBox','0 0 24 24');svg.setAttribute('aria-hidden','true');svg.classList.add('_twd-filled-glyph_');
+        var p=document.createElementNS('http://www.w3.org/2000/svg','path');p.setAttribute('d',path);svg.appendChild(p);wrap.appendChild(svg);return;
+    }
+    // Keep Telegram's extra hashed glyph class (currently v0eXS-8f): it supplies
+    // the white filled-glyph styling inside colored settings tiles.
+    var i=old&&old.tagName==='I'?old:document.createElement('i');
+    Array.from(i.classList).filter(function(c){return /^icon-/.test(c);}).forEach(function(c){i.classList.remove(c);});
+    i.classList.add('icon','icon-'+_filledIconName(icon));i.removeAttribute('style');i.setAttribute('aria-hidden','true');
+    if(!i.parentNode)wrap.appendChild(i);
+}
+function _toneForIcon(icon,danger){if(danger||/delete|close/.test(icon))return'red';if(/reload|folder|download|check|update/.test(icon))return'green';if(/mention|addons/.test(icon))return'purple';if(/user|account/.test(icon))return'orange';return'blue';}
+function _genDecoratedRow(icon,title,value,onClick,tone,sub,danger){
+    icon=_filledIconName(String(icon||'info').replace(/^icon-/,''));tone=tone||_toneForIcon(icon,danger);
+    var tpl=_nativeDecoratedTemplate(tone,!!sub);
+    if(!tpl){var li=document.querySelector('#Settings .ListItem.narrow')||document.querySelector('#Settings .ListItem');var plain=_genNativeSettingRow(li,title,sub||'',value||'',onClick);plain._v=plain._value;return plain;}
+    var r=tpl.cloneNode(true);r.removeAttribute('id');r.removeAttribute('style');var btn=r.querySelector('.ListItem-button');
+    var wrap=btn&&btn.querySelector('.ListItem-main-icon'),ripple=btn&&btn.querySelector('.ripple-container');
+    _setDecoratedGlyph(wrap,icon);
+    var multiTpl=btn&&btn.querySelector('.multiline-item');multiTpl=multiTpl&&multiTpl.cloneNode(false);
+    while(btn.firstChild)btn.removeChild(btn.firstChild);if(wrap)btn.appendChild(wrap);
+    var titleEl=null,subEl=null;
+    if(sub){var multi=multiTpl||document.createElement('div');multi.classList.add('multiline-item');titleEl=document.createElement('span');titleEl.className='title';titleEl.textContent=title||'';multi.appendChild(titleEl);subEl=document.createElement('span');subEl.className='subtitle';subEl.textContent=sub;multi.appendChild(subEl);btn.appendChild(multi);}
+    else{titleEl=document.createTextNode(title||'');btn.appendChild(titleEl);}
+    var v=document.createElement('span');v.className='settings-item__current-value';v.textContent=value==null?'':value;btn.appendChild(v);
+    r.classList.toggle('is-static',!onClick);if(danger)r.classList.add('destructive');
+    if(onClick){if(ripple)btn.appendChild(ripple);btn.setAttribute('role','button');btn.setAttribute('tabindex','0');btn.addEventListener('click',function(e){e.stopPropagation();onClick(v);});}else{btn.removeAttribute('role');btn.removeAttribute('tabindex');}
+    r._v=v;r._value=v;r._title=titleEl;r._subtitle=subEl;return r;
+}
+function _genRow(liEl,icon,title,value,onClick,danger){return _genDecoratedRow(icon,title,value,onClick,_toneForIcon(icon,danger),'',danger);}
 
 // ── #3a: секции настроек приложения В КОНЦЕ нативных «Общие настройки» ───────
 // Заголовки (vcGtwOtR) и карточки (RE8jeQLf) добавляем ПРЯМЫМИ детьми
@@ -270,9 +366,9 @@ function injectGeneralSettings(){
 
     var marker=document.createElement('div'); marker.setAttribute('data-tggen','1'); marker.style.display='none';
     sc.appendChild(marker);                                      // синхронный «замок» от двойного инжекта
-    // Отступы задаём явно (16px над заголовком, 8px над карточкой) — нативные
-    // CSS-правила «header+card» на наших узлах не срабатывают, ритм был бы рваный.
-    function addSection(title, cardEl){ var h=_genHeader(headerTpl,title); h.setAttribute('data-tggen','1'); h.style.marginTop='16px'; cardEl.setAttribute('data-tggen','1'); cardEl.style.marginTop='8px'; sc.appendChild(h); sc.appendChild(cardEl); }
+    // Секции используют нативный Telegram header/card rhythm. Для первой категории
+    // верхнего отступа нет; последующие получают его от родных CSS-правил.
+    function addSection(title, cardEl){ var pair=_appendNativeSection(sc,headerTpl,title,cardEl),h=pair.header; h.setAttribute('data-tggen','1'); cardEl.setAttribute('data-tggen','1'); }
 
     INV('get_settings').then(function(s){
         s=s||{};
@@ -283,25 +379,31 @@ function injectGeneralSettings(){
         folder.node.style.width='100%'; folder.node.style.marginBottom='0';   // убрать «подбородок» + центрировать
         if(folder.input) folder.input.style.paddingRight='46px';
         c1.appendChild(folder.node);
-        var pbtn=document.createElement('div'); pbtn.className='_tgfolderbtn_';
-        pbtn.style.cssText='position:absolute;right:26px;top:50%;transform:translateY(-50%);cursor:pointer;display:flex;align-items:center;justify-content:center;z-index:2;';
-        pbtn.innerHTML='<i class="icon icon-folder-tabs-folder" aria-hidden="true" style="font-size:24px"></i>';
+        var pbtn=_genIconButton('folder',T('choose'),'small',false);
+        pbtn.style.cssText='position:absolute;right:1.25rem;top:50%;transform:translateY(-50%);z-index:2;';
         pbtn.addEventListener('click',function(){ INV('open_folder_dialog').then(function(p){ if(p&&folder.input){ folder.input.value=p; _saveOne({save_path:p}); } }).catch(function(){}); });
         c1.appendChild(pbtn);
         addSection(T('sec_downloads'), c1);
 
         // Окно: тумблеры
         var c2=_genCard(cardCls);
-        c2.appendChild(_genToggle(T('st_tray'), !!s.minimize_to_tray, function(v){ _saveOne({minimize_to_tray:v}); }));
-        c2.appendChild(_genToggle(T('st_devtools'), !!s.devtools_enabled, function(v){ INV('toggle_devtools',{open:v}).catch(function(){}); _saveOne({devtools_enabled:v}); }));
+        c2.appendChild(_genToggle(T('st_tray'), !!s.minimize_to_tray, function(v){ _saveOne({minimize_to_tray:v}); }, T('st_tray_sub')));
+        c2.appendChild(_genToggle(T('st_devtools'), !!s.devtools_enabled, function(v){ _setDevtoolsEnabled(v); }));
         addSection(T('sec_window'), c2);
+
+        // Интеграция с Windows: выбор обработчика tg:// остаётся пользовательским решением.
+        var c3=_genCard(cardCls);
+        c3.appendChild(_genDecoratedRow('twd-link',T('st_tg_links'),T('st_open_defaults'),function(){
+            INV('open_default_apps').catch(function(){});
+        },'blue',T('st_tg_links_sub')));
+        addSection(T('sec_integration'), c3);
 
         // Обновления: частота автопроверки — нативный «выпадающий список» (попап-радио)
         var c4=_genCard(cardCls);
         var ivKeys=['30m','1h','12h','24h','3d','7d','30d','never'];
         var ivLbl={'30m':'iv_30m','1h':'iv_1h','12h':'iv_12h','24h':'iv_24h','3d':'iv_3d','7d':'iv_7d','30d':'iv_30d','never':'iv_never'};
         var ivCur=s.update_check_interval||'1h';
-        c4.appendChild(_genRow(liEl,'reload',T('st_auto_check'),T(ivLbl[ivCur]||'iv_1h'),function(v){
+        c4.appendChild(_genRow(liEl,'twd-update',T('st_auto_check'),T(ivLbl[ivCur]||'iv_1h'),function(v){
             pickModal({ title:T('st_auto_check'), current:ivCur,
                 options:ivKeys.map(function(k){ return { value:k, label:T(ivLbl[k]) }; }),
                 onSave:function(val){ ivCur=val; v.textContent=T(ivLbl[val]); _saveOne({update_check_interval:val}); } });
@@ -343,7 +445,8 @@ function injectAboutSection(){
     var verRow=_genRow(liEl,'info',T('st_version'),'—',null);
     var idRow=_genRow(liEl,'info',T('st_your_id'),'—',null);
     var unRow=_genRow(liEl,'mention',T('st_username'),'—',null);
-    var updRow=_genRow(liEl,'reload',T('check_updates'),'',async function(){
+    _wireUiLabUnlock(unRow);
+    var updRow=_genRow(liEl,'twd-update',T('check_updates'),'',async function(){
         toast(T('upd_checking'),'icon-reload');
         try{ var r=await INV('check_update_manual'); if(!r||r.upToDate)toast(T('st_uptodate'),'icon-check'); else if(r.error)toast(T('error')+': '+r.error,'icon-close'); }
         catch(e){ toast(T('st_check_err'),'icon-close'); }

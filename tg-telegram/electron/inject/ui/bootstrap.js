@@ -23,6 +23,23 @@ function makeTrayPng(count){
 }
 function waitBody(cb){if(document.body)cb();else{const t=setInterval(()=>{if(document.body){clearInterval(t);cb();}},50);}}
 
+function installProxyStallRecovery(){
+    if(window.__twdProxyStallRecovery)return;window.__twdProxyStallRecovery=true;
+    let waitingSince=0,lastKick=0;
+    setInterval(async()=>{
+        const status=document.querySelector('.MiddleHeader .info .status, .MiddleHeader .status');
+        const text=(status&&status.textContent||'').trim();
+        const waiting=/ожидание сети|waiting for network/i.test(text);
+        if(!waiting||navigator.onLine===false){waitingSince=0;return;}
+        const now=Date.now();if(!waitingSince){waitingSince=now;return;}
+        if(now-waitingSince<12000||now-lastKick<60000)return;
+        try{
+            const ps=await INV('get_proxy_status');
+            if(ps&&ps.active){lastKick=now;waitingSince=now;await INV('reconnect_proxy');}
+        }catch(e){}
+    },1000);
+}
+
 function installAtomicQrReveal(){
     if(document.getElementById('_twd_qr_atomic_css_')) return;
     const style=document.createElement('style'); style.id='_twd_qr_atomic_css_';
@@ -49,6 +66,7 @@ function installAtomicQrReveal(){
 
 waitBody(()=>{
     installAtomicQrReveal();
+    installProxyStallRecovery();
     tryInject();
     new MutationObserver(tryInject).observe(document.body,{childList:true,subtree:false});
     
@@ -314,6 +332,10 @@ document.addEventListener('click', function(e){
     // в контекст-меню (клик по тексту пункта не попадает в саму иконку, поэтому
     // проверяем весь .MenuItem/кнопку на наличие icon-download).
     function isDownloadTrigger(t){
+        // Не путать наши элементы интерфейса с настоящим скачиванием Telegram.
+        // В частности пункт меню «Загрузки» сам содержит icon-download и раньше
+        // создавал ложную карточку «Файл / Скачивание…» при открытии панели.
+        if(t.closest('#Settings,._tgpanel_,._mo_,[id^="_tgmi_"]')) return false;
         var el=t.closest('.icon-download,.download-button,[aria-label="Download"],[aria-label="Загрузка"],[title="Download"],[title="Загрузка"],.MenuItem,button');
         if(!el) return false;
         if(el.classList&&(el.classList.contains('icon-download')||el.classList.contains('download-button'))) return true;
@@ -556,51 +578,64 @@ window.__tgMarkAllRead=function(){
         });
     }
 
-    // Категория чата для фильтра настроек: private | group | channel.
-    function chatCategory(type){
+    // Реальный тип чата нужен для отдельных переключателей
+    // private/group/channel. По одному знаку peerId канал от супергруппы не отличить:
+    // оба отрицательные. Берём type из собственного IndexedDB Web A (tt-global-state*).
+    // Кэш прогреваем один раз; повторно читаем БД только при cache miss и не чаще 5с.
+    var chatTypeById=Object.create(null), chatTypeLoad=null, chatTypeLoadedAt=0;
+    function categoryFromType(type){
         if(type==='chatTypePrivate')return 'private';
         if(type==='chatTypeChannel')return 'channel';
-        return 'group';                                  // basic/super group
+        if(type==='chatTypeBasicGroup'||type==='chatTypeSuperGroup')return 'group';
+        return '';
     }
-    // Приглушён ли чат: персональное исключение, иначе дефолт по типу (как в бейдже трея).
-    function isMuted(g,id,type,now){
-        var exc=g.chats.notifyExceptionById||{}, e=exc[id];
-        if(e&&typeof e.mutedUntil!=='undefined')return e.mutedUntil>now;
-        var defs=(g.settings&&g.settings.notifyDefaults)||{};
-        var dkey=(type==='chatTypePrivate')?'users':(type==='chatTypeChannel')?'channels':'groups';
-        var d=defs[dkey]; return d?(d.mutedUntil>now):false;
+    function loadChatTypes(force){
+        var now=Date.now();
+        if(chatTypeLoad)return chatTypeLoad;
+        if(!force&&chatTypeLoadedAt)return Promise.resolve();
+        if(force&&chatTypeLoadedAt&&now-chatTypeLoadedAt<5000)return Promise.resolve();
+        chatTypeLoad=new Promise(function(resolve){
+            try{
+                if(!window.indexedDB){resolve();return;}
+                var req=indexedDB.open('tt-data');
+                req.onerror=function(){resolve();};
+                req.onsuccess=function(){
+                    var db=req.result, tx;
+                    try{tx=db.transaction('store','readonly');}catch(e){try{db.close();}catch(_){} resolve();return;}
+                    var cur=tx.objectStore('store').openCursor();
+                    cur.onerror=function(){};
+                    cur.onsuccess=function(){
+                        var c=cur.result;
+                        if(!c)return;
+                        var key=String(c.key||'');
+                        if(/^tt-global-state(?:_\d+)?$/.test(key)){
+                            var byId=c.value&&c.value.chats&&c.value.chats.byId;
+                            if(byId)Object.keys(byId).forEach(function(id){
+                                var chat=byId[id], type=chat&&chat.type;
+                                if(type)chatTypeById[String(id)]=type;
+                            });
+                        }
+                        c.continue();
+                    };
+                    tx.oncomplete=function(){try{db.close();}catch(_){} resolve();};
+                    tx.onerror=function(){try{db.close();}catch(_){} resolve();};
+                    tx.onabort=function(){try{db.close();}catch(_){} resolve();};
+                };
+            }catch(e){resolve();}
+        }).then(function(){chatTypeLoadedAt=Date.now();chatTypeLoad=null;});
+        return chatTypeLoad;
     }
-    // Имя отправителя (для префикса в группах): user → имя+фамилия, иначе chat.title.
-    function senderName(g,msg){
-        var sid=msg&&msg.senderId; if(!sid)return '';
-        var u=g.users&&g.users.byId&&g.users.byId[sid];
-        if(u)return ((u.firstName||'')+' '+(u.lastName||'')).trim();
-        var c=g.chats&&g.chats.byId&&g.chats.byId[sid];
-        return c?(c.title||''):'';
-    }
-    // Текст сообщения. Текст/подпись — в приоритете (покрывает и webPage-превью).
-    // Медиа без подписи → локализованная метка типа. Служебное (action) → null (не уведомляем).
-    function msgText(g,msg){
-        var c=msg&&msg.content; if(!c)return T('new_message');
-        if(c.text&&c.text.text)return c.text.text;
-        if(c.action)return null;                         // вступил/покинул/закрепил — служебное
-        if(c.sticker)return ((c.sticker.emoji||'')+' '+T('mt_sticker')).trim();
-        if(c.photo)return T('mt_photo');
-        if(c.video)return c.video.isRound?T('mt_round'):(c.video.isGif?T('mt_gif'):T('mt_video'));
-        if(c.voice)return T('mt_voice');
-        if(c.audio)return T('mt_audio');
-        if(c.document)return c.document.fileName||T('mt_file');
-        if(c.poll)return T('mt_poll');
-        if(c.contact)return T('mt_contact');
-        if(c.location||c.geo)return T('mt_location');
-        return T('new_message');
-    }
-    function sendPopup(pid,title,text){
-        text=(text||'').replace(/\s+/g,' ').trim();      // превью в одну строку, как в TG
-        toDataUrl(domAvatar(pid)).then(function(icon){
-            INV('show_notification',{title:title,body:text,icon:icon,sender:title,peerId:String(pid),playSound:false}).catch(function(){});
+    function resolveChatCategory(pid){
+        pid=String(pid||'');
+        if(!pid)return Promise.resolve('');
+        var known=categoryFromType(chatTypeById[pid]);
+        if(known)return Promise.resolve(known);
+        if(pid.charAt(0)!=='-')return Promise.resolve('private');
+        return loadChatTypes(true).then(function(){
+            return categoryFromType(chatTypeById[pid])||'group'; // preserve old fallback if state is not persisted yet
         });
     }
+    loadChatTypes(false);
 
     // Источник уведомлений — перехват notify-пайплайна Telegram (см. notif-intercept.js).
     // На desktop Web A сначала сам решает, нужно ли уведомлять (обычно только когда
@@ -611,19 +646,25 @@ window.__tgMarkAllRead=function(){
     function handleTgNotif(p){
         if(!p)return;
         var pid = p.chatId!=null ? String(p.chatId) : '';
-        // Категория по знаку peerId: >0 личка, иначе группа/канал. Канал от группы по
-        // источнику не отличить — фильтр notif_cat_channel схлопнут в group.
-        var cat = (pid.charAt(0)==='-') ? 'group' : 'private';
-        if(cfg['notif_cat_'+cat]===false)return;                       // категория выключена
         if(pid && String(pid)===String(currentPeer()) && document.hasFocus())return; // открытый чат в фокусе
         var title=(p.title||'').trim()||'Telegram';
         var text=(p.body||'').replace(/\s+/g,' ').trim();
-        // Иконку (blob:/data:) конвертим: main не достанет blob из рендерера. Нет иконки
-        // в payload — берём аватар из строки чат-листа по peerId.
-        toDataUrl(p.icon||domAvatar(pid)).then(function(icon){
-            INV('show_notification',{title:title,body:text,icon:icon,sender:title,peerId:pid,playSound:false}).catch(function(){});
+
+        resolveChatCategory(pid).then(function(cat){
+            if(cat && cfg['notif_cat_'+cat]===false)return;             // private/group/channel независимо
+            // Иконку (blob:/data:) конвертим: main не достанет blob из рендерера. Нет иконки
+            // в payload — берём аватар из строки чат-листа по peerId.
+            toDataUrl(p.icon||domAvatar(pid)).then(function(icon){
+                INV('show_notification',{title:title,body:text,icon:icon,sender:title,peerId:pid,playSound:false}).catch(function(){});
+            });
+            if(!p.isSilent)playSound();                                 // звук только для разрешённой категории
+        }).catch(function(){
+            // Если IndexedDB временно недоступен, не теряем уведомление.
+            toDataUrl(p.icon||domAvatar(pid)).then(function(icon){
+                INV('show_notification',{title:title,body:text,icon:icon,sender:title,peerId:pid,playSound:false}).catch(function(){});
+            });
+            if(!p.isSilent)playSound();
         });
-        if(!p.isSilent)playSound();                                    // звук (с дедупом lastTgSound)
     }
     // Регистрируем приёмник и забираем то, что накопилось до старта UI_JS.
     window.__tgOnNotif = handleTgNotif;

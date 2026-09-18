@@ -7,14 +7,29 @@ let _ready = false;
 let _pending = [];
 let _idSeq = 0;
 
-const WIDTH = 380;
+const WIDTH = 384;
 const MARGIN = 16;
+const MAX_ICON_DATA_URL = 2 * 1024 * 1024;
+
+function clipText(value, max) {
+    return String(value == null ? '' : value).trim().slice(0, max);
+}
+
+function sanitizePopupIcon(value) {
+    const s = String(value || '');
+    if (!s || s.length > MAX_ICON_DATA_URL) return '';
+    return /^data:image\/(?:png|jpe?g|webp|gif|avif|bmp);base64,/i.test(s) ? s : '';
+}
+
+function isPopupSender(event) {
+    return !!(_win && !_win.isDestroyed() && event && event.sender === _win.webContents);
+}
 
 function init(getMainWindow) {
     _getMainWindow = getMainWindow;
 
-    ipcMain.on('notif-resize', (_e, { h }) => {
-        if (!_win || _win.isDestroyed()) return;
+    ipcMain.on('notif-resize', (event, { h } = {}) => {
+        if (!isPopupSender(event)) return;
         const wa = primaryWorkArea();
         const height = Math.max(1, Math.min(Math.round(h) || 1, wa.height - MARGIN * 2));
         _win.setBounds({
@@ -25,20 +40,24 @@ function init(getMainWindow) {
         });
     });
 
-    ipcMain.on('notif-empty', () => {
-        if (_win && !_win.isDestroyed()) _win.hide();
+    ipcMain.on('notif-empty', (event) => {
+        if (!isPopupSender(event)) return;
+        _win.hide();
     });
 
-    ipcMain.on('notif-action', (_e, { action, peerId }) => {
+    ipcMain.on('notif-action', (event, { action, peerId } = {}) => {
+        if (!isPopupSender(event)) return;
+        const peer = String(peerId == null ? '' : peerId);
+        if (!/^-?\d+$/.test(peer)) return;
         const win = _getMainWindow && _getMainWindow();
-        if (!win || win.isDestroyed() || !peerId) return;
+        if (!win || win.isDestroyed()) return;
         if (action === 'open') {
             win.show();
             win.focus();
-            openChat(win, String(peerId));
+            openChat(win, peer);
         } else if (action === 'read') {
             // Mark as read in the background — don't show or focus the window.
-            markRead(win, String(peerId));
+            markRead(win, peer);
         }
     });
 }
@@ -75,34 +94,36 @@ function markRead(win, peerId) {
 
 function buildHtml() {
     return String.raw`<!DOCTYPE html>
-<html><head><meta charset="UTF-8"><meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; img-src data: blob: https:; script-src 'unsafe-inline';"><style>
+<html><head><meta charset="UTF-8"><meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; img-src data:; script-src 'unsafe-inline';"><style>
     *{box-sizing:border-box;}
     html,body{margin:0;width:100%;height:100%;overflow:hidden;background:transparent;
         font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;user-select:none;}
-    #stack{display:flex;flex-direction:column;gap:8px;padding:0;}
-    .card{background:#212121;border-radius:16px;padding:12px 14px;color:#fff;
-        border:1px solid rgba(255,255,255,.12);
-        box-shadow:rgba(16,16,16,.61) 0 4px 8px 2px;
-        opacity:0;transform:translateY(-10px);transition:opacity .2s ease,transform .2s ease;}
-    .card.show{opacity:1;transform:translateY(0);}
-    .card.hide{opacity:0;transform:translateY(-8px);}
+    #stack{position:absolute;left:0;right:0;bottom:0;display:flex;flex-direction:column;gap:8px;padding:0 8px;}
+    /* Telegram-like desktop card, with a subtle edge so it does not dissolve into
+       dark wallpapers. Slightly roomier than the in-page toast for desktop readability. */
+    .card{background:rgba(33,33,33,.94);backdrop-filter:blur(8px);border:1px solid rgba(255,255,255,.14);
+        border-radius:16px;padding:17px;min-height:132px;color:#fff;
+        box-shadow:0 6px 24px rgba(0,0,0,.28);
+        opacity:1;transform:translateY(0);will-change:transform,opacity;}
+    .card.hide{opacity:0;transform:translateY(-12px);}
     .top{display:flex;gap:12px;align-items:center;}
-    .avatar{width:40px;height:40px;flex:0 0 40px;border-radius:50%;overflow:hidden;background:#2b5278;
-        display:flex;align-items:center;justify-content:center;font-size:17px;font-weight:700;color:#fff;}
+    .avatar{width:44px;height:44px;flex:0 0 44px;border-radius:50%;overflow:hidden;background:#8774e1;
+        display:flex;align-items:center;justify-content:center;font-size:18px;font-weight:500;color:#fff;}
     .avatar img{width:100%;height:100%;object-fit:cover;}
-    .body{flex:1;min-width:0;}
-    .title{font-size:13px;font-weight:700;line-height:1.3;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
-    .text{margin-top:2px;font-size:12px;line-height:1.35;color:#c2c9d1;
+    .body{flex:1;min-width:0;font-size:15px;line-height:1.25;overflow-wrap:anywhere;}
+    .title{font-size:15px;font-weight:500;line-height:1.25;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+    .text{margin-top:2px;font-size:15px;line-height:1.25;color:rgba(255,255,255,.82);
         display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;}
-    .close-x{background:none;border:none;color:#7e8794;font-size:16px;line-height:1;cursor:pointer;padding:0 0 0 6px;align-self:flex-start;}
-    .close-x:hover{color:#fff;}
-    .actions{display:flex;gap:8px;margin-top:10px;}
-    .btn{flex:1;border:none;border-radius:8px;padding:7px 0;font-size:12px;font-weight:600;cursor:pointer;}
-    .btn.reply{background:#8774e1;color:#fff;}
-    .btn.reply:hover{filter:brightness(1.1);}
-    .btn.read{background:rgba(255,255,255,.08);color:#c2c9d1;}
-    .btn.read:hover{background:rgba(255,255,255,.14);color:#fff;}
-    .progress{margin-top:10px;height:2px;border-radius:999px;overflow:hidden;background:rgba(255,255,255,.08);}
+    .close-x{width:32px;height:32px;flex:0 0 32px;border:0;border-radius:50%;background:transparent;color:#aaa;
+        font-size:20px;line-height:32px;cursor:pointer;padding:0;align-self:center;}
+    .close-x:hover{background:rgba(255,255,255,.08);color:#fff;}
+    .actions{display:flex;justify-content:flex-end;gap:4px;margin-top:12px;}
+    .btn{flex:0 0 auto;height:38px;border:0;border-radius:10px;padding:0 13px;background:transparent;
+        color:#8774e1;font-size:14px;font-weight:600;cursor:pointer;}
+    .btn:hover{background:rgba(135,116,225,.14);}
+    .btn.read{color:#aaa;}
+    .btn.read:hover{background:rgba(255,255,255,.08);color:#fff;}
+    .progress{margin-top:8px;height:4px;border-radius:2px;overflow:hidden;background:rgba(255,255,255,.1);}
     .bar{height:100%;background:#8774e1;width:100%;}
     @keyframes barshrink{from{width:100%;}to{width:0%;}}
 </style></head>
@@ -111,39 +132,42 @@ function buildHtml() {
 <script>
     const stack = document.getElementById('stack');
     const cards = new Map();
+    const MAX_CARDS=3;
+    const GAP=8;
+    const MOVE_MS=280;
+    const FADE_MS=180;
+    const MOVE_EASE='cubic-bezier(.25,1,.5,1)';
 
+    function visibleStackHeight(){
+        const all=Array.from(stack.children), shown=all.slice(-MAX_CARDS);
+        if(!shown.length)return 1;
+        let h=0;
+        shown.forEach(function(el){h+=el.getBoundingClientRect().height;});
+        h+=GAP*Math.max(0,shown.length-1);
+        return Math.ceil(h)+4;
+    }
     function reportSize(){
-        requestAnimationFrame(function(){
-            const h = stack.scrollHeight;
-            window.notifBridge.sendResize(h + 4);
-        });
+        window.notifBridge.sendResize(visibleStackHeight());
     }
     function firstLetter(s){ s=(s||'T').trim(); return (s[0]||'T').toUpperCase(); }
 
     function removeCard(id){
         const c=cards.get(id); if(!c)return;
         clearTimeout(c.timer);
-        c.el.classList.remove('show'); c.el.classList.add('hide');
         cards.delete(id);
+        c.el.style.transition='opacity 180ms ease, transform 200ms '+MOVE_EASE;
+        c.el.classList.add('hide');
         setTimeout(function(){
             if(c.el.parentNode)c.el.parentNode.removeChild(c.el);
             reportSize();
             if(cards.size===0)window.notifBridge.sendEmpty();
-        },200);
+        },205);
     }
 
     function arm(id,duration){
         const c=cards.get(id); if(!c)return;
         clearTimeout(c.timer);
         c.timer=setTimeout(function(){removeCard(id);},duration);
-    }
-
-    const MAX_CARDS=3;
-    function dropOldest(){
-        const first=stack.firstChild; if(!first)return;
-        let oid=null; cards.forEach(function(v,k){ if(v.el===first)oid=k; });
-        if(oid!=null){ const c=cards.get(oid); if(c)clearTimeout(c.timer); cards.delete(oid); }
-        if(first.parentNode)first.parentNode.removeChild(first);
     }
 
     window.notifBridge.onAdd(function(data){
@@ -176,15 +200,83 @@ function buildHtml() {
         const bar=document.createElement('div'); bar.className='bar'; prog.appendChild(bar);
 
         el.appendChild(top); el.appendChild(acts); el.appendChild(prog);
-        stack.appendChild(el); // new ones go at the bottom, right at the corner
+
+        // FLIP the existing stack. New notifications are appended at the BOTTOM.
+        // The BrowserWindow is bottom-anchored, so after it grows upward every old card
+        // would otherwise jump. The inverse translate holds each card at its old screen
+        // position; releasing that translate makes the new card physically push it up.
+        const oldEls=Array.from(stack.children);
+        const oldRects=new Map();
+        oldEls.forEach(function(node){oldRects.set(node,node.getBoundingClientRect());});
+        stack.appendChild(el);
+
+        const afterRects=new Map();
+        oldEls.forEach(function(node){afterRects.set(node,node.getBoundingClientRect());});
+        oldEls.forEach(function(node){
+            const before=oldRects.get(node),after=afterRects.get(node);
+            const dy=before.top-after.top;
+            node.style.transition='none';
+            node.style.transform='translateY('+dy+'px)';
+        });
+
+        // Start completely below the bottom edge. body/window clipping makes it look as
+        // if the card rises from under the desktop corner, while opacity comes up with it.
+        const enterOffset=Math.ceil(el.getBoundingClientRect().height)+GAP;
+        el.style.transition='none';
+        el.style.opacity='0';
+        el.style.transform='translateY('+enterOffset+'px)';
 
         cards.set(id,{el:el,timer:null});
-        while(cards.size>MAX_CARDS)dropOldest();   // pool limit — oldest gets dropped
-        requestAnimationFrame(function(){
-            el.classList.add('show'); reportSize();
-            bar.style.animation='barshrink '+dur+'ms linear forwards';
-        });
-        arm(id,dur);
+
+        // Keep the fourth card in the DOM only for the exit animation. Because the stack
+        // is bottom-anchored and the window height is capped to the last three cards, the
+        // oldest card's final layout position is already above the clipping edge.
+        let evicted=null,evictedId=null;
+        if(stack.children.length>MAX_CARDS){
+            evicted=stack.firstElementChild;
+            cards.forEach(function(v,k){if(v.el===evicted)evictedId=k;});
+            if(evictedId!=null){
+                const ec=cards.get(evictedId);if(ec)clearTimeout(ec.timer);
+                cards.delete(evictedId);
+            }
+        }
+
+        // Flush the inverse transforms before asking Electron to resize the transparent
+        // BrowserWindow. Start on its resize event; at the three-card cap there is no
+        // resize, so a short fallback starts the same animation.
+        void stack.offsetHeight;
+        let started=false;
+        const start=function(){
+            if(started||!el.isConnected)return;
+            started=true;window.removeEventListener('resize',onResize);
+            requestAnimationFrame(function(){
+                if(!el.isConnected)return;
+                oldEls.forEach(function(node){
+                    if(!node.isConnected)return;
+                    node.style.transition='transform '+MOVE_MS+'ms '+MOVE_EASE+(node===evicted?', opacity '+FADE_MS+'ms ease-out':'');
+                    node.style.transform='translateY(0)';
+                    if(node===evicted)node.style.opacity='0';
+                });
+                el.style.transition='transform '+MOVE_MS+'ms '+MOVE_EASE+', opacity '+FADE_MS+'ms ease-out';
+                el.style.transform='translateY(0)';
+                el.style.opacity='1';
+                bar.style.animation='barshrink '+dur+'ms linear forwards';
+                arm(id,dur);
+            });
+            setTimeout(function(){
+                oldEls.forEach(function(node){
+                    if(node===evicted||!node.isConnected)return;
+                    node.style.transition='';node.style.transform='';node.style.opacity='';
+                });
+                if(el.isConnected){el.style.transition='';el.style.transform='';el.style.opacity='';}
+                if(evicted&&evicted.parentNode)evicted.parentNode.removeChild(evicted);
+                reportSize();
+            },MOVE_MS+30);
+        };
+        const onResize=function(){start();};
+        window.addEventListener('resize',onResize);
+        reportSize();
+        setTimeout(start,70);
 
         el.onmouseenter=function(){const c=cards.get(id);if(c)clearTimeout(c.timer);bar.style.animationPlayState='paused';};
         el.onmouseleave=function(){
@@ -264,17 +356,19 @@ function flush() {
 }
 
 function queueNotification(data) {
+    const rawDuration = Number(data && data.duration);
+    const peer = String((data && data.peerId) || '');
     const payload = {
         id: ++_idSeq,
-        title: String((data && data.title) || '').trim() || 'Telegram',
-        body: String((data && data.body) || '').trim() || 'Новое сообщение',
-        icon: String((data && data.icon) || ''),
+        title: clipText(data && data.title, 256) || 'Telegram',
+        body: clipText(data && data.body, 4096) || 'Новое сообщение',
+        icon: sanitizePopupIcon(data && data.icon),
         anon: !!(data && data.anon),
-        btnOpen: (data && data.btnOpen) || '',
-        btnRead: (data && data.btnRead) || '',
-        peerId: (data && data.peerId) || '',
+        btnOpen: clipText(data && data.btnOpen, 64),
+        btnRead: clipText(data && data.btnRead, 64),
+        peerId: /^-?\d+$/.test(peer) ? peer : '',
         playSound: data && data.playSound !== false,
-        duration: (data && data.duration) || 6,
+        duration: Number.isFinite(rawDuration) ? Math.max(2, Math.min(30, rawDuration)) : 6,
     };
     ensureWin();
     _pending.push(payload);

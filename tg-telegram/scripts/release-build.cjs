@@ -16,8 +16,14 @@ if (!signingConfigured) {
   console.warn('WARNING: building an unsigned release; Windows may show Unknown publisher / SmartScreen.');
 }
 
+const localElectronExe = path.join(root, 'node_modules', 'electron', 'dist', 'electron.exe');
+if (!fs.existsSync(localElectronExe)) {
+  console.error('Local Electron runtime is missing. Run npm install before building.');
+  process.exit(2);
+}
+
 const builder = path.join(root, 'node_modules', '.bin', 'electron-builder.cmd');
-const builderArgs = ['--win', 'nsis'];
+const builderArgs = ['--win', 'nsis', '--config.electronDist=node_modules/electron/dist'];
 if (signingConfigured) builderArgs.push('--config.forceCodeSigning=true');
 const result = spawnSync(builder, builderArgs, {
   cwd: root,

@@ -5,6 +5,14 @@
     // was already proxied in this document's lifetime (HMR / watchdog).
     const _alreadyProxied = !!window.__tgNotifIntercept;
     window.__tgNotifIntercept = true;
+    // A same-document watchdog reinjection should repair the existing interceptor
+    // instead of stacking another set of wrappers/timers. Older builds did not expose
+    // this repair entry point, so if it is missing we intentionally continue through
+    // the full installer below to upgrade the live document in place.
+    if (_alreadyProxied && typeof window.__twdNotifRepair === 'function') {
+        try { window.__twdNotifRepair(); } catch (_) {}
+        return;
+    }
 
     function normalizeText(value, fallback) {
         var text = String(value == null ? '' : value).trim();
@@ -168,22 +176,30 @@
     // replace/re-register its controller at any time. Per-instance hooks therefore
     // disappear with the old ServiceWorker wrapper; this is exactly why the old fixes
     // needed polling and why b56a710 regressed after removing it. A prototype hook is
-    // inherited by every current and future controller, so no watchdog/re-hook loop is
-    // required. Keep a controller-level fallback only for engines that forbid patching
-    // the prototype.
+    // inherited by every current and future controller. Web A or another script can
+    // still restore the native prototype method later, so the health loop below verifies
+    // the exact installed function and repairs it. Keep a controller-level fallback for
+    // engines that forbid patching the prototype.
     function hookServiceWorker() {
         try {
             var proto = window.ServiceWorker && window.ServiceWorker.prototype;
             if (proto && typeof proto.postMessage === 'function') {
-                if (!proto.__twdNotifProtoHooked) {
+                var installedHook = proto.__twdNotifPostMessageHook;
+                if (!installedHook || proto.postMessage !== installedHook) {
                     var nativePostMessage = proto.postMessage;
+                    var wrappedPostMessage = function(msg) {
+                        if (consumeServiceWorkerNotification(msg)) return;
+                        return nativePostMessage.apply(this, arguments);
+                    };
                     Object.defineProperty(proto, 'postMessage', {
                         configurable: true,
                         writable: true,
-                        value: function(msg) {
-                            if (consumeServiceWorkerNotification(msg)) return;
-                            return nativePostMessage.apply(this, arguments);
-                        },
+                        value: wrappedPostMessage,
+                    });
+                    Object.defineProperty(proto, '__twdNotifPostMessageHook', {
+                        configurable: true,
+                        writable: true,
+                        value: wrappedPostMessage,
                     });
                     Object.defineProperty(proto, '__twdNotifProtoHooked', {
                         configurable: true,
@@ -211,8 +227,6 @@
         } catch (e) {}
     }
     hookServiceWorker();
-
-    if (_alreadyProxied) return;
 
     function NotificationShim(title, opts) {
         if (!(this instanceof NotificationShim)) return new NotificationShim(title, opts);
@@ -274,11 +288,14 @@
         return p;
     };
 
-    try {
-        Object.defineProperty(window, 'Notification', { configurable: true, writable: true, value: NotificationShim });
-    } catch (e) {
-        window.Notification = NotificationShim;
+    function installNotificationShim() {
+        try {
+            Object.defineProperty(window, 'Notification', { configurable: true, writable: true, value: NotificationShim });
+        } catch (e) {
+            try { window.Notification = NotificationShim; } catch (_) {}
+        }
     }
+    installNotificationShim();
 
     try {
         if (navigator.permissions && navigator.permissions.query) {
@@ -291,4 +308,31 @@
             };
         }
     } catch (e) {}
+
+    // Long-lived desktop sessions are the important case here. Web A may replace its
+    // service-worker controller or another script may restore browser globals hours
+    // after startup. Keep the hooks self-healing without generating any network traffic.
+    // The slower IndexedDB check repairs Telegram's own persisted notification flags
+    // if a failed browser-push attempt flips them later in the session.
+    function ensureHealthTimers() {
+        if (!window.__twdNotifHealthTimer) {
+            window.__twdNotifHealthTimer = setInterval(function() {
+                try { hookServiceWorker(); } catch (_) {}
+                try { if (window.Notification !== NotificationShim) installNotificationShim(); } catch (_) {}
+            }, 30000);
+        }
+        if (!window.__twdNotifStateRepairTimer) {
+            window.__twdNotifStateRepairTimer = setInterval(function() {
+                try { repairTelegramNotificationFlags(); } catch (_) {}
+            }, 5 * 60 * 1000);
+        }
+    }
+    function repairNotificationInterception() {
+        try { ensureNotificationPermission(); } catch (_) {}
+        try { hookServiceWorker(); } catch (_) {}
+        try { if (window.Notification !== NotificationShim) installNotificationShim(); } catch (_) {}
+        try { ensureHealthTimers(); } catch (_) {}
+    }
+    window.__twdNotifRepair = repairNotificationInterception;
+    ensureHealthTimers();
 })();

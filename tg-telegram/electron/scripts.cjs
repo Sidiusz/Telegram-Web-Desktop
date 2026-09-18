@@ -13,10 +13,11 @@ const UI_PARTS = [
     'lang.js',                   // i18n: curLang / T
     'downloads-registry.js',     // window.__tgdl: bind downloads to messages
     'notifications-settings.js', // built-in notification settings
-    'modal.js',                  // showModal / makePanel / openPanel
+    'modal.js',                  // escaped dialogs + native radio picker
     'native-panels.js',          // native "Downloads" / "App settings" panels
     'settings-render.js',        // render app settings + auto-save
     'notif-ui.js',               // corner notifications, update progress, download indicator
+    'ui-lab.js',                 // hidden service-only native component laboratory
     'inject.js',                 // injectMenu / injectSettingsRows
     'bootstrap.js',              // tryInject / waitBody / start observers
 ];
