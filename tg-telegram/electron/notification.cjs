@@ -9,6 +9,10 @@ let _idSeq = 0;
 
 const WIDTH = 384;
 const MARGIN = 16;
+const CARD_HEIGHT = 156;
+const CARD_GAP = 8;
+const MAX_CARDS = 3;
+const STACK_HEIGHT = CARD_HEIGHT * MAX_CARDS + CARD_GAP * (MAX_CARDS - 1);
 const MAX_ICON_DATA_URL = 2 * 1024 * 1024;
 
 function clipText(value, max) {
@@ -28,16 +32,17 @@ function isPopupSender(event) {
 function init(getMainWindow) {
     _getMainWindow = getMainWindow;
 
-    ipcMain.on('notif-resize', (event, { h } = {}) => {
+    ipcMain.on('notif-shape', (event, { count } = {}) => {
         if (!isPopupSender(event)) return;
-        const wa = primaryWorkArea();
-        const height = Math.max(1, Math.min(Math.round(h) || 1, wa.height - MARGIN * 2));
-        _win.setBounds({
-            x: wa.x + wa.width - WIDTH - MARGIN,
-            y: wa.y + wa.height - height - MARGIN,   // anchor to bottom-right corner
-            width: WIDTH,
-            height,
-        });
+        const n = Math.max(0, Math.min(MAX_CARDS, Math.trunc(Number(count) || 0)));
+        try {
+            if (!n) {
+                _win.setShape([]);
+                return;
+            }
+            const height = CARD_HEIGHT * n + CARD_GAP * (n - 1);
+            _win.setShape([{ x: 0, y: STACK_HEIGHT - height, width: WIDTH, height }]);
+        } catch (_) {}
     });
 
     ipcMain.on('notif-empty', (event) => {
@@ -98,15 +103,13 @@ function buildHtml() {
     *{box-sizing:border-box;}
     html,body{margin:0;width:100%;height:100%;overflow:hidden;background:transparent;
         font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;user-select:none;}
-    #stack{position:absolute;left:0;right:0;bottom:0;display:flex;flex-direction:column;gap:8px;padding:0 8px;}
-    /* Telegram-like desktop card, with a subtle edge so it does not dissolve into
-       dark wallpapers. Slightly roomier than the in-page toast for desktop readability. */
-    .card{background:rgba(33,33,33,.94);backdrop-filter:blur(8px);border:1px solid rgba(255,255,255,.14);
-        border-radius:16px;padding:17px;min-height:132px;color:#fff;
-        box-shadow:0 6px 24px rgba(0,0,0,.28);
-        opacity:1;transform:translateY(0);will-change:transform,opacity;}
-    .card.hide{opacity:0;transform:translateY(-12px);}
-    .top{display:flex;gap:12px;align-items:center;}
+    #stack{position:absolute;inset:0;overflow:hidden;}
+    /* Fixed-slot stack: no flex reflow and no BrowserWindow resize while cards exist. */
+    .card{position:absolute;left:8px;right:8px;height:156px;
+        background:rgba(33,33,33,.94);backdrop-filter:blur(8px);border:1px solid rgba(255,255,255,.14);
+        border-radius:16px;padding:17px;color:#fff;box-shadow:0 6px 24px rgba(0,0,0,.28);
+        opacity:1;transform:translate3d(0,0,0);will-change:transform,opacity;}
+    .top{display:flex;height:58px;gap:12px;align-items:center;}
     .avatar{width:44px;height:44px;flex:0 0 44px;border-radius:50%;overflow:hidden;background:#8774e1;
         display:flex;align-items:center;justify-content:center;font-size:18px;font-weight:500;color:#fff;}
     .avatar img{width:100%;height:100%;object-fit:cover;}
@@ -130,63 +133,45 @@ function buildHtml() {
 <body>
 <div id="stack"></div>
 <script>
-    const stack = document.getElementById('stack');
-    const cards = new Map();
+    const stack=document.getElementById('stack');
+    const cards=new Map();
+    const order=[];
     const MAX_CARDS=3;
+    const CARD_H=156;
     const GAP=8;
+    const STACK_H=484;
     const MOVE_MS=280;
     const FADE_MS=180;
     const MOVE_EASE='cubic-bezier(.25,1,.5,1)';
-
     let opChain=Promise.resolve();
 
     function wait(ms){return new Promise(function(resolve){setTimeout(resolve,ms);});}
-    function nextFrame(){
-        return new Promise(function(resolve){requestAnimationFrame(function(){requestAnimationFrame(resolve);});});
+    function enqueue(op){opChain=opChain.then(op).catch(function(){});return opChain;}
+    function yFor(index,total){
+        const fromBottom=total-1-index;
+        return STACK_H-CARD_H-fromBottom*(CARD_H+GAP);
     }
-    function enqueue(op){
-        opChain=opChain.then(op).catch(function(){});
-        return opChain;
+    function setPose(c,y,opacity){
+        c.y=y;
+        c.el.style.transform='translate3d(0,'+y+'px,0)';
+        c.el.style.opacity=String(opacity);
     }
-    function contentHeight(nodes){
-        const all=Array.from(nodes||[]);
-        if(!all.length)return 1;
-        let h=0;
-        all.forEach(function(node){h+=node.getBoundingClientRect().height;});
-        return Math.ceil(h+GAP*Math.max(0,all.length-1)+4);
-    }
-    function resizeWindow(targetHeight){
-        const target=Math.max(1,Math.ceil(targetHeight||1));
-        if(Math.abs(window.innerHeight-target)<=1)return Promise.resolve();
-        return new Promise(function(resolve){
-            let done=false;
-            const finish=function(){
-                if(done)return;
-                done=true;
-                window.removeEventListener('resize',onResize);
-                requestAnimationFrame(resolve);
-            };
-            const onResize=function(){requestAnimationFrame(finish);};
-            window.addEventListener('resize',onResize);
-            window.notifBridge.sendResize(target);
-            setTimeout(finish,100);
+    function animatePose(c,toY,toOpacity,duration){
+        const fromY=Number.isFinite(c.y)?c.y:toY;
+        const fromOpacity=parseFloat(c.el.style.opacity||getComputedStyle(c.el).opacity||'1');
+        const a=c.el.animate([
+            {transform:'translate3d(0,'+fromY+'px,0)',opacity:String(fromOpacity)},
+            {transform:'translate3d(0,'+toY+'px,0)',opacity:String(toOpacity)}
+        ],{duration:duration,easing:MOVE_EASE,fill:'forwards'});
+        return a.finished.catch(function(){}).then(function(){
+            a.cancel();
+            if(c.el.isConnected)setPose(c,toY,toOpacity);
         });
     }
-    function measureCard(el){
-        const css=el.style.cssText;
-        el.style.position='absolute';
-        el.style.left='8px';el.style.right='8px';el.style.top='0';
-        el.style.visibility='hidden';el.style.pointerEvents='none';
-        el.style.opacity='1';el.style.transform='none';el.style.transition='none';
-        document.body.appendChild(el);
-        const h=Math.ceil(el.getBoundingClientRect().height);
-        el.remove();el.style.cssText=css;
-        return h;
-    }
-    function firstLetter(s){ s=(s||'T').trim(); return (s[0]||'T').toUpperCase(); }
+    function firstLetter(s){s=(s||'T').trim();return(s[0]||'T').toUpperCase();}
 
     function arm(id,duration){
-        const c=cards.get(id); if(!c)return;
+        const c=cards.get(id);if(!c)return;
         clearTimeout(c.timer);
         c.remaining=Math.max(0,Number(duration)||0);
         c.startedAt=Date.now();
@@ -198,171 +183,117 @@ function buildHtml() {
             c.remaining=Math.max(0,c.remaining-(Date.now()-c.startedAt));
             clearTimeout(c.timer);c.timer=null;
         }
-        if(c.bar)c.bar.style.animationPlayState='paused';
+        c.bar.style.animationPlayState='paused';
     }
     function resumeCard(id){
-        const c=cards.get(id);if(!c)return;
-        if(c.bar)c.bar.style.animationPlayState='running';
-        clearTimeout(c.timer);
+        const c=cards.get(id);if(!c||c.timer)return;
+        c.bar.style.animationPlayState='running';
         c.startedAt=Date.now();
         c.timer=setTimeout(function(){enqueue(function(){return removeCardNow(id);});},Math.max(0,c.remaining));
+    }
+
+    function buildCard(data){
+        const id=data.id,dur=(data.duration||6)*1000;
+        const el=document.createElement('div');el.className='card';
+        const title=(data.title||'Telegram').trim()||'Telegram';
+        const text=(data.body||'').trim()||'Новое сообщение';
+
+        const top=document.createElement('div');top.className='top';
+        const av=document.createElement('div');av.className='avatar';
+        if(data.anon)av.style.background='#6b6b6b';
+        if(data.icon){
+            const im=document.createElement('img');im.src=data.icon;
+            im.onerror=function(){av.textContent=firstLetter(title);};
+            av.appendChild(im);
+        }else av.textContent=firstLetter(title);
+
+        const bd=document.createElement('div');bd.className='body';
+        const tt=document.createElement('div');tt.className='title';tt.textContent=title;
+        const tx=document.createElement('div');tx.className='text';tx.textContent=text;
+        bd.appendChild(tt);bd.appendChild(tx);
+
+        const cx=document.createElement('button');cx.className='close-x';cx.textContent='✕';
+        cx.onclick=function(){enqueue(function(){return removeCardNow(id);});};
+        top.appendChild(av);top.appendChild(bd);top.appendChild(cx);
+
+        const acts=document.createElement('div');acts.className='actions';
+        const reply=document.createElement('button');reply.className='btn reply';reply.textContent=data.btnOpen||'Открыть';
+        reply.onclick=function(){window.notifBridge.sendAction('open',data.peerId);enqueue(function(){return removeCardNow(id);});};
+        const read=document.createElement('button');read.className='btn read';read.textContent=data.btnRead||'Прочитано';
+        read.onclick=function(){window.notifBridge.sendAction('read',data.peerId);enqueue(function(){return removeCardNow(id);});};
+        acts.appendChild(reply);acts.appendChild(read);
+
+        const prog=document.createElement('div');prog.className='progress';
+        const bar=document.createElement('div');bar.className='bar';prog.appendChild(bar);
+        el.appendChild(top);el.appendChild(acts);el.appendChild(prog);
+
+        const c={id:id,el:el,bar:bar,dur:dur,timer:null,remaining:dur,startedAt:0,y:STACK_H+GAP};
+        el.onmouseenter=function(){pauseCard(id);};
+        el.onmouseleave=function(){resumeCard(id);};
+        return c;
+    }
+
+    async function addCard(data){
+        const c=buildCard(data);
+        stack.appendChild(c.el);
+        cards.set(c.id,c);
+        order.push(c.id);
+        setPose(c,STACK_H+GAP,0);
+        window.notifBridge.sendShape(Math.min(order.length,MAX_CARDS));
+
+        let evictedId=null;
+        if(order.length>MAX_CARDS)evictedId=order.shift();
+        const visible=order.slice();
+        const moves=[];
+
+        visible.forEach(function(id,index){
+            const item=cards.get(id);if(!item)return;
+            moves.push(animatePose(item,yFor(index,visible.length),1,MOVE_MS));
+        });
+
+        if(evictedId!=null){
+            const evicted=cards.get(evictedId);
+            if(evicted){
+                clearTimeout(evicted.timer);evicted.timer=null;
+                moves.push(animatePose(evicted,-CARD_H-GAP,0,MOVE_MS));
+            }
+        }
+
+        c.bar.style.animation='barshrink '+c.dur+'ms linear forwards';
+        arm(c.id,c.dur);
+        await Promise.all(moves);
+
+        if(evictedId!=null){
+            const evicted=cards.get(evictedId);
+            if(evicted){
+                if(evicted.el.parentNode)evicted.el.parentNode.removeChild(evicted.el);
+                cards.delete(evictedId);
+            }
+        }
     }
 
     async function removeCardNow(id){
         const c=cards.get(id);if(!c)return;
         clearTimeout(c.timer);c.timer=null;
+        const pos=order.indexOf(id);
+        if(pos!==-1)order.splice(pos,1);
+
+        // Fade the disappearing card in place first. Moving it against the survivor that
+        // fills its slot creates a visible cross-over, which reads as a back-and-forth jerk.
+        await animatePose(c,c.y,0,FADE_MS);
+        if(c.el.parentNode)c.el.parentNode.removeChild(c.el);
         cards.delete(id);
-        const el=c.el;
-        if(!el||!el.isConnected){
-            if(cards.size===0)window.notifBridge.sendEmpty();
-            return;
-        }
 
-        // First let the card itself leave upward and fade. Nothing else moves yet.
-        el.style.transition='transform '+FADE_MS+'ms '+MOVE_EASE+', opacity '+FADE_MS+'ms ease-out';
-        el.style.transform='translateY(-12px)';
-        el.style.opacity='0';
-        await wait(FADE_MS+12);
+        const survivors=order.slice();
+        const moves=[];
+        survivors.forEach(function(sid,index){
+            const item=cards.get(sid);if(!item)return;
+            moves.push(animatePose(item,yFor(index,survivors.length),1,MOVE_MS));
+        });
+        await Promise.all(moves);
 
-        // Then close the gap with FLIP. This prevents the remaining cards from jumping
-        // down and then back again when the bottom-anchored BrowserWindow shrinks.
-        const survivors=Array.from(stack.children).filter(function(node){return node!==el;});
-        const before=new Map();
-        survivors.forEach(function(node){before.set(node,node.getBoundingClientRect());});
-        if(el.parentNode)el.parentNode.removeChild(el);
-        const after=new Map();
-        survivors.forEach(function(node){after.set(node,node.getBoundingClientRect());});
-        survivors.forEach(function(node){
-            const a=before.get(node),b=after.get(node);
-            const dy=a.top-b.top;
-            node.style.transition='none';
-            node.style.transform='translateY('+dy+'px)';
-        });
-        void stack.offsetHeight;
-        await nextFrame();
-        survivors.forEach(function(node){
-            if(!node.isConnected)return;
-            node.style.transition='transform '+MOVE_MS+'ms '+MOVE_EASE;
-            node.style.transform='translateY(0)';
-        });
-        await wait(MOVE_MS+18);
-        survivors.forEach(function(node){
-            if(!node.isConnected)return;
-            node.style.transition='';node.style.transform='';
-        });
-
-        await resizeWindow(contentHeight(Array.from(stack.children).slice(-MAX_CARDS)));
+        window.notifBridge.sendShape(order.length);
         if(cards.size===0)window.notifBridge.sendEmpty();
-    }
-
-    async function addCard(data){
-        const id=data.id;
-        const dur=(data.duration||6)*1000;
-        const el=document.createElement('div'); el.className='card';
-        const title=(data.title||'Telegram').trim()||'Telegram';
-        const text=(data.body||'').trim()||'Новое сообщение';
-        const top=document.createElement('div'); top.className='top';
-        const av=document.createElement('div'); av.className='avatar';
-        if(data.anon){av.style.background='#6b6b6b';}
-        if(data.icon){const im=document.createElement('img');im.src=data.icon;im.onerror=function(){av.textContent=firstLetter(title);};av.appendChild(im);}
-        else av.textContent=firstLetter(title);
-        const bd=document.createElement('div'); bd.className='body';
-        const tt=document.createElement('div'); tt.className='title'; tt.textContent=title;
-        const tx=document.createElement('div'); tx.className='text'; tx.textContent=text;
-        bd.appendChild(tt); bd.appendChild(tx);
-        const cx=document.createElement('button'); cx.className='close-x'; cx.textContent='✕';
-        cx.onclick=function(){enqueue(function(){return removeCardNow(id);});};
-        top.appendChild(av); top.appendChild(bd); top.appendChild(cx);
-
-        const acts=document.createElement('div'); acts.className='actions';
-        const reply=document.createElement('button'); reply.className='btn reply'; reply.textContent=data.btnOpen||'Открыть';
-        reply.onclick=function(){window.notifBridge.sendAction('open', data.peerId);enqueue(function(){return removeCardNow(id);});};
-        const read=document.createElement('button'); read.className='btn read'; read.textContent=data.btnRead||'Прочитано';
-        read.onclick=function(){window.notifBridge.sendAction('read', data.peerId);enqueue(function(){return removeCardNow(id);});};
-        acts.appendChild(reply); acts.appendChild(read);
-
-        const prog=document.createElement('div'); prog.className='progress';
-        const bar=document.createElement('div'); bar.className='bar'; prog.appendChild(bar);
-        el.appendChild(top); el.appendChild(acts); el.appendChild(prog);
-
-        const newHeight=measureCard(el);
-        const oldEls=Array.from(stack.children);
-        const futureVisible=oldEls.slice(-(MAX_CARDS-1));
-        const futureHeight=Math.ceil(
-            futureVisible.reduce(function(sum,node){return sum+node.getBoundingClientRect().height;},0)
-            +newHeight
-            +GAP*Math.max(0,futureVisible.length)
-            +4
-        );
-
-        // Critical ordering: resize FIRST while only the old stack exists. Since both the
-        // window and stack are bottom-anchored, this changes only transparent space above
-        // the cards and cannot move them on screen. The previous implementation appended
-        // first and resized second, which is what made 1→2 and 2→3 jump in the wrong way.
-        if(futureHeight>window.innerHeight+1)await resizeWindow(futureHeight);
-
-        const oldRects=new Map();
-        oldEls.forEach(function(node){oldRects.set(node,node.getBoundingClientRect());});
-        stack.appendChild(el);
-        const afterRects=new Map();
-        oldEls.forEach(function(node){afterRects.set(node,node.getBoundingClientRect());});
-
-        oldEls.forEach(function(node){
-            const before=oldRects.get(node),after=afterRects.get(node);
-            const dy=before.top-after.top;
-            node.style.transition='none';
-            node.style.transform='translateY('+dy+'px)';
-        });
-
-        // The newcomer begins completely below the bottom clip and rises into the corner.
-        const enterOffset=newHeight+GAP;
-        el.style.transition='none';
-        el.style.opacity='0';
-        el.style.transform='translateY('+enterOffset+'px)';
-
-        cards.set(id,{el:el,bar:bar,timer:null,remaining:dur,startedAt:0});
-
-        let evicted=null,evictedId=null;
-        if(oldEls.length>=MAX_CARDS){
-            evicted=oldEls[0];
-            cards.forEach(function(v,k){if(v.el===evicted)evictedId=k;});
-            if(evictedId!=null){
-                const ec=cards.get(evictedId);
-                if(ec)clearTimeout(ec.timer);
-                cards.delete(evictedId);
-            }
-        }
-
-        void stack.offsetHeight;
-        await nextFrame();
-
-        oldEls.forEach(function(node){
-            if(!node.isConnected)return;
-            node.style.transition='transform '+MOVE_MS+'ms '+MOVE_EASE+(node===evicted?', opacity '+FADE_MS+'ms ease-out':'');
-            node.style.transform='translateY(0)';
-            if(node===evicted)node.style.opacity='0';
-        });
-        el.style.transition='transform '+MOVE_MS+'ms '+MOVE_EASE+', opacity '+FADE_MS+'ms ease-out';
-        el.style.transform='translateY(0)';
-        el.style.opacity='1';
-        bar.style.animation='barshrink '+dur+'ms linear forwards';
-        arm(id,dur);
-
-        await wait(MOVE_MS+25);
-
-        oldEls.forEach(function(node){
-            if(node===evicted||!node.isConnected)return;
-            node.style.transition='';node.style.transform='';node.style.opacity='';
-        });
-        if(el.isConnected){el.style.transition='';el.style.transform='';el.style.opacity='';}
-        if(evicted&&evicted.parentNode)evicted.parentNode.removeChild(evicted);
-
-        // When the incoming card is shorter than the evicted one, defer the shrink until
-        // after the top card has finished leaving, otherwise it would be clipped too early.
-        if(Math.abs(window.innerHeight-futureHeight)>1)await resizeWindow(futureHeight);
-
-        el.onmouseenter=function(){pauseCard(id);};
-        el.onmouseleave=function(){resumeCard(id);};
     }
 
     window.notifBridge.onAdd(function(data){
@@ -377,9 +308,9 @@ function ensureWin() {
     const wa = primaryWorkArea();
     const win = _win = new BrowserWindow({
         width: WIDTH,
-        height: 120,
+        height: STACK_HEIGHT,
         x: wa.x + wa.width - WIDTH - MARGIN,
-        y: wa.y + wa.height - 120 - MARGIN,
+        y: wa.y + wa.height - STACK_HEIGHT - MARGIN,
         frame: false,
         transparent: true,
         resizable: false,
@@ -404,6 +335,7 @@ function ensureWin() {
     });
     win.setAlwaysOnTop(true, 'screen-saver');
     try { win.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true }); } catch (e) {}
+    try { win.setShape([]); } catch (_) {}
 
     _ready = false;
     win.webContents.once('did-finish-load', () => {
