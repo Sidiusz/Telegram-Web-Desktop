@@ -8,20 +8,29 @@ function closeNativePanel(animate){
     if(window.__tgdlNativeRefresh) delete window.__tgdlNativeRefresh;
     if(!_nativePanel) return;
     var p=_nativePanel; _nativePanel=null;
-    var st=document.getElementById('Settings'); if(st) st.classList.remove('_tgpush_');
+    var st=document.getElementById('Settings');
     if(animate===false){
         if(p._under)p._under.classList.remove('_twd-under_','_twd-under-back_');
+        if(st)st.classList.remove('_tgpush_');
         p.remove(); return;
     }
-    p.classList.remove('_in_'); p.classList.add('_out_');
+    p.classList.remove('_in_');
     if(p._under){
-        p._under.classList.add('_twd-under-back_');
         p._under.classList.remove('_twd-under_');
+        p._under.classList.add('_twd-under-back_');
     }
-    setTimeout(function(){
-        if(p._under)p._under.classList.remove('_twd-under-back_');
+    void p.offsetWidth;
+    p.classList.add('_out_');
+    var finished=false;
+    function finishBack(e){
+        if(e&&e.target!==p)return;
+        if(finished)return;finished=true;
+        if(p._under)p._under.classList.remove('_twd-under_','_twd-under-back_');
+        if(st)st.classList.remove('_tgpush_');
         if(p&&p.parentNode)p.remove();
-    },330);
+    }
+    p.addEventListener('animationend',finishBack);
+    setTimeout(function(){finishBack();},380);
 }
 
 // Открывает нативный экран Настроек TG (клик по пункту «Настройки» в сайд-меню).
@@ -80,12 +89,15 @@ function openNativePanel(opts){
     panel._content=content;
     // Кладём поверх колонки настроек (та же геометрия, что у слайдов).
     settings.style.position=settings.style.position||'relative';
+    settings.querySelectorAll('._twd-under_,._twd-under-back_').forEach(function(x){
+        x.classList.remove('_twd-under_','_twd-under-back_');
+    });
     panel._under=settings.querySelector('.Transition_slide-active, .Transition__slide--active');
     settings.appendChild(panel);
     _nativePanel=panel;
     if(opts.renderContent) opts.renderContent(content);
-    // Commit the off-screen initial state before starting Telegram's push animation.
-    // requestAnimationFrame may be suspended for an occluded Electron window.
+    // Commit the native off-screen start state, then attach Telegram's own
+    // slide-in-200/push-out animation pair on the same frame.
     void panel.offsetWidth;
     settings.classList.add('_tgpush_');
     if(panel._under)panel._under.classList.add('_twd-under_');

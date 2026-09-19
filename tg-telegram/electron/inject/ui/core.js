@@ -99,21 +99,16 @@ html._tgreading_ .bubble.menu-container.shown{opacity:0 !important;pointer-event
    панель (React-state не трогаем → кнопка работает железно). */
 ._tgpanel_{position:absolute;inset:0;z-index:50;display:flex;flex-direction:column;background:var(--color-background,#212121);
     opacity:1;transform:translateX(200%);}
-/* Mirrors Telegram Web A's native settings transition:
-   destination enters from +200%; source shrinks to 70% and fades out.
-   Back navigation is the exact inverse. */
-@keyframes _twd-settings-panel-in_{from{transform:translateX(200%)}to{transform:translateX(0)}}
-@keyframes _twd-settings-panel-out_{from{transform:translateX(0)}to{transform:translateX(200%)}}
-@keyframes _twd-settings-under-out_{from{transform:scale(1);opacity:1}to{transform:scale(.7);opacity:0}}
-@keyframes _twd-settings-under-in_{from{transform:scale(.7);opacity:0}to{transform:scale(1);opacity:1}}
-._tgpanel_._in_{animation:_twd-settings-panel-in_ .3s cubic-bezier(.25,1,.5,1) forwards;}
-._tgpanel_._out_{animation:_twd-settings-panel-out_ .3s cubic-bezier(.25,1,.5,1) forwards;}
+/* Use Telegram Web A's own settings keyframes instead of approximating them.
+   Forward: slide-in-200 + push-out. Back: the native backwards variants. */
+._tgpanel_._in_{animation:slide-in-200 var(--slide-transition,.3s cubic-bezier(.25,1,.5,1)) both;}
+._tgpanel_._out_{animation:slide-in-200-backwards var(--slide-transition,.3s cubic-bezier(.25,1,.5,1)) both;}
 #Settings .Transition_slide-active._twd-under_,#Settings .Transition__slide--active._twd-under_{
     transform-origin:center center;
-    animation:_twd-settings-under-out_ .3s cubic-bezier(.25,1,.5,1) forwards!important;}
+    animation:push-out var(--slide-transition,.3s cubic-bezier(.25,1,.5,1)) both!important;}
 #Settings .Transition_slide-active._twd-under-back_,#Settings .Transition__slide--active._twd-under-back_{
     transform-origin:center center;
-    animation:_twd-settings-under-in_ .3s cubic-bezier(.25,1,.5,1) forwards!important;}
+    animation:push-out-backwards var(--slide-transition,.3s cubic-bezier(.25,1,.5,1)) both!important;}
 ._tgpanel_ .left-header{flex:0 0 auto;}
 ._tgpanel_ .settings-content{flex:1;overflow-y:auto;background:var(--color-background-secondary,#0f0f0f);}
 /* Small layout helpers around native Telegram controls. */

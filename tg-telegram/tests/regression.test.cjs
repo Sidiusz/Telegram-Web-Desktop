@@ -322,17 +322,18 @@ test('custom UI stays inside Telegram Settings and keeps native navigation seman
     assert.doesNotMatch(settings, /function injectGeneralSettings|function injectAboutSection|function renderSt/);
 
     assert.match(settings, /_TWD_FILLED_GLYPHS/);
-    assert.match(core, /Mirrors Telegram Web A's native settings transition/);
-    assert.match(core, /\.3s cubic-bezier\(\.25,1,\.5,1\)/);
-    assert.match(core, /@keyframes _twd-settings-panel-in_/);
-    assert.match(core, /@keyframes _twd-settings-panel-out_/);
-    assert.match(core, /@keyframes _twd-settings-under-out_/);
+    assert.match(core, /Use Telegram Web A's own settings keyframes/);
+    assert.match(core, /slide-in-200 var\(--slide-transition/);
+    assert.match(core, /slide-in-200-backwards var\(--slide-transition/);
+    assert.match(core, /push-out var\(--slide-transition/);
+    assert.match(core, /push-out-backwards var\(--slide-transition/);
     assert.match(core, /transform:translateX\(200%\)/);
-    assert.match(core, /transform:scale\(\.7\);opacity:0/);
     assert.match(core, /_twd-range-control_\{[^}]*width:22rem;[^}]*flex:0 0 22rem/);
     assert.match(core, /_twd-range-input_/);
     assert.match(core, /accent-color:var\(--color-primary/);
-    assert.doesNotMatch(core, /_tgpanel_\._in_\{animation:slide-in-200|_twd-under_[^{]*push-out/);
+    assert.doesNotMatch(core, /@keyframes _twd-settings-/);
+    assert.match(panels, /addEventListener\('animationend',finishBack\)/);
+    assert.match(panels, /querySelectorAll\('\._twd-under_,\._twd-under-back_'\)/);
 
     const modal = read('electron/inject/ui/modal.js');
     assert.doesNotMatch(modal, /function makePanel\(|function openPanel\(/);
