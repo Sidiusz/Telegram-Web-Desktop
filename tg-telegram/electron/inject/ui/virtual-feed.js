@@ -1,4 +1,4 @@
-// Local virtual "Feed" chat. Sources are real Telegram channels/groups, but the
+// Local virtual "Feed" chat. Sources are Telegram broadcast channels only; the
 // feed row and posts exist only in this client. Nothing is sent or forwarded.
 (function(){
     if(window.__twdVirtualFeedStarted)return;
@@ -14,6 +14,9 @@
     var lastChatContext=null;
     var lastUnderlying=null;
     var renderSeq=0;
+    var channelCatalog=new Map();
+    var mediaObserver=null;
+    var mediaViewer=null;
     var ru=function(){return typeof curLang==='function'&&curLang()==='ru';};
     var tr=function(r,e){return ru()?r:e;};
     var keyOf=function(chatId,messageId){return String(chatId)+':'+String(messageId);};
@@ -24,12 +27,20 @@
         try{window.dispatchEvent(new CustomEvent('__twd_feed_config',{detail:{sources:sourceIds()}}));}catch(_){}
     }
     async function loadSources(){
-        try{
-            var s=await INV('get_settings')||{};
-            feedSources=Array.isArray(s.feed_sources)?s.feed_sources.map(function(x){
-                return {id:String(x.id||''),title:String(x.title||''),username:String(x.username||'')};
-            }).filter(function(x){return /^-\d+$/.test(x.id);}):[];
-        }catch(_){feedSources=[];}
+        var settings={};
+        try{settings=await INV('get_settings')||{};}catch(_){settings={};}
+        var requested=Array.isArray(settings.feed_sources)?settings.feed_sources.map(function(x){
+            return {id:String(x.id||''),title:String(x.title||''),username:String(x.username||'')};
+        }).filter(function(x){return /^-\d+$/.test(x.id);}):[];
+        var states=await readTelegramStates();
+        rebuildChannelCatalog(states);
+        feedSources=requested.filter(function(x){return channelCatalog.has(x.id);}).map(function(x){
+            var meta=channelCatalog.get(x.id)||{};
+            return {id:x.id,title:String(meta.title||x.title||''),username:String((meta.usernames&&meta.usernames.find(function(u){return u&&u.isActive!==false&&u.username;})||{}).username||x.username||'')};
+        });
+        if(feedSources.length!==requested.length){
+            try{await INV('save_settings',{settings:Object.assign({},settings,{feed_sources:feedSources})});}catch(_){}
+        }
         publishConfig();
         updateFeedRow();
         if(feedView)renderFeed();
@@ -38,9 +49,11 @@
         var clean=[],seen=new Set();
         (next||[]).forEach(function(x){
             var id=String(x&&x.id||'');
-            if(!/^-\d+$/.test(id)||seen.has(id))return;
+            if(!/^-\d+$/.test(id)||seen.has(id)||!channelCatalog.has(id))return;
             seen.add(id);
-            clean.push({id:id,title:String(x.title||'').slice(0,160),username:String(x.username||'').replace(/^@/,'').slice(0,64)});
+            var meta=channelCatalog.get(id)||{};
+            var uname=(meta.usernames&&meta.usernames.find(function(u){return u&&u.isActive!==false&&u.username;})||{}).username;
+            clean.push({id:id,title:String(meta.title||x.title||'').slice(0,160),username:String(uname||x.username||'').replace(/^@/,'').slice(0,64)});
         });
         feedSources=clean;
         try{
@@ -76,9 +89,16 @@
             var type=keys[i],m=content[type];if(!m)continue;
             return {
                 type:type,
+                id:m.id!=null?String(m.id):'',
                 thumbnail:m.thumbnail&&m.thumbnail.dataUri?String(m.thumbnail.dataUri):'',
                 fileName:m.fileName?String(m.fileName):'',
-                duration:Number(m.duration)||0
+                duration:Number(m.duration)||0,
+                mimeType:m.mimeType?String(m.mimeType):'',
+                width:Number(m.width||(m.thumbnail&&m.thumbnail.width))||0,
+                height:Number(m.height||(m.thumbnail&&m.thumbnail.height))||0,
+                size:Number(m.size)||0,
+                sizes:Array.isArray(m.sizes)?m.sizes.map(function(x){return{width:Number(x&&x.width)||0,height:Number(x&&x.height)||0,type:String(x&&x.type||'')};}):[],
+                previewPhotoSizes:Array.isArray(m.previewPhotoSizes)?m.previewPhotoSizes.map(function(x){return{width:Number(x&&x.width)||0,height:Number(x&&x.height)||0,type:String(x&&x.type||'')};}):[]
             };
         }
         return null;
@@ -115,6 +135,16 @@
         };
     }
 
+    function rebuildChannelCatalog(states){
+        channelCatalog.clear();
+        (states||[]).forEach(function(state){
+            var chats=state&&state.chats&&state.chats.byId||{};
+            Object.keys(chats).forEach(function(id){
+                var meta=chats[id];
+                if(meta&&meta.type==='chatTypeChannel')channelCatalog.set(String(id),meta);
+            });
+        });
+    }
     function readTelegramStates(){
         return new Promise(function(resolve){
             var states=[];
@@ -138,9 +168,11 @@
     }
     async function collectFeedItems(){
         var sources=new Set(sourceIds()),map=new Map(),states=await readTelegramStates();
+        rebuildChannelCatalog(states);
         states.forEach(function(state){
             feedSources.forEach(function(src){
                 var meta=state&&state.chats&&state.chats.byId&&state.chats.byId[src.id];
+                if(!meta||meta.type!=='chatTypeChannel')return;
                 if(meta){
                     if(!src.title&&meta.title)src.title=String(meta.title);
                     if(!src.username&&Array.isArray(meta.usernames)){
@@ -210,7 +242,100 @@
         var path=document.createElementNS(ns,'path');path.setAttribute('d','M3 17h6V0c-.193 2.84-.876 5.767-2.05 8.782-.904 2.325-2.446 4.485-4.625 6.48A1 1 0 003 17z');path.setAttribute('class','corner');
         svg.appendChild(path);return svg;
     }
-    function makePost(item){
+    function mediaPreviewHash(media){
+        if(!media||!media.id)return '';
+        if(media.type==='photo')return 'photo'+media.id+'?size=x';
+        if(media.type==='video'||media.type==='animation'||media.type==='document')return 'document'+media.id+'?size=x';
+        return '';
+    }
+    function mediaFullHash(media){
+        if(!media||!media.id)return '';
+        if(media.type==='photo')return 'photo'+media.id;
+        if(media.type==='video'||media.type==='animation'||media.type==='document')return 'document'+media.id;
+        return '';
+    }
+    async function loadMediaHash(hash,retry){
+        if(!hash||!window.__twdFeedMediaApi||typeof window.__twdFeedMediaApi.load!=='function')throw new Error('media api unavailable');
+        try{return await window.__twdFeedMediaApi.load(hash);}
+        catch(e){
+            if((retry||0)<3){
+                await new Promise(function(r){setTimeout(r,350*(retry+1));});
+                return loadMediaHash(hash,(retry||0)+1);
+            }
+            throw e;
+        }
+    }
+    function loadFeedPreview(img){
+        if(!img||!img.isConnected||img.dataset.twdMediaReady==='1'||img.dataset.twdMediaLoading==='1')return;
+        var hash=img.dataset.twdMediaHash;if(!hash)return;
+        img.dataset.twdMediaLoading='1';
+        loadMediaHash(hash).then(function(url){
+            if(img.isConnected&&url){img.src=url;img.dataset.twdMediaReady='1';img.classList.add('_twd-feed-media-ready_');}
+        }).catch(function(){}).finally(function(){if(img&&img.dataset)delete img.dataset.twdMediaLoading;});
+    }
+    function hydrateMediaNearViewport(){
+        if(!feedBody||!feedBody.isConnected)return;
+        var root=feedBody.getBoundingClientRect(),pad=700;
+        feedBody.querySelectorAll('._twd-feed-native-thumb_[data-twd-media-hash]').forEach(function(img){
+            var r=img.getBoundingClientRect();
+            if(r.bottom>=root.top-pad&&r.top<=root.bottom+pad)loadFeedPreview(img);
+        });
+    }
+    function setupMediaObserver(){
+        if(mediaObserver){try{mediaObserver.disconnect();}catch(_){}}
+        mediaObserver=new IntersectionObserver(function(entries){
+            entries.forEach(function(entry){
+                if(!entry.isIntersecting)return;
+                loadFeedPreview(entry.target);
+            });
+        },{root:feedBody,rootMargin:'700px 0px'});
+        if(!feedBody._twdMediaScrollBound){
+            feedBody._twdMediaScrollBound=true;
+            var timer=0;
+            feedBody.addEventListener('scroll',function(){
+                clearTimeout(timer);timer=setTimeout(hydrateMediaNearViewport,60);
+            },{passive:true});
+        }
+    }
+    function closeMediaViewer(){
+        if(!mediaViewer)return;
+        try{mediaViewer.remove();}catch(_){}
+        mediaViewer=null;
+    }
+    function openMediaViewer(item){
+        var media=item&&item.media,hash=mediaFullHash(media);
+        if(!hash||!media)return;
+        try{
+            var actions=window.__tgRuntime&&window.__tgRuntime.getActions&&window.__tgRuntime.getActions();
+            if(actions&&typeof actions.openMediaViewer==='function'){
+                actions.openMediaViewer({chatId:String(item.chatId),messageId:Number(item.messageId)});
+                return;
+            }
+        }catch(_){}
+        closeMediaViewer();
+        var root=document.getElementById('portals')||document.body;
+        mediaViewer=document.createElement('div');mediaViewer.className='_twd-feed-media-viewer_';
+        var stage=document.createElement('div');stage.className='_twd-feed-media-stage_';
+        var loading=document.createElement('div');loading.className='_twd-feed-media-loading_';loading.textContent=tr('Загрузка…','Loading…');
+        var close=document.createElement('button');close.type='button';close.className='Button smaller translucent-white round _twd-feed-media-close_';close.setAttribute('aria-label',tr('Закрыть','Close'));close.innerHTML='<i class="icon icon-close" aria-hidden="true"></i>';
+        close.addEventListener('click',function(e){e.stopPropagation();closeMediaViewer();});
+        stage.appendChild(loading);mediaViewer.append(stage,close);root.appendChild(mediaViewer);
+        mediaViewer.addEventListener('click',function(e){if(e.target===mediaViewer)closeMediaViewer();});
+        var esc=function(e){if(e.key==='Escape'){window.removeEventListener('keydown',esc,true);closeMediaViewer();}};
+        window.addEventListener('keydown',esc,true);
+        loadMediaHash(hash).then(function(url){
+            if(!mediaViewer||!mediaViewer.isConnected)return;
+            stage.innerHTML='';
+            if(media.type==='video'||media.type==='animation'){
+                var video=document.createElement('video');video.className='_twd-feed-media-full_';video.src=url;video.controls=true;video.autoplay=true;video.playsInline=true;stage.appendChild(video);
+            }else{
+                var full=document.createElement('img');full.className='_twd-feed-media-full_';full.src=url;full.alt='';full.draggable=false;stage.appendChild(full);
+            }
+        }).catch(function(){
+            if(loading&&loading.isConnected)loading.textContent=tr('Не удалось загрузить медиа','Failed to load media');
+        });
+    }
+    function makePost(item,eagerMedia){
         var src=sourceById(item.chatId)||{id:item.chatId,title:item.chatId};
         var hasText=!!item.text,hasMedia=!!item.media;
 
@@ -225,22 +350,18 @@
         var wrapper=document.createElement('div');wrapper.className='message-content-wrapper can-select-text';
         var peerColor=0;
         try{peerColor=Number((BigInt(String(item.chatId).replace('-',''))%7n));}catch(_){}
-        var classes=['message-content','peer-color-'+peerColor,'is-forwarded','has-action-button','has-shadow','has-solid-background','has-appendix','_twd-feed-native-bubble_'];
+        var classes=['message-content','peer-color-'+peerColor,'has-action-button','has-shadow','has-solid-background','has-appendix','_twd-feed-native-bubble_'];
         if(hasMedia)classes.push('media','has-adaptive-width','with-wide-media');
         else classes.push('text','has-footer');
         if(hasMedia&&hasText)classes.push('text','has-footer');
         else if(hasMedia)classes.push('no-text','no-footer');
         var bubble=document.createElement('div');bubble.className=classes.join(' ');bubble.setAttribute('dir','auto');
-        var inner=document.createElement('div');inner.className='content-inner forwarded-message';inner.setAttribute('dir','auto');
+        var inner=document.createElement('div');inner.className='content-inner';inner.setAttribute('dir','auto');
 
-        var title=document.createElement('div');title.className='message-title _twd-feed-forward-title_';title.setAttribute('dir','ltr');
+        var title=document.createElement('div');title.className='message-title _twd-feed-source-title_';title.setAttribute('dir','ltr');
         var titleWrap=document.createElement('span');titleWrap.className='message-title-name-container interactive';titleWrap.setAttribute('dir','ltr');
-        var forwardContainer=document.createElement('span');forwardContainer.className='forward-title-container';
-        var forwardIcon=document.createElement('i');forwardIcon.className='icon icon-share-filled';forwardIcon.setAttribute('aria-hidden','true');
-        var forward=document.createElement('span');forward.className='forward-title';forward.textContent=tr('Переслано от','Forwarded from');
-        forwardContainer.append(forwardIcon,forward);
         var nameWrap=document.createElement('span');nameWrap.className='message-title-name';
-        var fAvatar=document.createElement('div');fAvatar.className='Avatar forward-avatar size-micro peer-color-'+peerColor;fAvatar.style.setProperty('--_size','16px');
+        var fAvatar=document.createElement('div');fAvatar.className='Avatar size-micro _twd-feed-source-avatar_ peer-color-'+peerColor;fAvatar.style.setProperty('--_size','16px');
         var fInner=document.createElement('div');fInner.className='inner';
         try{
             var sourceAvatar=document.querySelector('#LeftColumn .Avatar[data-peer-id="'+CSS.escape(String(item.chatId))+'"] img');
@@ -251,7 +372,7 @@
         fAvatar.appendChild(fInner);
         var sender=document.createElement('span');sender.className='sender-title';sender.textContent=src.title||('@'+src.username)||item.chatId;
         nameWrap.append(fAvatar,sender);
-        titleWrap.append(forwardContainer,nameWrap);title.append(titleWrap);
+        titleWrap.append(nameWrap);title.append(titleWrap);
         var spacer=document.createElement('div');spacer.className='title-spacer';title.appendChild(spacer);
         titleWrap.addEventListener('click',function(){openSource(item);});
         bubble.appendChild(title);
@@ -259,8 +380,13 @@
         if(hasMedia){
             if(item.media.thumbnail){
                 var media=document.createElement('div');media.className='media-inner interactive _twd-feed-native-media_';
+                if(item.media.width&&item.media.height){media.style.setProperty('--media-width',item.media.width+'px');media.style.setProperty('--media-aspect-ratio',String(item.media.width/item.media.height));}
                 var img=document.createElement('img');img.className='full-media opacity-transition slow shown open _twd-feed-native-thumb_';img.src=item.media.thumbnail;img.alt=mediaLabel(item.media.type);img.draggable=false;
+                var previewHash=mediaPreviewHash(item.media);if(previewHash)img.dataset.twdMediaHash=previewHash;
+                media.addEventListener('click',function(e){e.preventDefault();e.stopPropagation();openMediaViewer(item);});
                 media.appendChild(img);
+                if(previewHash&&mediaObserver)mediaObserver.observe(img);
+                if(previewHash&&eagerMedia)setTimeout(function(){loadFeedPreview(img);},0);
                 if(item.media.type==='video'||item.media.type==='animation'){
                     var play=document.createElement('i');play.className='icon icon-large-play _twd-feed-play_';play.setAttribute('aria-hidden','true');media.appendChild(play);
                 }
@@ -333,18 +459,19 @@
         if(!feedSources.length){
             var empty=document.createElement('div');empty.className='_twd-feed-empty_';
             var h=document.createElement('h3');h.textContent=tr('Лента пока пустая','Your feed is empty');
-            var p=document.createElement('p');p.textContent=tr('Нажмите ПКМ по каналу или группе в списке чатов и выберите «Добавить в ленту».','Right-click a channel or group in the chat list and choose “Add to feed”.');
+            var p=document.createElement('p');p.textContent=tr('Нажмите ПКМ по каналу в списке чатов и выберите «Добавить в ленту».','Right-click a channel in the chat list and choose “Add to feed”.');
             empty.append(h,p);container.appendChild(empty);updateFeedHeader();return;
         }
         var loading=document.createElement('div');loading.className='_twd-feed-empty_';loading.textContent=tr('Загрузка постов…','Loading posts…');container.appendChild(loading);
         var items=await collectFeedItems();
         if(seq!==renderSeq||!feedBody)return;
         container.innerHTML='';
+        setupMediaObserver();
         if(!items.length){
             var none=document.createElement('div');none.className='_twd-feed-empty_';none.textContent=tr('В кэше Telegram пока нет постов из выбранных источников. Новые публикации появятся здесь автоматически.','Telegram has no cached posts from these sources yet. New posts will appear here automatically.');container.appendChild(none);
         }else{
             var current='',dateGroup=null,first=true;
-            items.forEach(function(item){
+            items.forEach(function(item,index){
                 var dk=dateKey(item.date);
                 if(dk!==current){
                     current=dk;
@@ -355,9 +482,9 @@
                     var label=document.createElement('span');label.setAttribute('dir','auto');label.textContent=dateLabel(item.date);
                     sticky.appendChild(label);dateGroup.appendChild(sticky);container.appendChild(dateGroup);
                 }
-                dateGroup.appendChild(makePost(item));
+                dateGroup.appendChild(makePost(item,index>=items.length-16));
             });
-            requestAnimationFrame(function(){if(feedBody)feedBody.scrollTop=feedBody.scrollHeight;});
+            setTimeout(function(){if(feedBody){feedBody.scrollTop=feedBody.scrollHeight;setTimeout(hydrateMediaNearViewport,80);}},0);
         }
         updateFeedRow(items);
         updateFeedHeader(items);
@@ -371,14 +498,14 @@
         var close=document.createElement('button');close.className='Button smaller round';close.type='button';close.innerHTML='<i class="icon icon-close"></i>';close.addEventListener('click',toggleSourcePanel);
         head.append(title,close);sourcePanel.appendChild(head);
 
-        if(lastUnderlying&&/^-\d+$/.test(lastUnderlying.id)&&!sourceById(lastUnderlying.id)){
+        if(lastUnderlying&&channelCatalog.has(String(lastUnderlying.id))&&!sourceById(lastUnderlying.id)){
             var add=document.createElement('button');add.className='_twd-feed-source-add_';add.type='button';
-            add.textContent=tr('Добавить открытый чат: ','Add open chat: ')+(lastUnderlying.title||lastUnderlying.id);
+            add.textContent=tr('Добавить открытый канал: ','Add open channel: ')+(lastUnderlying.title||lastUnderlying.id);
             add.addEventListener('click',function(){saveSources(feedSources.concat([{id:lastUnderlying.id,title:lastUnderlying.title||lastUnderlying.id,username:''}]));});
             sourcePanel.appendChild(add);
         }
         if(!feedSources.length){
-            var e=document.createElement('p');e.className='_twd-feed-source-note_';e.textContent=tr('Источников нет. Добавляйте каналы и группы через ПКМ в списке чатов.','No sources yet. Add channels and groups from the chat-list context menu.');sourcePanel.appendChild(e);
+            var e=document.createElement('p');e.className='_twd-feed-source-note_';e.textContent=tr('Источников нет. Добавляйте каналы через ПКМ в списке чатов.','No sources yet. Add channels from the chat-list context menu.');sourcePanel.appendChild(e);
         }else{
             feedSources.forEach(function(src){
                 var row=document.createElement('div');row.className='_twd-feed-source-row_';
@@ -410,7 +537,7 @@
         if(feedView&&feedView.isConnected)return;
         lastUnderlying=currentUnderlyingChat();
         var middle=document.getElementById('MiddleColumn');if(!middle)return;
-        var donor=middle.querySelector(':scope > .messages-layout');
+        var donor=middle.querySelector(':scope > .messages-layout:not(._twd-feed-view_)');
 
         middle.classList.add('_twd-feed-host_');
         document.body.classList.add('_twd-feed-open_');
@@ -474,6 +601,8 @@
     function closeFeed(){
         document.body.classList.remove('_twd-feed-open_');
         var middle=document.getElementById('MiddleColumn');if(middle)middle.classList.remove('_twd-feed-host_');
+        if(mediaObserver){try{mediaObserver.disconnect();}catch(_){}mediaObserver=null;}
+        closeMediaViewer();
         if(feedView&&feedView._underLayout){
             feedView._underLayout.style.visibility='';
             delete feedView._underLayout.dataset.twdFeedHidden;
@@ -491,7 +620,7 @@
             var count=Array.isArray(items)?items.length:null;
             sub.textContent=count!=null
                 ? (n+' '+tr('источн.','sources')+' · '+count+' '+tr('постов','posts'))
-                : (n? n+' '+tr('источн.','sources') : tr('Добавьте каналы и группы','Add channels and groups'));
+                : (n? n+' '+tr('источн.','sources') : tr('Добавьте каналы','Add channels'));
         }
     }
     function buildFeedRow(sample){
@@ -526,10 +655,13 @@
         var sample=list.querySelector('.Chat:not(._twd-feed-chat_)');
         if(!sample)return;
         var inner=sample.parentElement;if(!inner||inner===list)return;
-        if(feedRow&&feedRow.isConnected&&feedRow.parentElement===list){updateFeedRow();return;}
+        inner.classList.add('_twd-feed-list-inner_');
+        if(feedRow&&feedRow.isConnected&&feedRow.parentElement===inner){updateFeedRow();return;}
         document.querySelectorAll('#_twd-feed-chat_').forEach(function(x){x.remove();});
         feedRow=buildFeedRow(sample);
-        list.insertBefore(feedRow,inner);
+        var archive=inner.querySelector('.chat-item-archive');
+        var anchor=archive||inner.querySelector('.Chat:not(._twd-feed-chat_)')||null;
+        inner.insertBefore(feedRow,anchor);
         updateFeedRow();
     }
 
@@ -537,7 +669,7 @@
         var chat=target&&target.closest&&target.closest('#LeftColumn .Chat:not(._twd-feed-chat_)');
         if(!chat)return null;
         var av=chat.querySelector('.Avatar[data-peer-id]'),id=av&&av.getAttribute('data-peer-id');
-        if(!id||!/^-\d+$/.test(String(id)))return null;
+        if(!id||!/^-\d+$/.test(String(id))||!channelCatalog.has(String(id)))return null;
         var t=chat.querySelector('.fullName, h3');
         return {id:String(id),title:String(t&&(t.innerText||t.textContent)||id),ts:Date.now()};
     }
@@ -589,6 +721,7 @@
         applyFeedEvent(e.detail);
         var q=window.__twdFeedUpdateQueue;if(Array.isArray(q)&&q.length)q.shift();
     });
+    window.addEventListener('__twd_feed_media_ready',function(){if(feedView)setTimeout(hydrateMediaNearViewport,0);});
     function drainQueue(){
         var q=window.__twdFeedUpdateQueue;if(!Array.isArray(q)||!q.length)return;
         q.splice(0,q.length).forEach(applyFeedEvent);

@@ -34,6 +34,10 @@ try {
             const historyEnabled = !!(historyConfig && (historyConfig.showDeleted || historyConfig.editHistory));
             const feedSourceIds = new Set(Array.isArray(feedConfig && feedConfig.sources) ? feedConfig.sources.map(String) : []);
             const feedByMessageId = new Map();
+            const feedMediaRequests = new Map();
+            const feedMediaCache = new Map();
+            let feedApiWorker = null;
+            let feedMediaSeq = 0;
             const historyTracked = new Map();
             const historyByMessageId = new Map();
             const historyDeletedByChat = new Map();
@@ -79,9 +83,16 @@ try {
                     const thumb = media.thumbnail && media.thumbnail.dataUri ? String(media.thumbnail.dataUri) : '';
                     return {
                         type,
+                        id: media.id != null ? String(media.id) : '',
                         thumbnail: thumb,
                         fileName: media.fileName ? String(media.fileName) : '',
                         duration: Number(media.duration) || 0,
+                        mimeType: media.mimeType ? String(media.mimeType) : '',
+                        width: Number(media.width || (media.thumbnail && media.thumbnail.width)) || 0,
+                        height: Number(media.height || (media.thumbnail && media.thumbnail.height)) || 0,
+                        size: Number(media.size) || 0,
+                        sizes: Array.isArray(media.sizes) ? media.sizes.map(x => ({ width: Number(x && x.width) || 0, height: Number(x && x.height) || 0, type: String(x && x.type || '') })) : [],
+                        previewPhotoSizes: Array.isArray(media.previewPhotoSizes) ? media.previewPhotoSizes.map(x => ({ width: Number(x && x.width) || 0, height: Number(x && x.height) || 0, type: String(x && x.type || '') })) : [],
                     };
                 }
                 return null;
@@ -116,12 +127,75 @@ try {
                 if (q.length > 1500) q.splice(0, q.length - 1500);
                 try { window.dispatchEvent(new CustomEvent('__twd_feed_update', { detail })); } catch (_) {}
             }
+            function feedHandleMethodPayload(payload) {
+                if (!payload || payload.type !== 'methodResponse' || !payload.messageId) return false;
+                const req = feedMediaRequests.get(String(payload.messageId));
+                if (!req) return false;
+                feedMediaRequests.delete(String(payload.messageId));
+                clearTimeout(req.timer);
+                if (payload.error) {
+                    req.reject(new Error(String(payload.error.message || 'Media request failed')));
+                    return true;
+                }
+                try {
+                    const response = payload.response || {};
+                    const blob = response.dataBlob instanceof Blob ? response.dataBlob : null;
+                    if (!blob) throw new Error('Media response did not contain a blob');
+                    const objectUrl = URL.createObjectURL(blob);
+                    feedMediaCache.set(req.url, objectUrl);
+                    req.resolve(objectUrl);
+                } catch (e) { req.reject(e); }
+                return true;
+            }
+            function feedWaitForApiWorker(timeoutMs) {
+                if (feedApiWorker) return Promise.resolve(feedApiWorker);
+                const deadline = Date.now() + (Number(timeoutMs) || 15000);
+                return new Promise((resolve, reject) => {
+                    const tick = () => {
+                        if (feedApiWorker) { resolve(feedApiWorker); return; }
+                        if (Date.now() >= deadline) { reject(new Error('Telegram API worker is not ready')); return; }
+                        setTimeout(tick, 100);
+                    };
+                    tick();
+                });
+            }
+            async function feedLoadMedia(url) {
+                url = String(url || '');
+                if (!url) throw new Error('Missing media hash');
+                if (feedMediaCache.has(url)) return feedMediaCache.get(url);
+                const worker = await feedWaitForApiWorker(15000);
+                if (feedMediaCache.has(url)) return feedMediaCache.get(url);
+                const messageId = '__twd_feed_media_' + Date.now().toString(36) + '_' + (++feedMediaSeq).toString(36);
+                return new Promise((resolve, reject) => {
+                    const timer = setTimeout(() => {
+                        feedMediaRequests.delete(messageId);
+                        reject(new Error('Media request timed out'));
+                    }, 45000);
+                    feedMediaRequests.set(messageId, { resolve, reject, timer, url });
+                    try {
+                        worker.postMessage({ payloads: [{
+                            type: 'callMethod',
+                            messageId,
+                            name: 'downloadMedia',
+                            args: [{ url, mediaFormat: 0, isHtmlAllowed: false }],
+                        }] });
+                    } catch (e) {
+                        clearTimeout(timer);
+                        feedMediaRequests.delete(messageId);
+                        reject(e);
+                    }
+                });
+            }
+            window.__twdFeedMediaApi = {
+                load: feedLoadMedia,
+                has: (url) => feedMediaCache.has(String(url || '')),
+            };
             function feedHandleWorkerMessage(event) {
-                if (!feedSourceIds.size) return;
                 const payloads = event && event.data && event.data.payloads;
                 if (!Array.isArray(payloads)) return;
                 payloads.forEach(payload => {
-                    if (!payload || payload.type !== 'updates' || !Array.isArray(payload.updates)) return;
+                    if (feedHandleMethodPayload(payload)) return;
+                    if (!feedSourceIds.size || !payload || payload.type !== 'updates' || !Array.isArray(payload.updates)) return;
                     payload.updates.forEach(update => {
                         if (!update || typeof update !== 'object') return;
                         if (update['@type'] === 'updateMessage') {
@@ -374,7 +448,17 @@ try {
                         } catch (_) {}
                         super(target, options);
                         try {
+                            const twdWorker = this;
                             this.addEventListener('message', function(event) {
+                                try {
+                                    const payloads = event && event.data && event.data.payloads;
+                                    if (Array.isArray(payloads) && payloads.some(p => p && (p.type === 'updates' || p.type === 'methodResponse'))) {
+                                        if (!feedApiWorker) {
+                                            feedApiWorker = twdWorker;
+                                            try { window.dispatchEvent(new Event('__twd_feed_media_ready')); } catch (_) {}
+                                        } else feedApiWorker = twdWorker;
+                                    }
+                                } catch (_) {}
                                 feedHandleWorkerMessage(event);
                                 historyHandleWorkerMessage(event);
                             });
