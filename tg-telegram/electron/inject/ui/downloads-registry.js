@@ -155,6 +155,7 @@ const DL = window.__tgdl = (function(){
             file.dataset.tgdlId = r.id!=null ? String(r.id) : (file.dataset.tgdlId||'');
             file.dataset.tgdlMid = r.mid;
             file.classList.remove('_tgdl_downloading_');
+            clearDownloadingBadge(file);
             ensureBadges(file);
         } else if(r.status==='downloading' || r.status==='pending'){
             file.removeAttribute('data-tgdl-done');

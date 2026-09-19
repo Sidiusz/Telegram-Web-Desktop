@@ -40,7 +40,7 @@ html._tgreading_ .bubble.menu-container.shown{opacity:0 !important;pointer-event
 ._twd_notice_iconhost_{display:flex;align-items:center;justify-content:center;flex-shrink:0;margin-inline-end:.75rem;color:var(--color-toast-action,var(--color-primary));}
 ._twd_notice_text_{opacity:.82;margin-top:.125rem;overflow:hidden;text-overflow:ellipsis;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;}
 ._twd_notice_close_{flex-shrink:0;margin-inline-start:.25rem;color:inherit;}
-.Notification-container.dl_card{margin-left:auto;margin-right:.5rem;transition:width .2s,opacity .2s,transform .2s;}
+.Notification-container.dl_card{margin-left:auto;margin-right:auto;transition:width .2s,opacity .2s,transform .2s;}
 .Notification-container.dl_compact{width:15rem;}
 .Notification-container.dl_compact ._twd_notice_avatar_{width:1.75rem;height:1.75rem;font-size:.8125rem;}
 .Notification-container.dl_compact ._twd_notice_text_{font-size:.8125rem;}

@@ -116,6 +116,8 @@ test('developer tools stay locked until the setting is enabled', () => {
 test('download and addon safety regressions stay covered', () => {
     const ipc = read('electron/ipc.cjs');
     const downloads = read('electron/downloads.cjs');
+    const downloadRegistry = read('electron/inject/ui/downloads-registry.js');
+    const core = read('electron/inject/ui/core.js');
     const addons = read('electron/addons.cjs');
     assert.match(ipc, /SAFE_OPEN_EXTS/);
     assert.match(ipc, /invalid-url/);
@@ -127,6 +129,8 @@ test('download and addon safety regressions stay covered', () => {
     assert.match(ipc, /handle\('get_downloads'[\s\S]*filename: d\.filename[\s\S]*exists:/);
     assert.doesNotMatch(ipc, /handle\('get_downloads'[\s\S]{0,350}\.\.\.d/);
     assert.match(ipc, /normalizeDownloadId/);
+    assert.match(downloadRegistry, /file\.classList\.remove\('_tgdl_downloading_'\);\s*clearDownloadingBadge\(file\);\s*ensureBadges\(file\);/);
+    assert.match(core, /\.Notification-container\.dl_card\{margin-left:auto;margin-right:auto;/);
     assert.doesNotMatch(addons, /embedded_addons|embedded:/);
     assert.match(addons, /\^user:/);
     assert.match(addons, /function normalizeAddonKey/);
