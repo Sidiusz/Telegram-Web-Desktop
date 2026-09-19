@@ -2,7 +2,9 @@
 const { contextBridge, ipcRenderer } = require('electron');
 
 let _proxyBootstrap = { active: false, domains: [], revision: 0 };
+let _historyBootstrap = { showDeleted: false, editHistory: false };
 try { const boot = ipcRenderer.sendSync('get_proxy_bootstrap'); if (boot && typeof boot === 'object') _proxyBootstrap = boot; } catch (_) {}
+try { const boot = ipcRenderer.sendSync('get_history_bootstrap'); if (boot && typeof boot === 'object') _historyBootstrap = boot; } catch (_) {}
 function publishProxyState(payload) {
     _proxyBootstrap = payload && typeof payload === 'object' ? payload : _proxyBootstrap;
     try {
@@ -24,9 +26,13 @@ contextBridge.exposeInMainWorld('__twdProxyRouter', { get: () => ({ ..._proxyBoo
 
 try {
     contextBridge.executeInMainWorld({
-        func: (initial) => {
+        func: (initial, historyConfig) => {
             window.__twdProxyState = initial;
             const proxyWorkers = new Set();
+            const historyEnabled = !!(historyConfig && (historyConfig.showDeleted || historyConfig.editHistory));
+            const historyTracked = new Map();
+            const historyByMessageId = new Map();
+            const historyDeletedByChat = new Map();
             // A unique query per renderer boot prevents Chromium/Telegram's service worker
             // from reusing an older already-patched transport worker after an app update.
             const proxyWorkerNonce = Date.now().toString(36) + Math.random().toString(36).slice(2);
@@ -38,6 +44,219 @@ try {
                     catch (_) { proxyWorkers.delete(worker); }
                 }
             });
+            function historyActiveChatId() {
+                try {
+                    const avatar = document.querySelector('#MiddleColumn .MiddleHeader .Avatar[data-peer-id]');
+                    const peerId = avatar && avatar.getAttribute('data-peer-id');
+                    if (peerId) return String(peerId);
+                    const match = String(location.hash || '').match(/#(-?\d+)/);
+                    return match ? match[1] : '';
+                } catch (_) { return ''; }
+            }
+            function historyIsPrivate(chatId) {
+                try { return BigInt(String(chatId)) > 0n; } catch (_) { return false; }
+            }
+            function historyMessageText(message) {
+                try {
+                    const text = message && message.content && message.content.text;
+                    return String(text && text.text != null ? text.text : '');
+                } catch (_) { return ''; }
+            }
+            function historyKey(chatId, messageId) {
+                return String(chatId) + ':' + String(messageId);
+            }
+            function historyEmit(detail) {
+                if (!historyEnabled || !detail) return;
+                const q = window.__twdHistoryUpdateQueue || (window.__twdHistoryUpdateQueue = []);
+                q.push(detail);
+                if (q.length > 1500) q.splice(0, q.length - 1500);
+                try { window.dispatchEvent(new CustomEvent('__twd_history_update', { detail })); } catch (_) {}
+            }
+            function historyDomSnapshot(chatId, messageId) {
+                try {
+                    if (historyActiveChatId() !== String(chatId)) return null;
+                    const selector = '#MiddleColumn .Message[data-message-id="' + CSS.escape(String(messageId)) + '"]';
+                    const node = document.querySelector(selector);
+                    if (!node) return null;
+                    const candidates = ['.message-text','.text-content','.TranslatableMessage','.message-content .content-inner','.message-content .caption'];
+                    let text = '';
+                    for (const sel of candidates) {
+                        const el = node.querySelector(sel);
+                        if (el && String(el.innerText || el.textContent || '').trim()) {
+                            text = String(el.innerText || el.textContent || '').trim();
+                            break;
+                        }
+                    }
+                    return { chatId: String(chatId), messageId: String(messageId), text, timestamp: Date.now() };
+                } catch (_) { return null; }
+            }
+            function historyRemember(item) {
+                if (!item || !item.chatId || !item.messageId) return;
+                const key = historyKey(item.chatId, item.messageId);
+                historyTracked.set(key, item);
+                historyByMessageId.set(String(item.messageId), key);
+                if (historyTracked.size > 5000) {
+                    const first = historyTracked.keys().next().value;
+                    const old = historyTracked.get(first);
+                    historyTracked.delete(first);
+                    if (old && historyByMessageId.get(String(old.messageId)) === first) historyByMessageId.delete(String(old.messageId));
+                }
+            }
+            function historyTrackMessage(update) {
+                if (!historyEnabled || !update || update['@type'] !== 'updateMessage') return;
+                const message = update.message;
+                if (!message || !message.content) return;
+                const chatId = String(update.chatId != null ? update.chatId : message.chatId != null ? message.chatId : '');
+                const messageId = String(update.id != null ? update.id : message.id != null ? message.id : '');
+                if (!chatId || !messageId) return;
+                const active = historyActiveChatId();
+                if (!historyIsPrivate(chatId) && active !== chatId) return;
+                const key = historyKey(chatId, messageId);
+                let previous = historyTracked.get(key);
+                if (!previous && update.isFromNew !== true && active === chatId) previous = historyDomSnapshot(chatId, messageId);
+                const current = { chatId, messageId, text: historyMessageText(message), timestamp: Date.now() };
+                historyRemember(current);
+                historyEmit({
+                    kind: update.isFromNew === true ? 'new' : 'edit',
+                    chatId,
+                    messageId,
+                    text: current.text,
+                    oldText: previous ? String(previous.text || '') : null,
+                    timestamp: current.timestamp
+                });
+            }
+            function historyScrubState(value) {
+                if (!value || !value.messages || !value.messages.byChatId || !historyDeletedByChat.size) return value;
+                let copy;
+                try { copy = structuredClone(value); } catch (_) { return value; }
+                let changed = false;
+                historyDeletedByChat.forEach((ids, chatId) => {
+                    const bucket = copy.messages && copy.messages.byChatId && copy.messages.byChatId[chatId];
+                    if (!bucket) return;
+                    ids.forEach((mid) => {
+                        if (bucket.byId && Object.prototype.hasOwnProperty.call(bucket.byId, mid)) {
+                            delete bucket.byId[mid];
+                            changed = true;
+                        }
+                        if (bucket.ephemeralById && Object.prototype.hasOwnProperty.call(bucket.ephemeralById, mid)) {
+                            delete bucket.ephemeralById[mid];
+                            changed = true;
+                        }
+                    });
+                    Object.values(bucket.threadsById || {}).forEach((thread) => {
+                        if (!thread) return;
+                        const local = thread.localState || {};
+                        ['listedIds','lastViewportIds','pinnedIds'].forEach((name) => {
+                            if (!Array.isArray(local[name])) return;
+                            const next = local[name].filter((id) => !ids.has(String(id)));
+                            if (next.length !== local[name].length) {
+                                local[name] = next;
+                                changed = true;
+                            }
+                        });
+                        if (thread.threadInfo && ids.has(String(thread.threadInfo.lastMessageId))) {
+                            thread.threadInfo.lastMessageId = undefined;
+                            changed = true;
+                        }
+                    });
+                });
+                return changed ? copy : value;
+            }
+            function historyScrubPersisted() {
+                if (!historyConfig || historyConfig.showDeleted !== true || !historyDeletedByChat.size) return;
+                try {
+                    const req = indexedDB.open('tt-data');
+                    req.onsuccess = function() {
+                        const db = req.result;
+                        let tx;
+                        try { tx = db.transaction('store', 'readwrite'); } catch (_) { try { db.close(); } catch (_) {} return; }
+                        const cursor = tx.objectStore('store').openCursor();
+                        cursor.onsuccess = function() {
+                            const c = cursor.result;
+                            if (!c) return;
+                            if (/^tt-global-state(?:_\d+)?$/.test(String(c.key || ''))) {
+                                const next = historyScrubState(c.value);
+                                if (next !== c.value) {
+                                    try { c.update(next); } catch (_) {}
+                                }
+                            }
+                            c.continue();
+                        };
+                        tx.oncomplete = tx.onerror = function() { try { db.close(); } catch (_) {} };
+                    };
+                } catch (_) {}
+            }
+            function historyMarkDeleted(item) {
+                if (!item) return;
+                let set = historyDeletedByChat.get(String(item.chatId));
+                if (!set) historyDeletedByChat.set(String(item.chatId), set = new Set());
+                set.add(String(item.messageId));
+            }
+            function historyProtectDelete(update) {
+                if (!historyConfig || historyConfig.showDeleted !== true || !update || !Array.isArray(update.ids)) return true;
+                const active = historyActiveChatId();
+                const explicitChat = update.chatId != null ? String(update.chatId) : '';
+                const protectedItems = [];
+                const remaining = [];
+                update.ids.forEach((rawId) => {
+                    const messageId = String(rawId);
+                    let item = null;
+                    if (explicitChat) {
+                        const key = historyKey(explicitChat, messageId);
+                        item = historyTracked.get(key) || null;
+                        if (!item && active === explicitChat) item = historyDomSnapshot(explicitChat, messageId);
+                        if (item && !historyIsPrivate(explicitChat) && active !== explicitChat) item = null;
+                    } else {
+                        const key = historyByMessageId.get(messageId);
+                        item = key ? historyTracked.get(key) || null : null;
+                        if (item && !historyIsPrivate(item.chatId) && active !== item.chatId) item = null;
+                        if (!item && active && !historyIsPrivate(active)) item = historyDomSnapshot(active, messageId);
+                    }
+                    if (!item) {
+                        remaining.push(rawId);
+                        return;
+                    }
+                    historyRemember(item);
+                    historyMarkDeleted(item);
+                    protectedItems.push({ chatId: String(item.chatId), messageId, text: String(item.text || ''), timestamp: Date.now() });
+                });
+                if (protectedItems.length) {
+                    historyEmit({ kind: 'delete', items: protectedItems, timestamp: Date.now() });
+                    queueMicrotask(historyScrubPersisted);
+                }
+                update.ids = remaining;
+                return remaining.length > 0;
+            }
+            function historyHandleWorkerMessage(event) {
+                if (!historyEnabled) return;
+                const payloads = event && event.data && event.data.payloads;
+                if (!Array.isArray(payloads)) return;
+                payloads.forEach((payload) => {
+                    if (!payload || payload.type !== 'updates' || !Array.isArray(payload.updates)) return;
+                    const kept = [];
+                    payload.updates.forEach((update) => {
+                        if (!update || typeof update !== 'object') {
+                            kept.push(update);
+                            return;
+                        }
+                        if (update['@type'] === 'updateMessage') historyTrackMessage(update);
+                        if (update['@type'] === 'deleteMessages' && !historyProtectDelete(update)) return;
+                        kept.push(update);
+                    });
+                    payload.updates = kept;
+                });
+            }
+            if (historyConfig && historyConfig.showDeleted === true && window.IDBObjectStore && !window.__twdHistoryIdbPut) {
+                try {
+                    const nativePut = IDBObjectStore.prototype.put;
+                    const wrappedPut = function(value, key) {
+                        if (/^tt-global-state(?:_\d+)?$/.test(String(key || ''))) value = historyScrubState(value);
+                        return nativePut.call(this, value, key);
+                    };
+                    Object.defineProperty(window, '__twdHistoryIdbPut', { value: wrappedPut });
+                    IDBObjectStore.prototype.put = wrappedPut;
+                } catch (_) {}
+            }
             const NativeWorker = window.Worker;
             if (NativeWorker && !window.__twdNativeWorker) {
                 window.Worker = class RoutedWorker extends NativeWorker {
@@ -52,6 +271,9 @@ try {
                             }
                         } catch (_) {}
                         super(target, options);
+                        if (historyEnabled) {
+                            try { this.addEventListener('message', historyHandleWorkerMessage); } catch (_) {}
+                        }
                         if (tagged) { proxyWorkers.add(this); try { this.postMessage({ __twdProxyConfig: window.__twdProxyState }); } catch (_) {} }
                     }
                 };
@@ -61,7 +283,7 @@ try {
                 if (!window.__twdProxyChannel) window.__twdProxyChannel = new BroadcastChannel('__twd_proxy_v1');
                 window.__twdProxyChannel.postMessage(initial);
             } catch (_) {}
-        }, args: [_proxyBootstrap],
+        }, args: [_proxyBootstrap, _historyBootstrap],
     });
 } catch (_) {}
 
@@ -123,7 +345,7 @@ const TWD_ALLOWED_INVOKE = new Set([
     'open_download_folder','open_download_file','clear_cache','fetch_changelog','fetch_changelog_structured',
     'check_update_manual','skip_version','download_update','get_addons','delete_addon','toggle_addon','apply_addons','apply_features',
     'show_image_context_menu','save_blob','open_addons_folder','report_lang','set_tray_image','get_tray_base',
-    'set_notifications_count','history_sync','history_mark_deleted','history_get_chat','history_clear'
+    'set_notifications_count'
 ]);
 function twdInvoke(cmd, args) {
     if (!TWD_ALLOWED_INVOKE.has(cmd)) return Promise.reject(new Error('IPC command is not allowed'));

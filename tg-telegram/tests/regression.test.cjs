@@ -323,27 +323,32 @@ test('custom UI stays inside Telegram Settings and keeps native navigation seman
     assert.match(wide, /Message\.own:not\(\.is-in-document-group\):has\(\.message-content\.media\) \.message-content-wrapper[\s\S]{0,220}justify-content: flex-start/);
 });
 
-test('message history feature persists bounded snapshots and uses Telegram deletion state', () => {
-    const backend = read('electron/message-history.cjs');
+test('message history is event-driven, session-only and native-integrated', () => {
     const feature = read('electron/features/message_history.js');
     const ipc = read('electron/ipc.cjs');
     const preload = read('electron/preload.js');
-    assert.match(backend, /MAX_RECORDS = 3000/);
-    assert.match(backend, /MAX_EDITS = 20/);
-    assert.match(backend, /MAX_HTML = 65536/);
-    assert.match(backend, /items\.slice\(0, MAX_BATCH\)/);
-    assert.match(backend, /const wasDeleted = prev\.deleted === true/);
-    assert.match(feature, /is-deleting/);
-    assert.match(feature, /is-dissolving/);
-    assert.match(feature, /attributeFilter: \['class'\]/);
-    assert.doesNotMatch(feature, /stateHasMessage/);
-    assert.match(feature, /_twd-deleted-clone_/);
-    assert.match(feature, /_twd-edit-history-badge_/);
-    assert.match(ipc, /handle\('history_sync'/);
-    assert.match(ipc, /handle\('history_mark_deleted'/);
-    assert.match(ipc, /handle\('history_get_chat'/);
-    assert.match(preload, /'history_sync'/);
-    assert.match(preload, /'history_mark_deleted'/);
+    assert.equal(fs.existsSync(path.join(root, 'electron/message-history.cjs')), false);
+    assert.match(ipc, /get_history_bootstrap/);
+    assert.match(ipc, /message-history\.json/);
+    assert.doesNotMatch(ipc, /handle\('history_sync'/);
+    assert.doesNotMatch(ipc, /handle\('history_mark_deleted'/);
+    assert.match(preload, /historyHandleWorkerMessage/);
+    assert.match(preload, /this\.addEventListener\('message', historyHandleWorkerMessage\)/);
+    assert.match(preload, /update\['@type'\] === 'deleteMessages'/);
+    assert.match(preload, /IDBObjectStore\.prototype\.put/);
+    assert.match(preload, /historyIsPrivate/);
+    assert.match(preload, /if \(!historyIsPrivate\(chatId\) && active !== chatId\) return/);
+    assert.match(preload, /if \(item && !historyIsPrivate\(item\.chatId\) && active !== item\.chatId\) item = null/);
+    assert.doesNotMatch(preload, /'history_sync'/);
+    assert.doesNotMatch(feature, /setInterval\(scan/);
+    assert.doesNotMatch(feature, /querySelectorAll\('#MiddleColumn \.Message\[data-message-id\]:not/);
+    assert.match(feature, /document\.addEventListener\('contextmenu'/);
+    assert.match(feature, /MessageContextMenu_items/);
+    assert.match(feature, /_twd-edit-history-menu_/);
+    assert.doesNotMatch(feature, /_twd-edit-history-badge_/);
+    assert.match(feature, /className = '_mo_ _twd-history-native_'/);
+    assert.doesNotMatch(feature, /_twd-history-native_ \.modal-dialog/);
+    assert.match(feature, /window\.__twdMessageHistoryApi/);
 });
 
 test('service UI Lab stays hidden and reuses native builders', () => {

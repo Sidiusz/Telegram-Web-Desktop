@@ -4,16 +4,11 @@
 
     var cfg = window.__twdMessageHistoryConfig || {};
     if (!cfg.showDeleted && !cfg.editHistory) return;
-    if (!window.tgBridge || typeof window.tgBridge.invoke !== 'function') return;
 
-    var invoke = function (cmd, args) { return window.tgBridge.invoke(cmd, args || {}); };
-    var seen = new Map();
     var records = new Map();
-    var currentChat = '';
-    var lastFetch = 0;
-    var syncing = false;
-    var pendingSync = new Map();
-    var observer = null;
+    var lastContext = null;
+    var MAX_EDITS = 20;
+    var MAX_RECORDS = 5000;
 
     function langRu() {
         return String(document.documentElement.lang || navigator.language || '').toLowerCase().indexOf('ru') === 0;
@@ -22,317 +17,287 @@
         var avatar = document.querySelector('#MiddleColumn .MiddleHeader .Avatar[data-peer-id]');
         var peerId = avatar && avatar.getAttribute('data-peer-id');
         if (peerId) return String(peerId);
-        // Legacy Web A builds exposed the active peer in location.hash.
         var m = String(location.hash || '').match(/#(-?\d+)/);
         return m ? m[1] : '';
     }
-    function normalizeText(v) {
-        return String(v == null ? '' : v).replace(/\u00a0/g, ' ').replace(/[ \t]+\n/g, '\n').replace(/\n{3,}/g, '\n\n').trim();
+    function keyOf(chatId, messageId) {
+        return String(chatId) + ':' + String(messageId);
     }
-    function messageText(msg) {
-        var selectors = [
-            '.message-text',
-            '.text-content',
-            '.TranslatableMessage',
-            '.message-content .content-inner',
-            '.message-content .caption'
-        ];
-        for (var i = 0; i < selectors.length; i++) {
-            var el = msg.querySelector(selectors[i]);
-            if (el) {
-                var t = normalizeText(el.innerText || el.textContent || '');
-                if (t) return t;
-            }
+    function trimRecords() {
+        while (records.size > MAX_RECORDS) records.delete(records.keys().next().value);
+    }
+    function getRecord(chatId, messageId) {
+        return records.get(keyOf(chatId, messageId)) || null;
+    }
+    function ensureRecord(chatId, messageId, text, timestamp) {
+        var key = keyOf(chatId, messageId);
+        var rec = records.get(key);
+        if (!rec) {
+            rec = {
+                chatId: String(chatId),
+                messageId: String(messageId),
+                text: String(text == null ? '' : text),
+                edits: [],
+                deleted: false,
+                updatedAt: Number(timestamp) || Date.now()
+            };
+            records.set(key, rec);
+            trimRecords();
         }
-        var content = msg.querySelector('.message-content');
-        if (!content) return '';
-        var clone = content.cloneNode(true);
-        clone.querySelectorAll('.message-time,.MessageMeta,.Reactions,.ReactionList,.quick-reaction,.message-action-buttons-container,button').forEach(function (x) { x.remove(); });
-        return normalizeText(clone.innerText || clone.textContent || '');
+        return rec;
     }
-    function senderText(msg) {
-        var el = msg.querySelector('.sender-title,.message-title,.SenderName,.MessageSender,.peer-title');
-        return normalizeText(el && (el.innerText || el.textContent || ''));
+    function pushEdit(rec, text, timestamp) {
+        if (!rec || !cfg.editHistory) return;
+        text = String(text == null ? '' : text);
+        var last = rec.edits[rec.edits.length - 1];
+        if (last && last.text === text) return;
+        rec.edits.push({ text: text, timestamp: Number(timestamp) || Date.now() });
+        if (rec.edits.length > MAX_EDITS) rec.edits.splice(0, rec.edits.length - MAX_EDITS);
     }
-    function timeText(msg) {
-        var el = msg.querySelector('.message-time,.MessageMeta time,.MessageMeta,.time');
-        return normalizeText(el && (el.innerText || el.textContent || '')).slice(0, 128);
+    function applyHistoryEvent(ev) {
+        if (!ev || typeof ev !== 'object') return;
+        if (ev.kind === 'new' || ev.kind === 'edit') {
+            var rec = getRecord(ev.chatId, ev.messageId);
+            if (!rec && ev.kind === 'edit' && ev.oldText != null) {
+                rec = ensureRecord(ev.chatId, ev.messageId, ev.oldText, ev.timestamp);
+            }
+            if (!rec) rec = ensureRecord(ev.chatId, ev.messageId, ev.text, ev.timestamp);
+            if (ev.kind === 'edit') {
+                var previous = ev.oldText != null ? String(ev.oldText) : String(rec.text || '');
+                if (previous !== String(ev.text == null ? '' : ev.text)) pushEdit(rec, previous, ev.timestamp);
+            }
+            rec.text = String(ev.text == null ? '' : ev.text);
+            rec.updatedAt = Number(ev.timestamp) || Date.now();
+            return;
+        }
+        if (ev.kind === 'delete' && Array.isArray(ev.items)) {
+            ev.items.forEach(function (item) {
+                var rec = ensureRecord(item.chatId, item.messageId, item.text, item.timestamp || ev.timestamp);
+                if (item.text != null && !rec.text) rec.text = String(item.text);
+                rec.deleted = true;
+                rec.deletedAt = Number(item.timestamp || ev.timestamp) || Date.now();
+                markVisibleDeleted(rec);
+            });
+        }
     }
-    function safeHtml(msg) {
+    function messageNode(chatId, messageId) {
+        if (currentChatId() !== String(chatId)) return null;
         try {
-            var clone = msg.cloneNode(true);
-            clone.classList.remove('_twd-deleted-clone_', 'is-deleting', 'is-dissolving');
-            clone.querySelectorAll('script,iframe,object,embed,form,input,textarea,select,._twd-edit-history-badge_,._twd-deleted-mark_').forEach(function (x) { x.remove(); });
-            clone.querySelectorAll('[id]').forEach(function (x) { x.removeAttribute('id'); });
-            clone.querySelectorAll('*').forEach(function (x) {
-                Array.from(x.attributes || []).forEach(function (a) {
-                    if (/^on/i.test(a.name)) x.removeAttribute(a.name);
-                });
-            });
-            return clone.outerHTML.slice(0, 65536);
-        } catch (_) { return ''; }
+            return document.querySelector('#MiddleColumn .Message[data-message-id="' + CSS.escape(String(messageId)) + '"]');
+        } catch (_) { return null; }
     }
-    function snapshot(msg, chatId) {
-        if (!msg || msg.classList.contains('_twd-deleted-clone_')) return null;
-        var mid = msg.getAttribute('data-message-id');
-        if (!mid || !chatId) return null;
-        return {
-            chatId: String(chatId),
-            messageId: String(mid),
-            text: messageText(msg),
-            html: safeHtml(msg),
-            own: msg.classList.contains('own'),
-            sender: senderText(msg),
-            timeText: timeText(msg),
-            timestamp: Date.now()
-        };
+    function markNodeDeleted(node, rec) {
+        if (!node || !rec || !rec.deleted || node.classList.contains('_twd-deleted-message_')) return;
+        node.classList.add('_twd-deleted-message_');
+        var host = node.querySelector('.message-content') || node;
+        if (host.querySelector('._twd-deleted-mark_')) return;
+        var mark = document.createElement('span');
+        mark.className = '_twd-deleted-mark_';
+        mark.textContent = langRu() ? 'Удалено' : 'Deleted';
+        host.appendChild(mark);
     }
-    function keyOf(chatId, mid) { return String(chatId) + ':' + String(mid); }
-
-    function queueSnapshot(snap) {
-        if (!snap) return;
-        var k = keyOf(snap.chatId, snap.messageId);
-        var prev = seen.get(k);
-        if (prev && prev.text === snap.text && prev.html === snap.html) return;
-        seen.set(k, { text: snap.text, html: snap.html });
-        pendingSync.set(k, snap);
+    function markVisibleDeleted(rec) {
+        markNodeDeleted(messageNode(rec.chatId, rec.messageId), rec);
     }
-    function flushSync() {
-        if (syncing || !pendingSync.size) return;
-        syncing = true;
-        var items = Array.from(pendingSync.values()).slice(0, 300);
-        items.forEach(function (x) { pendingSync.delete(keyOf(x.chatId, x.messageId)); });
-        invoke('history_sync', { items: items, trackEdits: cfg.editHistory === true })
-            .catch(function () {})
-            .finally(function () { syncing = false; if (pendingSync.size) setTimeout(flushSync, 250); });
-    }
-    function inspectDeletingMessage(msg, chatId) {
-        if (!cfg.showDeleted || !msg || !chatId || !msg.matches('.Message[data-message-id]')) return;
-        if (msg.classList.contains('_twd-deleted-clone_')) return;
-        if (!msg.classList.contains('is-deleting') && !msg.classList.contains('is-dissolving')) return;
-        var snap = snapshot(msg, chatId);
-        if (!snap) return;
-
-        var k = keyOf(snap.chatId, snap.messageId);
-        seen.set(k, { text: snap.text, html: snap.html });
-        pendingSync.delete(k);
-
-        // Persist the final visible snapshot first. Only after that mark it deleted,
-        // so a message that was created and deleted between two periodic scans is
-        // still recoverable.
-        invoke('history_sync', { items: [snap], trackEdits: cfg.editHistory === true })
-            .then(function () {
-                return invoke('history_mark_deleted', {
-                    items: [{ chatId: snap.chatId, messageId: snap.messageId }]
-                });
-            })
-            .then(function () {
-                lastFetch = 0;
-                fetchRecords(true);
-            })
-            .catch(function () {});
-    }
-
-    function ensureObserver() {
-        var list = document.querySelector('#MiddleColumn .MessageList');
-        if (!list) return;
-        if (observer && observer._target === list) return;
-        if (observer) observer.disconnect();
-        observer = new MutationObserver(function (mutations) {
-            var chatId = currentChatId();
-            mutations.forEach(function (m) {
-                if (m.type === 'attributes' && m.target instanceof Element) {
-                    inspectDeletingMessage(m.target, chatId);
-                    return;
-                }
-                m.addedNodes.forEach(function (n) {
-                    if (!(n instanceof Element)) return;
-                    if (n.matches && n.matches('.Message[data-message-id]')) inspectDeletingMessage(n, chatId);
-                    if (n.querySelectorAll) n.querySelectorAll('.Message[data-message-id].is-deleting,.Message[data-message-id].is-dissolving').forEach(function (msg) {
-                        inspectDeletingMessage(msg, chatId);
-                    });
-                });
-            });
+    function inspectAdded(node) {
+        if (!(node instanceof Element)) return;
+        var nodes = [];
+        if (node.matches && node.matches('#MiddleColumn .Message[data-message-id]')) nodes.push(node);
+        if (node.querySelectorAll) {
+            node.querySelectorAll('#MiddleColumn .Message[data-message-id], .Message[data-message-id]').forEach(function (x) { nodes.push(x); });
+        }
+        nodes.forEach(function (msg) {
+            var mid = msg.getAttribute('data-message-id');
+            var rec = getRecord(currentChatId(), mid);
+            if (rec && rec.deleted) markNodeDeleted(msg, rec);
         });
-        observer._target = list;
-        observer.observe(list, { childList: true, subtree: true, attributes: true, attributeFilter: ['class'] });
     }
-
-    function parseDeletedNode(rec) {
-        var node = null;
-        if (rec.html) {
-            try {
-                var t = document.createElement('template');
-                t.innerHTML = rec.html.trim();
-                node = t.content.firstElementChild;
-            } catch (_) {}
-        }
-        if (!node || !node.classList || !node.classList.contains('Message')) {
-            node = document.createElement('div');
-            node.className = 'Message _twd-deleted-fallback_';
-            var box = document.createElement('div');
-            box.className = '_twd-deleted-fallback-box_';
-            box.textContent = rec.text || (langRu() ? 'Удалённое сообщение' : 'Deleted message');
-            node.appendChild(box);
-        }
-        node.classList.remove('is-deleting', 'is-dissolving');
-        node.classList.add('_twd-deleted-clone_');
-        node.setAttribute('data-message-id', rec.messageId);
-        node.setAttribute('data-twd-history-key', keyOf(rec.chatId, rec.messageId));
-        node.querySelectorAll('a,button,[role="button"]').forEach(function (x) {
-            x.removeAttribute('href'); x.removeAttribute('role'); x.removeAttribute('tabindex');
-            x.style.pointerEvents = 'none';
-        });
-        var content = node.querySelector('.message-content') || node;
-        if (!content.querySelector('._twd-deleted-mark_')) {
-            var mark = document.createElement('span');
-            mark.className = '_twd-deleted-mark_';
-            mark.textContent = langRu() ? 'Удалено' : 'Deleted';
-            content.appendChild(mark);
-        }
-        return node;
+    function closeContextMenu() {
+        try {
+            document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', keyCode: 27, which: 27, bubbles: true }));
+        } catch (_) {}
     }
-
-    function insertDeleted(rec) {
-        var list = document.querySelector('#MiddleColumn .MessageList .messages-container') ||
-                   document.querySelector('#MiddleColumn .MessageList');
-        if (!list) return;
-        var selector = '._twd-deleted-clone_[data-message-id="' + CSS.escape(String(rec.messageId)) + '"]';
-        if (list.querySelector(selector)) return;
-        if (document.querySelector('#MiddleColumn .Message[data-message-id="' + CSS.escape(String(rec.messageId)) + '"]:not(._twd-deleted-clone_)')) return;
-
-        var node = parseDeletedNode(rec);
-        var n = Number(rec.messageId);
-        var rows = Array.from(list.querySelectorAll(':scope > .Message[data-message-id], :scope > div > .Message[data-message-id]'));
-        var before = null;
-        if (Number.isFinite(n)) {
-            for (var i = 0; i < rows.length; i++) {
-                var x = Number(rows[i].getAttribute('data-message-id'));
-                if (Number.isFinite(x) && x > n) { before = rows[i]; break; }
-            }
-        }
-        if (before && before.parentNode) before.parentNode.insertBefore(node, before);
-        else list.appendChild(node);
+    function closeHistoryModal(mo) {
+        if (!mo || mo.dataset.closing === '1') return;
+        mo.dataset.closing = '1';
+        mo.classList.remove('open');
+        mo.classList.add('closing');
+        setTimeout(function () { if (mo.parentNode) mo.remove(); }, 200);
     }
-
     function showEditHistory(rec) {
         var old = document.getElementById('_twd-history-modal_');
         if (old) old.remove();
-        var overlay = document.createElement('div');
-        overlay.id = '_twd-history-modal_';
-        overlay.className = '_twd-history-modal_';
-        var box = document.createElement('div');
-        box.className = '_twd-history-modal-box_';
-        var head = document.createElement('div');
-        head.className = '_twd-history-modal-head_';
-        var title = document.createElement('strong');
+
+        var mo = document.createElement('div');
+        mo.id = '_twd-history-modal_';
+        mo.className = '_mo_ _twd-history-native_';
+
+        var dialog = document.createElement('div');
+        dialog.className = 'modal-dialog';
+        var header = document.createElement('div');
+        header.className = 'modal-header';
+        var title = document.createElement('div');
+        title.className = 'modal-title';
         title.textContent = langRu() ? 'История редактирования' : 'Edit history';
-        var close = document.createElement('button');
-        close.type = 'button'; close.textContent = '×'; close.className = '_twd-history-close_';
-        close.onclick = function () { overlay.remove(); };
-        head.append(title, close);
-        box.appendChild(head);
+        header.appendChild(title);
+
+        var content = document.createElement('div');
+        content.className = 'modal-content';
+        var list = document.createElement('div');
+        list.className = '_twd-history-list_ custom-scroll';
 
         var versions = (rec.edits || []).slice();
-        versions.push({ text: rec.text || '', timestamp: Date.now(), current: true });
-        versions.forEach(function (v, i) {
+        versions.push({ text: rec.text || '', timestamp: rec.updatedAt || Date.now(), current: true });
+        versions.forEach(function (version, i) {
             var item = document.createElement('div');
             item.className = '_twd-history-version_';
             var meta = document.createElement('div');
             meta.className = '_twd-history-version-meta_';
-            meta.textContent = (v.current ? (langRu() ? 'Текущая версия' : 'Current version') :
-                ((langRu() ? 'Версия ' : 'Version ') + (i + 1))) +
-                (v.timestamp ? ' · ' + new Date(v.timestamp).toLocaleString() : '');
+            meta.textContent = version.current
+                ? (langRu() ? 'Текущая версия' : 'Current version')
+                : ((langRu() ? 'Версия ' : 'Version ') + (i + 1));
+            if (version.timestamp) meta.textContent += ' · ' + new Date(version.timestamp).toLocaleString();
             var text = document.createElement('div');
             text.className = '_twd-history-version-text_';
-            text.textContent = v.text || (langRu() ? '[без текста]' : '[no text]');
-            item.append(meta, text); box.appendChild(item);
+            text.textContent = version.text || (langRu() ? '[без текста]' : '[no text]');
+            item.append(meta, text);
+            list.appendChild(item);
         });
-        overlay.appendChild(box);
-        overlay.addEventListener('mousedown', function (e) { if (e.target === overlay) overlay.remove(); });
-        document.body.appendChild(overlay);
-    }
 
-    function decorateEdited(rec) {
-        if (!cfg.editHistory || !rec.edits || !rec.edits.length) return;
-        var msg = document.querySelector('#MiddleColumn .Message[data-message-id="' + CSS.escape(String(rec.messageId)) + '"]:not(._twd-deleted-clone_)');
-        if (!msg || msg.querySelector('._twd-edit-history-badge_')) return;
-        var host = msg.querySelector('.message-content') || msg;
-        var badge = document.createElement('button');
-        badge.type = 'button';
-        badge.className = '_twd-edit-history-badge_';
-        badge.textContent = (langRu() ? 'История' : 'History') + ' · ' + rec.edits.length;
-        badge.addEventListener('click', function (e) { e.preventDefault(); e.stopPropagation(); showEditHistory(rec); });
-        host.appendChild(badge);
-    }
+        var buttons = document.createElement('div');
+        buttons.className = 'dialog-buttons';
+        var ok = document.createElement('button');
+        ok.className = 'Button text primary confirm-dialog-button';
+        ok.textContent = langRu() ? 'ОК' : 'OK';
+        buttons.appendChild(ok);
+        content.append(list, buttons);
+        dialog.append(header, content);
+        mo.appendChild(dialog);
+        document.body.appendChild(mo);
+        requestAnimationFrame(function () { mo.classList.add('open'); });
 
-    function renderRecords() {
-        records.forEach(function (rec) {
-            if (rec.deleted && cfg.showDeleted) insertDeleted(rec);
-            if (rec.edits && rec.edits.length && cfg.editHistory) decorateEdited(rec);
+        var onKey = function (e) {
+            if (e.key === 'Escape') {
+                document.removeEventListener('keydown', onKey, true);
+                closeHistoryModal(mo);
+            }
+        };
+        document.addEventListener('keydown', onKey, true);
+        ok.addEventListener('click', function () {
+            document.removeEventListener('keydown', onKey, true);
+            closeHistoryModal(mo);
+        });
+        mo.addEventListener('click', function (e) {
+            if (e.target === mo) {
+                document.removeEventListener('keydown', onKey, true);
+                closeHistoryModal(mo);
+            }
         });
     }
+    function injectHistoryMenuItem() {
+        if (!lastContext || Date.now() - lastContext.ts > 2500) return;
+        var rec = getRecord(lastContext.chatId, lastContext.messageId);
+        if (!rec || !cfg.editHistory || !rec.edits || !rec.edits.length) return;
+        var items = document.querySelector('.MessageContextMenu_items');
+        if (!items || items.querySelector('._twd-edit-history-menu_')) return;
 
-    function fetchRecords(force) {
-        var chatId = currentChatId();
-        if (!chatId) return;
-        var now = Date.now();
-        if (!force && chatId === currentChat && now - lastFetch < 1800) return;
-        currentChat = chatId;
-        lastFetch = now;
-        invoke('history_get_chat', { chatId: chatId }).then(function (items) {
-            if (chatId !== currentChatId()) return;
-            records.clear();
-            (items || []).forEach(function (r) { records.set(keyOf(r.chatId, r.messageId), r); });
-            renderRecords();
-        }).catch(function () {});
-    }
-
-    function scan() {
-        var chatId = currentChatId();
-        if (!chatId) return;
-        ensureObserver();
-        document.querySelectorAll('#MiddleColumn .Message[data-message-id]:not(._twd-deleted-clone_)').forEach(function (msg) {
-            if (msg.classList.contains('is-deleting') || msg.classList.contains('is-dissolving')) return;
-            var snap = snapshot(msg, chatId);
-            if (snap) queueSnapshot(snap);
+        var item = document.createElement('div');
+        item.className = 'MenuItem compact _twd-edit-history-menu_';
+        item.setAttribute('role', 'menuitem');
+        item.tabIndex = 0;
+        var icon = document.createElement('i');
+        icon.className = 'icon icon-info';
+        icon.setAttribute('aria-hidden', 'true');
+        item.appendChild(icon);
+        item.appendChild(document.createTextNode(langRu() ? 'История редактирования' : 'Edit history'));
+        item.addEventListener('click', function (e) {
+            e.preventDefault();
+            e.stopPropagation();
+            closeContextMenu();
+            showEditHistory(rec);
         });
-        flushSync();
+        items.appendChild(item);
+    }
+    document.addEventListener('contextmenu', function (e) {
+        var msg = e.target && e.target.closest && e.target.closest('#MiddleColumn .Message[data-message-id]');
+        if (!msg) {
+            lastContext = null;
+            return;
+        }
+        lastContext = {
+            chatId: currentChatId(),
+            messageId: String(msg.getAttribute('data-message-id') || ''),
+            ts: Date.now()
+        };
+        setTimeout(injectHistoryMenuItem, 0);
+        setTimeout(injectHistoryMenuItem, 60);
+        setTimeout(injectHistoryMenuItem, 140);
+    }, true);
 
-        fetchRecords(false);
-        renderRecords();
+    var addedObserver = new MutationObserver(function (mutations) {
+        mutations.forEach(function (mutation) {
+            mutation.addedNodes.forEach(inspectAdded);
+        });
+    });
+    function startAddedObserver() {
+        if (!document.body) {
+            setTimeout(startAddedObserver, 20);
+            return;
+        }
+        addedObserver.observe(document.body, { childList: true, subtree: true });
     }
 
     function ensureStyle() {
         if (document.getElementById('_twd-message-history-style_')) return;
-        var s = document.createElement('style');
-        s.id = '_twd-message-history-style_';
-        s.textContent = [
-            '._twd-deleted-clone_{opacity:.72!important;filter:saturate(.65);pointer-events:none!important;}',
-            '._twd-deleted-clone_ .message-content{outline:1px dashed color-mix(in srgb,var(--color-error,#e65b5b) 65%,transparent);position:relative;}',
-            '._twd-deleted-mark_{display:inline-block;margin:.25rem .35rem 0;font-size:.72rem;font-weight:600;color:var(--color-error,#e65b5b);}',
-            '._twd-deleted-fallback_{display:flex;padding:.25rem 1rem;}',
-            '._twd-deleted-fallback-box_{max-width:32rem;border-radius:12px;padding:.55rem .75rem;background:var(--color-background-compact-menu,#242424);color:var(--color-text-secondary,#aaa);}',
-            '._twd-edit-history-badge_{display:block;border:0;background:none;padding:.15rem .35rem 0;margin:0;color:var(--color-links,#4ea4f6);font:inherit;font-size:.7rem;cursor:pointer;}',
-            '._twd-history-modal_{position:fixed;inset:0;z-index:10050;background:rgba(0,0,0,.55);display:flex;align-items:center;justify-content:center;padding:1.5rem;}',
-            '._twd-history-modal-box_{width:min(36rem,100%);max-height:min(75vh,48rem);overflow:auto;background:var(--color-background,#212121);color:var(--color-text,#fff);border-radius:16px;box-shadow:0 12px 40px rgba(0,0,0,.45);padding:1rem;}',
-            '._twd-history-modal-head_{display:flex;align-items:center;justify-content:space-between;font-size:1.05rem;margin-bottom:.75rem;}',
-            '._twd-history-close_{border:0;background:none;color:inherit;font-size:1.6rem;cursor:pointer;}',
-            '._twd-history-version_{padding:.7rem .8rem;border-radius:10px;background:var(--color-background-secondary,#181818);margin-top:.5rem;}',
-            '._twd-history-version-meta_{font-size:.72rem;color:var(--color-text-secondary,#aaa);margin-bottom:.35rem;}',
+        var style = document.createElement('style');
+        style.id = '_twd-message-history-style_';
+        style.textContent = [
+            '._twd-deleted-message_ .message-content{outline:1px dashed color-mix(in srgb,var(--color-error,#e65b5b) 62%,transparent);}',
+            '._twd-deleted-mark_{display:inline-block;margin:.2rem .35rem 0;font-size:.72rem;font-weight:600;color:var(--color-error,#e65b5b);}',
+            '._twd-history-list_{max-height:min(60vh,34rem);overflow:auto;margin:-.25rem 0 .5rem;}',
+            '._twd-history-version_{padding:.72rem .8rem;border-radius:.75rem;background:var(--color-background-secondary,#181818);margin:.5rem 0;}',
+            '._twd-history-version-meta_{font-size:.75rem;color:var(--color-text-secondary,#aaa);margin-bottom:.35rem;}',
             '._twd-history-version-text_{white-space:pre-wrap;overflow-wrap:anywhere;}'
         ].join('');
-        (document.head || document.documentElement).appendChild(s);
+        (document.head || document.documentElement).appendChild(style);
     }
 
-    ensureStyle();
-    setInterval(scan, 900);
-    window.addEventListener('hashchange', function () {
-        currentChat = '';
-        lastFetch = 0;
-        records.clear();
-        document.querySelectorAll('._twd-deleted-clone_,._twd-edit-history-badge_').forEach(function (x) { x.remove(); });
-        setTimeout(scan, 100);
+    function drainQueue() {
+        var queue = window.__twdHistoryUpdateQueue;
+        if (!Array.isArray(queue) || !queue.length) return;
+        var copy = queue.splice(0, queue.length);
+        copy.forEach(applyHistoryEvent);
+    }
+    window.addEventListener('__twd_history_update', function (e) {
+        applyHistoryEvent(e.detail);
+        var queue = window.__twdHistoryUpdateQueue;
+        if (Array.isArray(queue) && queue.length) queue.shift();
     });
-    setTimeout(scan, 250);
+
+    window.__twdMessageHistoryApi = {
+        clear: function () {
+            records.clear();
+            lastContext = null;
+            var queue = window.__twdHistoryUpdateQueue;
+            if (Array.isArray(queue)) queue.splice(0, queue.length);
+            document.querySelectorAll('._twd-deleted-mark_').forEach(function (x) { x.remove(); });
+            document.querySelectorAll('._twd-deleted-message_').forEach(function (x) { x.classList.remove('_twd-deleted-message_'); });
+            setTimeout(function () { location.reload(); }, 60);
+            return true;
+        },
+        get: function (chatId, messageId) {
+            var rec = getRecord(chatId, messageId);
+            return rec ? {
+                chatId: rec.chatId,
+                messageId: rec.messageId,
+                text: rec.text,
+                edits: rec.edits.slice(),
+                deleted: rec.deleted === true
+            } : null;
+        }
+    };
+
+    ensureStyle();
+    drainQueue();
+    startAddedObserver();
 })();

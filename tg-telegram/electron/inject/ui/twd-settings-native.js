@@ -56,6 +56,13 @@ function _twdSave(patch){
     });
     return _twdSaveQueue;
 }
+function _twdClearMessageHistory(){
+    var api=window.__twdMessageHistoryApi;
+    if(api&&typeof api.clear==='function'){
+        try{api.clear();return Promise.resolve({ok:true});}catch(e){}
+    }
+    return Promise.resolve({ok:true});
+}
 function _twdFeatureApplyBar(content){
     var bar=document.createElement('div');
     bar.className='_twd-apply-bar_';
@@ -213,7 +220,7 @@ function _twdRenderMessages(content,ctx,s){
             msg:T('twd_clear_history_confirm'),
             okText:T('del_upper'),
             okDanger:true,
-            onOk:function(){return INV('history_clear').then(function(){toast(T('twd_history_cleared'),'icon-check');});}
+            onOk:function(){toast(T('twd_history_cleared'),'icon-check');return _twdClearMessageHistory();}
         });
     },'delete','red');
     clear.classList.add('destructive');
@@ -272,7 +279,7 @@ function _twdRenderData(content,ctx,s){
     clear.classList.add('destructive');
     card.appendChild(clear);
     var hist=_twdStaticRow(ctx,T('twd_clear_history'),T('twd_clear_history_desc'),' ',function(){
-        showModal({title:T('twd_clear_history'),msg:T('twd_clear_history_confirm'),okText:T('del_upper'),okDanger:true,onOk:function(){return INV('history_clear').then(function(){toast(T('twd_history_cleared'),'icon-check');});}});
+        showModal({title:T('twd_clear_history'),msg:T('twd_clear_history_confirm'),okText:T('del_upper'),okDanger:true,onOk:function(){toast(T('twd_history_cleared'),'icon-check');return _twdClearMessageHistory();}});
     },'delete','red');
     hist.classList.add('destructive');
     card.appendChild(hist);

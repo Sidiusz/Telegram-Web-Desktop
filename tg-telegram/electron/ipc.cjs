@@ -6,7 +6,6 @@ const { configureProxySettings, setProxyMode, resetAutoProxy, forceProxyReconnec
 const { getFallbackInfo } = require('./telegram-web-fallback.cjs');
 const { loadDownloads, saveDownloads, deleteDownload, cancelActive } = require('./downloads.cjs');
 const { getAddons, deleteAddon, openAddonsFolder, toggleAddon } = require('./addons.cjs');
-const { syncSnapshots, markDeleted, getChatRecords, clearHistory } = require('./message-history.cjs');
 const { uniquePath, sanitizeFilename } = require('./utils.cjs');
 const path = require('path');
 const fs = require('fs');
@@ -61,6 +60,10 @@ let state = {
 
 function initState() {
     state.settings = loadSettings();
+    // Message anti-delete/edit history is session-only. Remove files left by pre-1.3.1 builds.
+    for (const name of ['message-history.json', 'message-history.json.bak']) {
+        try { fs.unlinkSync(path.join(app.getPath('userData'), name)); } catch (_) {}
+    }
     state.downloads = loadDownloads();
     if (state.downloads.length > 0) {
         state.downloadCounter = Math.max(...state.downloads.map(d => d.id));
@@ -90,6 +93,16 @@ function registerIpc(getWindow) {
     scheduleChecks();
 
     handle('get_settings', () => state.settings);
+    ipcMain.on('get_history_bootstrap', (event) => {
+        try {
+            const win = getWindow();
+            const s = state.settings || loadSettings();
+            event.returnValue = win && !win.isDestroyed() && event.sender === win.webContents ? {
+                showDeleted: s.messages_show_deleted === true,
+                editHistory: s.messages_edit_history === true,
+            } : null;
+        } catch (_) { event.returnValue = null; }
+    });
     ipcMain.on('get_proxy_bootstrap', (event) => {
         // Preload asks synchronously at document_start, before senderFrame.url is guaranteed
         // to contain the committed Telegram URL. Bind this one channel to the exact main WebContents.
@@ -389,11 +402,6 @@ function registerIpc(getWindow) {
         const win = getWindow();
         if (win) win.webContents.reload();
     });
-
-    handle('history_sync', (e, { items, trackEdits }) => syncSnapshots(items, trackEdits === true));
-    handle('history_mark_deleted', (e, { items }) => markDeleted(items));
-    handle('history_get_chat', (e, { chatId }) => getChatRecords(chatId));
-    handle('history_clear', () => clearHistory());
 
     handle('show_image_context_menu', (e, { srcURL, x, y, downloadId }) => {
         const win = getWindow();
