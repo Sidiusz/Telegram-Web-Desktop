@@ -227,6 +227,9 @@ test('manual launch maximizes while autostart stays hidden', () => {
     const win = read('electron/window.cjs');
     const settings = read('electron/settings.cjs');
     assert.match(main, /isAutostartLaunch/);
+    assert.match(main, /TWD_DEV_PROFILE/);
+    assert.match(main, /TWD_ALLOW_MULTI_INSTANCE === '1'/);
+    assert.match(main, /remote-debugging-port/);
     assert.match(main, /--autostart/);
     assert.match(main, /--hidden/);
     assert.match(main, /showMainWindow\(win, true\)/);
@@ -241,6 +244,7 @@ test('manual launch maximizes while autostart stays hidden', () => {
 
 test('custom UI stays inside Telegram Settings and keeps native navigation semantics', () => {
     const core = read('electron/inject/ui/core.js');
+    const scripts = read('electron/scripts.cjs');
     const inject = read('electron/inject/ui/inject.js');
     const panels = read('electron/inject/ui/native-panels.js');
     const settings = read('electron/inject/ui/settings-render.js');
@@ -249,6 +253,18 @@ test('custom UI stays inside Telegram Settings and keeps native navigation seman
     const bootstrap = read('electron/inject/ui/bootstrap.js');
     const wide = read('electron/features/desktop_like_wide.js');
     const standard = read('electron/features/desktop_like_standard.js');
+    const largeIcons = ['settings','visual_interface','messages','notifications','proxy','data','info','download','addons','trash_bin'];
+    largeIcons.forEach(name => assert.equal(fs.existsSync(path.join(root, 'electron', 'assets', 'icons', name + '.svg')), true));
+    assert.match(scripts, /LARGE_ICON_NAMES/);
+    assert.match(scripts, /__twdLargeSvgIcons/);
+    assert.match(settings, /function _largeSvgGlyph\(/);
+    assert.match(settings, /__twdLargeSvgIcons\[icon\]/);
+    assert.match(twd, /'visual_interface'/);
+    assert.match(twd, /'messages'/);
+    assert.match(twd, /'proxy'/);
+    assert.match(twd, /'data'/);
+    assert.match(twd, /'trash_bin'/);
+    assert.match(inject, /'_tgst_ad_','addons'/);
 
     assert.match(inject, /_tgst_twd_/);
     assert.match(inject, /_tgst_dl_/);
@@ -346,6 +362,9 @@ test('message history is event-driven, session-only and native-integrated', () =
     assert.match(feature, /MessageContextMenu_items/);
     assert.match(feature, /_twd-edit-history-menu_/);
     assert.doesNotMatch(feature, /_twd-edit-history-badge_/);
+    assert.match(feature, /_twd-deleted-trash_/);
+    assert.match(feature, /icon icon-delete/);
+    assert.doesNotMatch(feature, /trash_bin/);
     assert.match(feature, /className = '_mo_ _twd-history-native_'/);
     assert.doesNotMatch(feature, /_twd-history-native_ \.modal-dialog/);
     assert.match(feature, /window\.__twdMessageHistoryApi/);

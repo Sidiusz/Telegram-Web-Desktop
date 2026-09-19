@@ -6,6 +6,15 @@ const path = require('path');
 const { app } = require('electron');
 
 const rd = p => fs.readFileSync(path.join(__dirname, 'inject', p), 'utf8');
+const LARGE_ICON_NAMES = ['settings','visual_interface','messages','notifications','proxy','data','info','download','addons','trash_bin'];
+function readLargeIcons() {
+    const dir = path.join(__dirname, 'assets', 'icons');
+    const out = {};
+    for (const name of LARGE_ICON_NAMES) {
+        out[name] = fs.readFileSync(path.join(dir, name + '.svg'), 'utf8');
+    }
+    return out;
+}
 
 // Only bootstrap's position matters (it runs last) — function declarations are hoisted, so the rest can be in any order.
 const UI_PARTS = [
@@ -27,7 +36,8 @@ function buildUiJs() {
     // Guard marker: re-running UI_JS in the same document is a no-op (no duplicate
     // intervals/handlers). The main-process watchdog checks the same marker and re-injects everything if it's gone (TG swapped the page during its own update).
     const parts = UI_PARTS.map(name => rd(path.join('ui', name)));
-    return '(function(){\nif(window.__tgUIInjected)return;window.__tgUIInjected=true;\n' + parts.join('\n') + '\n})();';
+    const icons = 'window.__twdLargeSvgIcons=' + JSON.stringify(readLargeIcons()) + ';\n';
+    return '(function(){\nif(window.__tgUIInjected)return;window.__tgUIInjected=true;\n' + icons + parts.join('\n') + '\n})();';
 }
 
 function readAll() {

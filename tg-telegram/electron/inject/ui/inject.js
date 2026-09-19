@@ -132,7 +132,7 @@ function injectSettingsRows(){
         twd.after(dl);
     }else if(dl._subtitle)dl._subtitle.textContent=T('downloads_desc');
     if(!ad){
-        ad=row('_tgst_ad_','twd-addons',T('addons'),T('addons_desc'),'purple',function(){openAddonsNative();});
+        ad=row('_tgst_ad_','addons',T('addons'),T('addons_desc'),'purple',function(){openAddonsNative();});
         dl.after(ad);
     }else{
         if(ad._title)ad._title.textContent=T('addons');

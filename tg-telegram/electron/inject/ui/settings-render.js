@@ -214,9 +214,27 @@ var _TWD_FILLED_GLYPHS={
     'twd-link':'M3.9 12c0-1.71 1.39-3.1 3.1-3.1h4V7H7a5 5 0 0 0 0 10h4v-1.9H7c-1.71 0-3.1-1.39-3.1-3.1zM8 13h8v-2H8v2zm9-6h-4v1.9h4c1.71 0 3.1 1.39 3.1 3.1s-1.39 3.1-3.1 3.1h-4V17h4a5 5 0 0 0 0-10z',
     'twd-update':'M12.35 15.65l2.79-2.79a.5.5 0 0 0-.35-.85H13V4c0-.55-.45-1-1-1s-1 .45-1 1v8H9.21c-.45 0-.67.54-.35.85l2.79 2.79c.19.2.51.2.7.01zM21 3h-5.01c-.54 0-.99.45-.99.99c0 .55.45.99.99.99H20c.55 0 1 .45 1 1v12.03c0 .55-.45 1-1 1H4c-.55 0-1-.45-1-1V5.99c0-.55.45-1 1-1h4.01c.54 0 .99-.45.99-.99a1 1 0 0 0-.99-1H3c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h18c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2z'
 };
+function _largeSvgGlyph(icon){
+    var raw=window.__twdLargeSvgIcons&&window.__twdLargeSvgIcons[icon];
+    if(!raw)return null;
+    try{
+        var doc=new DOMParser().parseFromString(raw,'image/svg+xml');
+        var src=doc&&doc.documentElement;
+        if(!src||String(src.nodeName).toLowerCase()!=='svg'||doc.querySelector('parsererror'))return null;
+        var svg=document.importNode(src,true);
+        svg.removeAttribute('width');svg.removeAttribute('height');svg.removeAttribute('style');
+        svg.setAttribute('aria-hidden','true');svg.setAttribute('focusable','false');svg.setAttribute('fill','currentColor');
+        svg.classList.add('_twd-filled-glyph_');
+        svg.querySelectorAll('script,foreignObject').forEach(function(x){x.remove();});
+        svg.querySelectorAll('*').forEach(function(x){Array.from(x.attributes||[]).forEach(function(a){if(/^on/i.test(a.name))x.removeAttribute(a.name);});});
+        return svg;
+    }catch(_){return null;}
+}
 function _setDecoratedGlyph(wrap,icon){
     if(!wrap)return;
     var old=wrap.querySelector('i.icon,svg._twd-filled-glyph_');
+    var custom=_largeSvgGlyph(icon);
+    if(custom){if(old)old.remove();wrap.appendChild(custom);return;}
     var path=_TWD_FILLED_GLYPHS[icon];
     if(path){
         if(old)old.remove();
@@ -232,7 +250,7 @@ function _setDecoratedGlyph(wrap,icon){
 }
 function _toneForIcon(icon,danger){if(danger||/delete|close/.test(icon))return'red';if(/reload|folder|download|check|update/.test(icon))return'green';if(/mention|addons/.test(icon))return'purple';if(/user|account/.test(icon))return'orange';return'blue';}
 function _genDecoratedRow(icon,title,value,onClick,tone,sub,danger){
-    icon=_filledIconName(String(icon||'info').replace(/^icon-/,''));tone=tone||_toneForIcon(icon,danger);
+    icon=String(icon||'info').replace(/^icon-/,'');tone=tone||_toneForIcon(icon,danger);
     var tpl=_nativeDecoratedTemplate(tone,!!sub);
     if(!tpl){var li=document.querySelector('#Settings .ListItem.narrow')||document.querySelector('#Settings .ListItem');var plain=_genNativeSettingRow(li,title,sub||'',value||'',onClick);plain._v=plain._value;return plain;}
     var r=tpl.cloneNode(true);r.removeAttribute('id');r.removeAttribute('style');var btn=r.querySelector('.ListItem-button');

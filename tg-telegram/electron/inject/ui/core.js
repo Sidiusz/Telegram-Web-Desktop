@@ -126,7 +126,7 @@ html._tgreading_ .bubble.menu-container.shown{opacity:0 !important;pointer-event
 /* Small layout helpers around native Telegram controls. */
 ._tgpanel_ ._tpempty_{color:var(--color-text-secondary,#aaa);text-align:center;padding:40px 16px;font-size:14px;}
 ._twd-row-actions_{margin-inline-start:auto;display:flex;align-items:center;gap:.125rem;flex-shrink:0;}
-.ListItem-main-icon ._twd-filled-glyph_{width:1.5rem;height:1.5rem;display:block;fill:#fff;}
+.ListItem-main-icon ._twd-filled-glyph_{width:1.5rem;height:1.5rem;display:block;fill:#fff;color:#fff;}
 ._twd-filetype_{width:1.875rem!important;height:1.875rem!important;border-radius:.625rem!important;display:flex!important;align-items:center!important;justify-content:center!important;flex-shrink:0;font-size:.625rem!important;font-weight:700;color:#fff!important;text-transform:uppercase;}
 ._twd-apply-bar_{position:sticky;bottom:0;z-index:2;display:flex;justify-content:flex-end;padding:.75rem 0;background:var(--color-background-secondary,#0f0f0f);}
 ._twd-apply-bar_[hidden]{display:none!important;}

@@ -11,8 +11,11 @@ app.commandLine.appendSwitch('disable-renderer-backgrounding');
 // Keep timers alive (our incoming-message interceptor) when window is backgrounded/hidden
 app.commandLine.appendSwitch('disable-background-timer-throttling');
 app.commandLine.appendSwitch('disable-backgrounding-occluded-windows');
-// Dev only (unpackaged): expose CDP for local UI/smoke testing. Never in shipped builds.
-if (!app.isPackaged) app.commandLine.appendSwitch('remote-debugging-port', process.env.TWD_CDP_PORT || '9222');
+// Dev/test only: expose CDP for local UI/smoke testing. Packaged test builds may opt in
+// explicitly with TWD_ALLOW_MULTI_INSTANCE + TWD_CDP_PORT; normal shipped runs never do.
+if (!app.isPackaged || (process.env.TWD_ALLOW_MULTI_INSTANCE === '1' && process.env.TWD_CDP_PORT)) {
+    app.commandLine.appendSwitch('remote-debugging-port', process.env.TWD_CDP_PORT || '9222');
+}
 
 const { createWindow, getWindow } = require('./electron/window.cjs');
 const { createTray } = require('./electron/tray.cjs');
@@ -21,11 +24,12 @@ const { startEmbeddedFlowsealBridge, stopEmbeddedFlowsealBridge } = require('./e
 const { normalizeToTg, getTgUrlFromArgs } = require('./electron/deep-links.cjs');
 
 // Dev/test runs can use an isolated profile without competing with the installed app.
-// Production behavior is unchanged unless these explicit test-only env vars are set.
-if (!app.isPackaged) {
-    const devProfile = process.env.TWD_DEV_PROFILE;
-    if (devProfile) app.setPath('userData', path.resolve(devProfile));
-    else app.setPath('userData', path.join(app.getPath('appData'), 'Telegram Web Desktop'));
+// Packaged builds only honor it together with the explicit multi-instance test flag.
+const devProfile = process.env.TWD_DEV_PROFILE;
+if (devProfile && (!app.isPackaged || process.env.TWD_ALLOW_MULTI_INSTANCE === '1')) {
+    app.setPath('userData', path.resolve(devProfile));
+} else if (!app.isPackaged) {
+    app.setPath('userData', path.join(app.getPath('appData'), 'Telegram Web Desktop'));
 }
 
 // Register tg:// only from an installed build. `app.isPackaged` is also true for

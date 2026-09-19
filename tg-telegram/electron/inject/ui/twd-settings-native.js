@@ -151,11 +151,11 @@ function _twdRenderRoot(content,ctx){
     var card=ctx.card();
     [
         ['general','settings',T('twd_general'),T('twd_general_desc'),'blue'],
-        ['appearance','animations',T('twd_appearance'),T('twd_appearance_desc'),'purple'],
-        ['messages','chat',T('twd_messages'),T('twd_messages_desc'),'green'],
+        ['appearance','visual_interface',T('twd_appearance'),T('twd_appearance_desc'),'purple'],
+        ['messages','messages',T('twd_messages'),T('twd_messages_desc'),'green'],
         ['notifications','notifications',T('twd_notifications'),T('twd_notifications_desc'),'red'],
-        ['proxy','lock',T('proxy'),T('proxy_desc'),'blue'],
-        ['data','piechart',T('sec_data'),T('twd_data_desc'),'orange'],
+        ['proxy','proxy',T('proxy'),T('proxy_desc'),'blue'],
+        ['data','data',T('sec_data'),T('twd_data_desc'),'orange'],
         ['about','info',T('sec_about'),T('twd_about_desc'),'purple']
     ].forEach(function(x){
         card.appendChild(_twdStaticRow(ctx,x[2],x[3],'',function(){_twdNavigateNative(x[0]);},x[1],x[4]));
@@ -195,7 +195,7 @@ function _twdRenderAppearance(content,ctx,s){
                 _twdSave({appearance_message_layout:next});
             }
         });
-    },'animations','purple');
+    },'visual_interface','purple');
     card.appendChild(row);
     card.appendChild(_twdSwitchRow(ctx,T('twd_hide_ads'),T('twd_hide_ads_desc'),s.appearance_hide_ads!==false,function(v){
         _twdSave({appearance_hide_ads:v});
@@ -222,7 +222,7 @@ function _twdRenderMessages(content,ctx,s){
             okDanger:true,
             onOk:function(){toast(T('twd_history_cleared'),'icon-check');return _twdClearMessageHistory();}
         });
-    },'delete','red');
+    },'trash_bin','red');
     clear.classList.add('destructive');
     data.appendChild(clear);
     ctx.section(T('twd_local_data'),data);
@@ -275,12 +275,12 @@ function _twdAppendUpdates(content,ctx,s){
 }
 function _twdRenderData(content,ctx,s){
     var card=ctx.card();
-    var clear=_twdStaticRow(ctx,T('st_clear_cache'),T('st_clear_cache_sub'),' ',function(){INV('clear_cache').catch(function(){});},'delete','red');
+    var clear=_twdStaticRow(ctx,T('st_clear_cache'),T('st_clear_cache_sub'),' ',function(){INV('clear_cache').catch(function(){});},'trash_bin','red');
     clear.classList.add('destructive');
     card.appendChild(clear);
     var hist=_twdStaticRow(ctx,T('twd_clear_history'),T('twd_clear_history_desc'),' ',function(){
         showModal({title:T('twd_clear_history'),msg:T('twd_clear_history_confirm'),okText:T('del_upper'),okDanger:true,onOk:function(){toast(T('twd_history_cleared'),'icon-check');return _twdClearMessageHistory();}});
-    },'delete','red');
+    },'trash_bin','red');
     hist.classList.add('destructive');
     card.appendChild(hist);
     ctx.section(T('sec_data'),card);

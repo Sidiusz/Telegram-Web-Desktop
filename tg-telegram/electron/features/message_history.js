@@ -87,14 +87,24 @@
         } catch (_) { return null; }
     }
     function markNodeDeleted(node, rec) {
-        if (!node || !rec || !rec.deleted || node.classList.contains('_twd-deleted-message_')) return;
+        if (!node || !rec || !rec.deleted) return;
         node.classList.add('_twd-deleted-message_');
         var host = node.querySelector('.message-content') || node;
-        if (host.querySelector('._twd-deleted-mark_')) return;
-        var mark = document.createElement('span');
-        mark.className = '_twd-deleted-mark_';
-        mark.textContent = langRu() ? 'Удалено' : 'Deleted';
-        host.appendChild(mark);
+        if (!host.querySelector('._twd-deleted-mark_')) {
+            var mark = document.createElement('span');
+            mark.className = '_twd-deleted-mark_';
+            mark.textContent = langRu() ? 'Удалено' : 'Deleted';
+            host.appendChild(mark);
+        }
+        if (!host.querySelector('._twd-deleted-trash_')) {
+            var trash = document.createElement('span');
+            trash.className = '_twd-deleted-trash_';
+            trash.setAttribute('aria-hidden', 'true');
+            var icon = document.createElement('i');
+            icon.className = 'icon icon-delete';
+            trash.appendChild(icon);
+            host.appendChild(trash);
+        }
     }
     function markVisibleDeleted(rec) {
         markNodeDeleted(messageNode(rec.chatId, rec.messageId), rec);
@@ -252,8 +262,10 @@
         var style = document.createElement('style');
         style.id = '_twd-message-history-style_';
         style.textContent = [
-            '._twd-deleted-message_ .message-content{outline:1px dashed color-mix(in srgb,var(--color-error,#e65b5b) 62%,transparent);}',
+            '._twd-deleted-message_ .message-content{outline:1px dashed color-mix(in srgb,var(--color-error,#e65b5b) 62%,transparent);position:relative;overflow:visible;}',
             '._twd-deleted-mark_{display:inline-block;margin:.2rem .35rem 0;font-size:.72rem;font-weight:600;color:var(--color-error,#e65b5b);}',
+            '._twd-deleted-trash_{position:absolute;left:calc(100% + .45rem);top:50%;transform:translateY(-50%);width:1.35rem;height:1.35rem;display:flex;align-items:center;justify-content:center;color:var(--color-error,#e65b5b);pointer-events:none;z-index:2;}',
+            '._twd-deleted-trash_ .icon{font-size:1rem;line-height:1;}',
             '._twd-history-list_{max-height:min(60vh,34rem);overflow:auto;margin:-.25rem 0 .5rem;}',
             '._twd-history-version_{padding:.72rem .8rem;border-radius:.75rem;background:var(--color-background-secondary,#181818);margin:.5rem 0;}',
             '._twd-history-version-meta_{font-size:.75rem;color:var(--color-text-secondary,#aaa);margin-bottom:.35rem;}',
@@ -280,7 +292,7 @@
             lastContext = null;
             var queue = window.__twdHistoryUpdateQueue;
             if (Array.isArray(queue)) queue.splice(0, queue.length);
-            document.querySelectorAll('._twd-deleted-mark_').forEach(function (x) { x.remove(); });
+            document.querySelectorAll('._twd-deleted-mark_,._twd-deleted-trash_').forEach(function (x) { x.remove(); });
             document.querySelectorAll('._twd-deleted-message_').forEach(function (x) { x.classList.remove('_twd-deleted-message_'); });
             setTimeout(function () { location.reload(); }, 60);
             return true;
