@@ -1,0 +1,55 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - '[0-9]+.[0-9]+.[0-9]+'
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: tg-telegram/package-lock.json
+
+      - name: Install dependencies
+        working-directory: tg-telegram
+        run: npm ci
+      - name: Verify version
+        shell: powershell
+        run: |
+          $version = $env:GITHUB_REF_NAME
+          $packageVersion = (Get-Content "tg-telegram/package.json" -Raw | ConvertFrom-Json).version
+          if ($packageVersion -ne $version) {
+            throw "Tag $version does not match package version $packageVersion"
+          }
+
+      - name: Run regression tests
+        working-directory: tg-telegram
+        run: npm test
+
+      - name: Build release installer
+        working-directory: tg-telegram
+        run: npm run build
+
+      - name: Publish GitHub release
+        shell: powershell
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $version = $env:GITHUB_REF_NAME
+          $source = "tg-telegram/dist/Telegram Web Desktop Setup $version.exe"
+          $installer = "tg-telegram/dist/Telegram.Web.Desktop.Setup.$version.exe"
+          $notes = ".github/release-notes/$version.md"
+          Copy-Item $source $installer -Force
+          gh release create $version $installer --title $version --notes-file $notes --verify-tag --latest
