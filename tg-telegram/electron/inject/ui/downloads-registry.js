@@ -428,6 +428,8 @@ const DL = window.__tgdl = (function(){
         [].forEach.call(items.querySelectorAll('.MenuItem'),function(m){ if(m.querySelector('.icon-download')) after=m; });
         if(after) items.insertBefore(it, after.nextSibling);
         else items.appendChild(it);
+        _twdFitMenuViewport(items);
+        setTimeout(function(){_twdFitMenuViewport(items);},120);
     }
 
     // ── Просмотрщик медиа: индикатор «скачано» + «Открыть папку» ──────────

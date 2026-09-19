@@ -227,6 +227,8 @@
             showEditHistory(rec);
         });
         items.appendChild(item);
+        _twdFitMenuViewport(items);
+        setTimeout(function () { _twdFitMenuViewport(items); }, 120);
     }
     document.addEventListener('contextmenu', function (e) {
         var msg = e.target && e.target.closest && e.target.closest('#MiddleColumn .Message[data-message-id]');

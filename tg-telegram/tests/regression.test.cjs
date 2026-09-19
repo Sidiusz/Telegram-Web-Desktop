@@ -71,8 +71,12 @@ test('IPC boundary still validates sender and blocks arbitrary commands', () => 
     assert.match(ipc, /invalid-version/);
     assert.match(ipc, /data:image\\\/png;base64/);
     assert.match(settings, /function normalizeSetting/);
+    assert.match(settings, /function repairLegacyUtf8Mojibake\(/);
+    assert.match(settings, /new TextDecoder\('windows-1251'\)/);
+    assert.match(settings, /new TextDecoder\('utf-8', \{ fatal: true \}\)/);
     assert.match(settings, /function loadSettings\(\)[\s\S]*normalizeSetting\(key, raw\)/);
     assert.match(settings, /normalized === INVALID \? cloneDefault\(fallback\) : normalized/);
+    assert.match(settings, /key === 'save_path'[\s\S]{0,140}store\.set\(key, normalized\)/);
     assert.match(settings, /BOOL_KEYS/);
     assert.match(settings, /UPDATE_INTERVALS/);
     assert.match(settings, /normalized !== INVALID/);
@@ -130,6 +134,8 @@ test('download and addon safety regressions stay covered', () => {
     assert.doesNotMatch(ipc, /handle\('get_downloads'[\s\S]{0,350}\.\.\.d/);
     assert.match(ipc, /normalizeDownloadId/);
     assert.match(downloadRegistry, /file\.classList\.remove\('_tgdl_downloading_'\);\s*clearDownloadingBadge\(file\);\s*ensureBadges\(file\);/);
+    assert.match(downloadRegistry, /_twdFitMenuViewport\(items\)/);
+    assert.match(core, /function _twdFitMenuViewport\(/);
     assert.match(core, /\.Notification-container\.dl_card\{margin-left:auto;margin-right:auto;/);
     assert.doesNotMatch(addons, /embedded_addons|embedded:/);
     assert.match(addons, /\^user:/);
@@ -234,6 +240,7 @@ test('manual launch maximizes while autostart stays hidden', () => {
     assert.match(main, /TWD_DEV_PROFILE/);
     assert.match(main, /TWD_ALLOW_MULTI_INSTANCE === '1'/);
     assert.match(main, /remote-debugging-port/);
+    assert.ok(main.indexOf("app.setPath('userData'") < main.indexOf("require('./electron/window.cjs')"));
     assert.match(main, /--autostart/);
     assert.match(main, /--hidden/);
     assert.match(main, /showMainWindow\(win, true\)/);
@@ -315,11 +322,14 @@ test('custom UI stays inside Telegram Settings and keeps native navigation seman
     assert.doesNotMatch(settings, /function injectGeneralSettings|function injectAboutSection|function renderSt/);
 
     assert.match(settings, /_TWD_FILLED_GLYPHS/);
-    assert.match(core, /Measured from a live Telegram settings category transition/);
+    assert.match(core, /Mirrors Telegram Web A's native settings transition/);
     assert.match(core, /\.3s cubic-bezier\(\.25,1,\.5,1\)/);
-    assert.match(core, /@keyframes _twd-settings-in-move_/);
-    assert.match(core, /@keyframes _twd-settings-out-move_/);
-    assert.match(core, /@keyframes _twd-settings-back-out-move_/);
+    assert.match(core, /@keyframes _twd-settings-panel-in_/);
+    assert.match(core, /@keyframes _twd-settings-panel-out_/);
+    assert.match(core, /@keyframes _twd-settings-under-out_/);
+    assert.match(core, /transform:translateX\(200%\)/);
+    assert.match(core, /transform:scale\(\.7\);opacity:0/);
+    assert.match(core, /_twd-range-control_\{[^}]*width:22rem;[^}]*flex:0 0 22rem/);
     assert.match(core, /_twd-range-input_/);
     assert.match(core, /accent-color:var\(--color-primary/);
     assert.doesNotMatch(core, /_tgpanel_\._in_\{animation:slide-in-200|_twd-under_[^{]*push-out/);
@@ -365,6 +375,7 @@ test('message history is event-driven, session-only and native-integrated', () =
     assert.match(feature, /document\.addEventListener\('contextmenu'/);
     assert.match(feature, /MessageContextMenu_items/);
     assert.match(feature, /_twd-edit-history-menu_/);
+    assert.match(feature, /_twdFitMenuViewport\(items\)/);
     assert.doesNotMatch(feature, /_twd-edit-history-badge_/);
     assert.match(feature, /_twd-deleted-trash_/);
     assert.match(feature, /icon icon-delete/);

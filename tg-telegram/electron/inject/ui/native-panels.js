@@ -15,13 +15,13 @@ function closeNativePanel(animate){
     }
     p.classList.remove('_in_'); p.classList.add('_out_');
     if(p._under){
-        p._under.classList.remove('_twd-under_');
         p._under.classList.add('_twd-under-back_');
+        p._under.classList.remove('_twd-under_');
     }
     setTimeout(function(){
         if(p._under)p._under.classList.remove('_twd-under-back_');
         if(p&&p.parentNode)p.remove();
-    },250);
+    },330);
 }
 
 // Открывает нативный экран Настроек TG (клик по пункту «Настройки» в сайд-меню).

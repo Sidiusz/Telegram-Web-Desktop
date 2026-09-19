@@ -1,8 +1,36 @@
 'use strict';
 const Store = require('electron-store').default;
+const { TextDecoder } = require('util');
 
 const store = new Store({ name: 'settings' });
 const legacyAddonStore = new Store({ name: 'addon-states' });
+
+const _win1251Decoder = new TextDecoder('windows-1251');
+const _utf8Decoder = new TextDecoder('utf-8', { fatal: true });
+let _win1251Reverse = null;
+function repairLegacyUtf8Mojibake(value) {
+    if (typeof value !== 'string' || !value) return value;
+    if (!_win1251Reverse) {
+        _win1251Reverse = new Map();
+        for (let i = 0; i < 256; i++) {
+            const ch = _win1251Decoder.decode(Uint8Array.of(i));
+            if (ch && !_win1251Reverse.has(ch)) _win1251Reverse.set(ch, i);
+        }
+    }
+    const bytes = [];
+    for (const ch of value) {
+        const cp = ch.codePointAt(0);
+        if (cp < 0x80) bytes.push(cp);
+        else if (_win1251Reverse.has(ch)) bytes.push(_win1251Reverse.get(ch));
+        else return value;
+    }
+    try {
+        const repaired = _utf8Decoder.decode(Uint8Array.from(bytes));
+        return repaired && repaired !== value ? repaired : value;
+    } catch (_) {
+        return value;
+    }
+}
 
 const DEFAULTS = {
     save_path: null,
@@ -82,6 +110,7 @@ function loadSettings() {
         }
         const normalized = normalizeSetting(key, raw);
         out[key] = normalized === INVALID ? cloneDefault(fallback) : normalized;
+        if (key === 'save_path' && normalized !== INVALID && normalized !== raw) store.set(key, normalized);
     }
     return out;
 }
@@ -117,7 +146,7 @@ function normalizeSetting(k, v) {
     if (k === 'appearance_message_layout') return MESSAGE_LAYOUTS.has(v) ? v : INVALID;
     if (k === 'proxy_mode') return PROXY_MODES.has(v) ? v : INVALID;
     if (k === 'proxy_domain_source') return PROXY_DOMAIN_SOURCES.has(v) ? v : INVALID;
-    if (k === 'save_path') return typeof v === 'string' && v.length <= 32767 ? v : INVALID;
+    if (k === 'save_path') return typeof v === 'string' && v.length <= 32767 ? repairLegacyUtf8Mojibake(v) : INVALID;
     if (k === 'whatsnew_shown_version' || k === 'skipped_version') {
         return typeof v === 'string' && v.length <= 64 ? v : INVALID;
     }

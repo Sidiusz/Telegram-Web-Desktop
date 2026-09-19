@@ -17,12 +17,6 @@ if (!app.isPackaged || (process.env.TWD_ALLOW_MULTI_INSTANCE === '1' && process.
     app.commandLine.appendSwitch('remote-debugging-port', process.env.TWD_CDP_PORT || '9222');
 }
 
-const { createWindow, getWindow } = require('./electron/window.cjs');
-const { createTray } = require('./electron/tray.cjs');
-const { initState, getState, registerIpc } = require('./electron/ipc.cjs');
-const { startEmbeddedFlowsealBridge, stopEmbeddedFlowsealBridge } = require('./electron/tg-flowseal-bridge.cjs');
-const { normalizeToTg, getTgUrlFromArgs } = require('./electron/deep-links.cjs');
-
 // Dev/test runs can use an isolated profile without competing with the installed app.
 // Packaged builds only honor it together with the explicit multi-instance test flag.
 const devProfile = process.env.TWD_DEV_PROFILE;
@@ -31,6 +25,14 @@ if (devProfile && (!app.isPackaged || process.env.TWD_ALLOW_MULTI_INSTANCE === '
 } else if (!app.isPackaged) {
     app.setPath('userData', path.join(app.getPath('appData'), 'Telegram Web Desktop'));
 }
+
+// Modules that create electron-store instances must be loaded only after userData
+// is finalized, otherwise a dev instance silently reads/writes the installed profile.
+const { createWindow, getWindow } = require('./electron/window.cjs');
+const { createTray } = require('./electron/tray.cjs');
+const { initState, getState, registerIpc } = require('./electron/ipc.cjs');
+const { startEmbeddedFlowsealBridge, stopEmbeddedFlowsealBridge } = require('./electron/tg-flowseal-bridge.cjs');
+const { normalizeToTg, getTgUrlFromArgs } = require('./electron/deep-links.cjs');
 
 // Register tg:// only from an installed build. `app.isPackaged` is also true for
 // dist/win-unpacked, so test builds must not steal the OS association.

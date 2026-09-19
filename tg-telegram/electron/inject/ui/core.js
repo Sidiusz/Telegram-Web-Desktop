@@ -98,29 +98,22 @@ html._tgreading_ .bubble.menu-container.shown{opacity:0 !important;pointer-event
    → все хэш-классы и вид 1-в-1 как родной. Своя кнопка «Назад» просто прячет
    панель (React-state не трогаем → кнопка работает железно). */
 ._tgpanel_{position:absolute;inset:0;z-index:50;display:flex;flex-direction:column;background:var(--color-background,#212121);
-    opacity:0;transform:translateX(1.5rem);}
-/* Measured from a live Telegram settings category transition (2026-09-19):
-   --slide-transition = .3s cubic-bezier(.25,1,.5,1).
-   Forward: old page 1→0 opacity + 0→-1.5rem; new page 0→1 + +1.5rem→0.
-   Backward is the exact inverse. No scaling is involved. */
-@keyframes _twd-settings-in-opacity_{from{opacity:0}to{opacity:1}}
-@keyframes _twd-settings-out-opacity_{from{opacity:1}to{opacity:0}}
-@keyframes _twd-settings-in-move_{from{transform:translateX(1.5rem)}to{transform:translateX(0)}}
-@keyframes _twd-settings-out-move_{from{transform:translateX(0)}to{transform:translateX(-1.5rem)}}
-@keyframes _twd-settings-back-out-move_{from{transform:translateX(0)}to{transform:translateX(1.5rem)}}
-@keyframes _twd-settings-back-in-move_{from{transform:translateX(-1.5rem)}to{transform:translateX(0)}}
-._tgpanel_._in_{
-    animation:_twd-settings-in-opacity_ .3s cubic-bezier(.25,1,.5,1) forwards,
-              _twd-settings-in-move_ .3s cubic-bezier(.25,1,.5,1) forwards;}
-._tgpanel_._out_{
-    animation:_twd-settings-out-opacity_ .3s cubic-bezier(.25,1,.5,1) forwards,
-              _twd-settings-back-out-move_ .3s cubic-bezier(.25,1,.5,1) forwards;}
+    opacity:1;transform:translateX(200%);}
+/* Mirrors Telegram Web A's native settings transition:
+   destination enters from +200%; source shrinks to 70% and fades out.
+   Back navigation is the exact inverse. */
+@keyframes _twd-settings-panel-in_{from{transform:translateX(200%)}to{transform:translateX(0)}}
+@keyframes _twd-settings-panel-out_{from{transform:translateX(0)}to{transform:translateX(200%)}}
+@keyframes _twd-settings-under-out_{from{transform:scale(1);opacity:1}to{transform:scale(.7);opacity:0}}
+@keyframes _twd-settings-under-in_{from{transform:scale(.7);opacity:0}to{transform:scale(1);opacity:1}}
+._tgpanel_._in_{animation:_twd-settings-panel-in_ .3s cubic-bezier(.25,1,.5,1) forwards;}
+._tgpanel_._out_{animation:_twd-settings-panel-out_ .3s cubic-bezier(.25,1,.5,1) forwards;}
 #Settings .Transition_slide-active._twd-under_,#Settings .Transition__slide--active._twd-under_{
-    animation:_twd-settings-out-opacity_ .3s cubic-bezier(.25,1,.5,1) forwards!important,
-              _twd-settings-out-move_ .3s cubic-bezier(.25,1,.5,1) forwards!important;}
+    transform-origin:center center;
+    animation:_twd-settings-under-out_ .3s cubic-bezier(.25,1,.5,1) forwards!important;}
 #Settings .Transition_slide-active._twd-under-back_,#Settings .Transition__slide--active._twd-under-back_{
-    animation:_twd-settings-in-opacity_ .3s cubic-bezier(.25,1,.5,1) forwards!important,
-              _twd-settings-back-in-move_ .3s cubic-bezier(.25,1,.5,1) forwards!important;}
+    transform-origin:center center;
+    animation:_twd-settings-under-in_ .3s cubic-bezier(.25,1,.5,1) forwards!important;}
 ._tgpanel_ .left-header{flex:0 0 auto;}
 ._tgpanel_ .settings-content{flex:1;overflow-y:auto;background:var(--color-background-secondary,#0f0f0f);}
 /* Small layout helpers around native Telegram controls. */
@@ -132,8 +125,9 @@ html._tgreading_ .bubble.menu-container.shown{opacity:0 !important;pointer-event
 ._twd-apply-bar_[hidden]{display:none!important;}
 ._twd-panel-card_{margin-top:.5rem;}
 ._twd-range-row_ .multiline-item{min-width:9rem;}
-._twd-range-control_{margin-inline-start:auto;display:flex;align-items:center;gap:.75rem;min-width:min(22rem,52%);flex:0 1 22rem;}
-._twd-range-input_{width:100%;min-width:8rem;accent-color:var(--color-primary,#8774e1);cursor:pointer;}
+._twd-range-control_{margin-inline-start:auto;display:flex;align-items:center;gap:.75rem;width:22rem;min-width:22rem;flex:0 0 22rem;}
+._twd-range-input_{width:100%;min-width:0;flex:1 1 auto;accent-color:var(--color-primary,#8774e1);cursor:pointer;}
+@media(max-width:44rem){._twd-range-control_{width:18rem;min-width:18rem;flex-basis:18rem;}}
 ._twd-range-input_:focus-visible{outline:2px solid var(--color-primary,#8774e1);outline-offset:2px;}
 ._twd-range-value_{min-width:3.25rem;text-align:right;color:var(--color-text-secondary,#aaa);font-size:.875rem;font-variant-numeric:tabular-nums;white-space:nowrap;}
 ._twd-ui-lab-buttons_{display:flex;align-items:center;gap:.5rem;flex-wrap:wrap;padding:.75rem 1rem;}
@@ -142,6 +136,18 @@ html._tgreading_ .bubble.menu-container.shown{opacity:0 !important;pointer-event
 function ensureCSS(){if(!document.getElementById('_tgcss_')){const s=document.createElement('style');s.id='_tgcss_';s.textContent=CSS;(document.head||document.documentElement).appendChild(s);}}
 function ensureToast(){}
 function toast(msg,icon){try{if(typeof showNativeToast==='function')return showNativeToast(msg,icon);}catch(e){}}
+function _twdFitMenuViewport(node){
+    var menu=node&&node.matches&&node.matches('.bubble.menu-container')?node:(node&&node.closest?node.closest('.bubble.menu-container'):null);
+    if(!menu||!menu.isConnected)return;
+    menu.style.translate='';
+    menu.style.maxHeight=Math.max(7.5*16,window.innerHeight-16)+'px';
+    menu.style.overflowY='auto';
+    menu.style.overscrollBehavior='contain';
+    var r=menu.getBoundingClientRect(),pad=8,dy=0;
+    if(r.bottom>window.innerHeight-pad)dy-=r.bottom-(window.innerHeight-pad);
+    if(r.top+dy<pad)dy+=pad-(r.top+dy);
+    if(Math.abs(dy)>.5)menu.style.translate='0 '+Math.round(dy)+'px';
+}
 
 // ── Рантайм Telegram webZ: getGlobal() / getActions() ───────────────────────
 // Прямой доступ к состоянию и экшенам TG вместо эмуляции через DOM. Минифициро-
