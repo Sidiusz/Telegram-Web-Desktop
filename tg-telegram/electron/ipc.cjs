@@ -103,6 +103,15 @@ function registerIpc(getWindow) {
             } : null;
         } catch (_) { event.returnValue = null; }
     });
+    ipcMain.on('get_feed_bootstrap', (event) => {
+        try {
+            const win = getWindow();
+            const s = state.settings || loadSettings();
+            event.returnValue = win && !win.isDestroyed() && event.sender === win.webContents ? {
+                sources: Array.isArray(s.feed_sources) ? s.feed_sources.map(x => String(x && x.id || '')).filter(Boolean) : [],
+            } : null;
+        } catch (_) { event.returnValue = null; }
+    });
     ipcMain.on('get_proxy_bootstrap', (event) => {
         // Preload asks synchronously at document_start, before senderFrame.url is guaranteed
         // to contain the committed Telegram URL. Bind this one channel to the exact main WebContents.

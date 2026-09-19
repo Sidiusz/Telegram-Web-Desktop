@@ -3,8 +3,10 @@ const { contextBridge, ipcRenderer } = require('electron');
 
 let _proxyBootstrap = { active: false, domains: [], revision: 0 };
 let _historyBootstrap = { showDeleted: false, editHistory: false };
+let _feedBootstrap = { sources: [] };
 try { const boot = ipcRenderer.sendSync('get_proxy_bootstrap'); if (boot && typeof boot === 'object') _proxyBootstrap = boot; } catch (_) {}
 try { const boot = ipcRenderer.sendSync('get_history_bootstrap'); if (boot && typeof boot === 'object') _historyBootstrap = boot; } catch (_) {}
+try { const boot = ipcRenderer.sendSync('get_feed_bootstrap'); if (boot && typeof boot === 'object') _feedBootstrap = boot; } catch (_) {}
 function publishProxyState(payload) {
     _proxyBootstrap = payload && typeof payload === 'object' ? payload : _proxyBootstrap;
     try {
@@ -26,10 +28,12 @@ contextBridge.exposeInMainWorld('__twdProxyRouter', { get: () => ({ ..._proxyBoo
 
 try {
     contextBridge.executeInMainWorld({
-        func: (initial, historyConfig) => {
+        func: (initial, historyConfig, feedConfig) => {
             window.__twdProxyState = initial;
             const proxyWorkers = new Set();
             const historyEnabled = !!(historyConfig && (historyConfig.showDeleted || historyConfig.editHistory));
+            const feedSourceIds = new Set(Array.isArray(feedConfig && feedConfig.sources) ? feedConfig.sources.map(String) : []);
+            const feedByMessageId = new Map();
             const historyTracked = new Map();
             const historyByMessageId = new Map();
             const historyDeletedByChat = new Map();
@@ -44,6 +48,104 @@ try {
                     catch (_) { proxyWorkers.delete(worker); }
                 }
             });
+            window.addEventListener('__twd_feed_config', e => {
+                const ids = e && e.detail && Array.isArray(e.detail.sources) ? e.detail.sources : [];
+                feedSourceIds.clear();
+                ids.map(String).filter(Boolean).forEach(id => feedSourceIds.add(id));
+            });
+            function feedText(content) {
+                try {
+                    const candidates = [
+                        content && content.text,
+                        content && content.caption,
+                        content && content.photo && content.photo.caption,
+                        content && content.video && content.video.caption,
+                        content && content.document && content.document.caption,
+                        content && content.animation && content.animation.caption
+                    ];
+                    for (const value of candidates) {
+                        if (typeof value === 'string' && value) return value;
+                        if (value && value.text != null && String(value.text)) return String(value.text);
+                    }
+                } catch (_) {}
+                return '';
+            }
+            function feedMedia(content) {
+                if (!content || typeof content !== 'object') return null;
+                const keys = ['photo','video','animation','document','audio','voice','sticker','poll','location','contact'];
+                for (const type of keys) {
+                    const media = content[type];
+                    if (!media) continue;
+                    const thumb = media.thumbnail && media.thumbnail.dataUri ? String(media.thumbnail.dataUri) : '';
+                    return {
+                        type,
+                        thumbnail: thumb,
+                        fileName: media.fileName ? String(media.fileName) : '',
+                        duration: Number(media.duration) || 0,
+                    };
+                }
+                return null;
+            }
+            function feedPackMessage(message, chatId, messageId) {
+                const reactions = [];
+                try {
+                    for (const r of (message && message.reactions && message.reactions.results) || []) {
+                        if (!r || !r.reaction) continue;
+                        reactions.push({
+                            count: Number(r.count) || 0,
+                            emoji: r.reaction.emoticon ? String(r.reaction.emoticon) : '',
+                        });
+                    }
+                } catch (_) {}
+                return {
+                    chatId: String(chatId),
+                    messageId: String(messageId),
+                    text: feedText(message && message.content),
+                    date: Number(message && message.date) || Math.floor(Date.now() / 1000),
+                    media: feedMedia(message && message.content),
+                    viewsCount: Number(message && message.viewsCount) || 0,
+                    forwardsCount: Number(message && message.forwardsCount) || 0,
+                    reactions,
+                    isEdited: !!(message && (message.isEdited || message.editDate)),
+                };
+            }
+            function feedEmit(detail) {
+                if (!detail) return;
+                const q = window.__twdFeedUpdateQueue || (window.__twdFeedUpdateQueue = []);
+                q.push(detail);
+                if (q.length > 1500) q.splice(0, q.length - 1500);
+                try { window.dispatchEvent(new CustomEvent('__twd_feed_update', { detail })); } catch (_) {}
+            }
+            function feedHandleWorkerMessage(event) {
+                if (!feedSourceIds.size) return;
+                const payloads = event && event.data && event.data.payloads;
+                if (!Array.isArray(payloads)) return;
+                payloads.forEach(payload => {
+                    if (!payload || payload.type !== 'updates' || !Array.isArray(payload.updates)) return;
+                    payload.updates.forEach(update => {
+                        if (!update || typeof update !== 'object') return;
+                        if (update['@type'] === 'updateMessage') {
+                            const message = update.message;
+                            const chatId = String(update.chatId != null ? update.chatId : message && message.chatId != null ? message.chatId : '');
+                            const messageId = String(update.id != null ? update.id : message && message.id != null ? message.id : '');
+                            if (!message || !chatId || !messageId || !feedSourceIds.has(chatId)) return;
+                            feedByMessageId.set(messageId, chatId);
+                            feedEmit({ kind: update.isFromNew === true ? 'new' : 'edit', item: feedPackMessage(message, chatId, messageId) });
+                            return;
+                        }
+                        if (update['@type'] === 'deleteMessages' && Array.isArray(update.ids)) {
+                            const explicitChat = update.chatId != null ? String(update.chatId) : '';
+                            update.ids.forEach(rawId => {
+                                const messageId = String(rawId);
+                                const chatId = explicitChat || feedByMessageId.get(messageId) || '';
+                                if (!chatId || !feedSourceIds.has(chatId)) return;
+                                feedByMessageId.delete(messageId);
+                                feedEmit({ kind: 'delete', chatId, messageId });
+                            });
+                        }
+                    });
+                });
+            }
             function historyActiveChatId() {
                 try {
                     const avatar = document.querySelector('#MiddleColumn .MiddleHeader .Avatar[data-peer-id]');
@@ -271,9 +373,12 @@ try {
                             }
                         } catch (_) {}
                         super(target, options);
-                        if (historyEnabled) {
-                            try { this.addEventListener('message', historyHandleWorkerMessage); } catch (_) {}
-                        }
+                        try {
+                            this.addEventListener('message', function(event) {
+                                feedHandleWorkerMessage(event);
+                                historyHandleWorkerMessage(event);
+                            });
+                        } catch (_) {}
                         if (tagged) { proxyWorkers.add(this); try { this.postMessage({ __twdProxyConfig: window.__twdProxyState }); } catch (_) {} }
                     }
                 };
@@ -283,7 +388,7 @@ try {
                 if (!window.__twdProxyChannel) window.__twdProxyChannel = new BroadcastChannel('__twd_proxy_v1');
                 window.__twdProxyChannel.postMessage(initial);
             } catch (_) {}
-        }, args: [_proxyBootstrap, _historyBootstrap],
+        }, args: [_proxyBootstrap, _historyBootstrap, _feedBootstrap],
     });
 } catch (_) {}
 

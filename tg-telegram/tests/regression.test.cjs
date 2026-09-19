@@ -79,6 +79,9 @@ test('IPC boundary still validates sender and blocks arbitrary commands', () => 
     assert.match(settings, /key === 'save_path'[\s\S]{0,140}store\.set\(key, normalized\)/);
     assert.match(settings, /BOOL_KEYS/);
     assert.match(settings, /UPDATE_INTERVALS/);
+    assert.match(settings, /feed_sources:\s*\[\]/);
+    assert.match(settings, /if \(k === 'feed_sources'\)/);
+    assert.match(settings, /BigInt\(id\)/);
     assert.match(settings, /normalized !== INVALID/);
     assert.match(preload, /const TWD_ALLOWED_INVOKE = new Set/);
     assert.match(preload, /IPC command is not allowed/);
@@ -371,7 +374,8 @@ test('message history is event-driven, session-only and native-integrated', () =
     assert.doesNotMatch(ipc, /handle\('history_sync'/);
     assert.doesNotMatch(ipc, /handle\('history_mark_deleted'/);
     assert.match(preload, /historyHandleWorkerMessage/);
-    assert.match(preload, /this\.addEventListener\('message', historyHandleWorkerMessage\)/);
+    assert.match(preload, /this\.addEventListener\('message', function\(event\)/);
+    assert.match(preload, /historyHandleWorkerMessage\(event\)/);
     assert.match(preload, /update\['@type'\] === 'deleteMessages'/);
     assert.match(preload, /IDBObjectStore\.prototype\.put/);
     assert.match(preload, /historyIsPrivate/);
@@ -391,6 +395,32 @@ test('message history is event-driven, session-only and native-integrated', () =
     assert.match(feature, /className = '_mo_ _twd-history-native_'/);
     assert.doesNotMatch(feature, /_twd-history-native_ \.modal-dialog/);
     assert.match(feature, /window\.__twdMessageHistoryApi/);
+});
+
+test('virtual feed is local, source-driven and reuses Telegram cached messages', () => {
+    const feed = read('electron/inject/ui/virtual-feed.js');
+    const preload = read('electron/preload.js');
+    const ipc = read('electron/ipc.cjs');
+    const scripts = read('electron/scripts.cjs');
+    const core = read('electron/inject/ui/core.js');
+
+    assert.match(scripts, /'virtual-feed\.js'/);
+    assert.match(ipc, /get_feed_bootstrap/);
+    assert.match(preload, /_feedBootstrap/);
+    assert.match(preload, /feedHandleWorkerMessage/);
+    assert.match(preload, /__twd_feed_update/);
+    assert.match(preload, /__twd_feed_config/);
+    assert.match(preload, /feedSourceIds/);
+    assert.match(feed, /indexedDB\.open\('tt-data'\)/);
+    assert.match(feed, /state\.messages&&state\.messages\.byChatId/);
+    assert.match(feed, /_twd-feed-chat_/);
+    assert.match(feed, /_twd-feed-post_/);
+    assert.match(feed, /_twd-feed-source-menu_/);
+    assert.match(feed, /Добавить в ленту/);
+    assert.match(feed, /window\.__twdFeedApi/);
+    assert.match(core, /_twd-feed-view_/);
+    assert.match(core, /position:sticky!important/);
+    assert.doesNotMatch(feed, /sendMessage|forwardMessages|forwardMessage/);
 });
 
 test('service UI Lab stays hidden and reuses native builders', () => {

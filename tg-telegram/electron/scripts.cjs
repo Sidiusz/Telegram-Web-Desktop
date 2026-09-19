@@ -26,6 +26,7 @@ const UI_PARTS = [
     'native-panels.js',          // native "Downloads" / "App settings" panels
     'settings-render.js',        // shared native Settings builders
     'twd-settings-native.js',    // Telegram Web Desktop native Settings hierarchy
+    'virtual-feed.js',           // local virtual feed chat built from selected channels/groups
     'notif-ui.js',               // corner notifications, update progress, download indicator
     'ui-lab.js',                 // hidden service-only native component laboratory
     'inject.js',                 // injectMenu / injectSettingsRows
