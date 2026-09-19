@@ -233,13 +233,28 @@
         var bubble=document.createElement('div');bubble.className=classes.join(' ');bubble.setAttribute('dir','auto');
         var inner=document.createElement('div');inner.className='content-inner forwarded-message';inner.setAttribute('dir','auto');
 
-        var title=document.createElement('div');title.className='message-title interactive _twd-feed-forward-title_';
-        var titleWrap=document.createElement('span');titleWrap.className='message-title-name-container';
+        var title=document.createElement('div');title.className='message-title _twd-feed-forward-title_';title.setAttribute('dir','ltr');
+        var titleWrap=document.createElement('span');titleWrap.className='message-title-name-container interactive';titleWrap.setAttribute('dir','ltr');
+        var forwardContainer=document.createElement('span');forwardContainer.className='forward-title-container';
+        var forwardIcon=document.createElement('i');forwardIcon.className='icon icon-share-filled';forwardIcon.setAttribute('aria-hidden','true');
         var forward=document.createElement('span');forward.className='forward-title';forward.textContent=tr('Переслано от','Forwarded from');
+        forwardContainer.append(forwardIcon,forward);
+        var nameWrap=document.createElement('span');nameWrap.className='message-title-name';
+        var fAvatar=document.createElement('div');fAvatar.className='Avatar forward-avatar size-micro peer-color-'+peerColor;fAvatar.style.setProperty('--_size','16px');
+        var fInner=document.createElement('div');fInner.className='inner';
+        try{
+            var sourceAvatar=document.querySelector('#LeftColumn .Avatar[data-peer-id="'+CSS.escape(String(item.chatId))+'"] img');
+            if(sourceAvatar&&sourceAvatar.src){
+                var fImg=document.createElement('img');fImg.className='Avatar__media avatar-media opacity-transition slow shown open';fImg.src=sourceAvatar.src;fImg.alt=src.title||'';fImg.draggable=false;fInner.appendChild(fImg);
+            }
+        }catch(_){}
+        fAvatar.appendChild(fInner);
         var sender=document.createElement('span');sender.className='sender-title';sender.textContent=src.title||('@'+src.username)||item.chatId;
-        titleWrap.append(forward,sender);title.appendChild(titleWrap);
-        title.addEventListener('click',function(){openSource(item);});
-        inner.appendChild(title);
+        nameWrap.append(fAvatar,sender);
+        titleWrap.append(forwardContainer,nameWrap);title.append(titleWrap);
+        var spacer=document.createElement('div');spacer.className='title-spacer';title.appendChild(spacer);
+        titleWrap.addEventListener('click',function(){openSource(item);});
+        bubble.appendChild(title);
 
         if(hasMedia){
             if(item.media.thumbnail){
@@ -395,35 +410,59 @@
         if(feedView&&feedView.isConnected)return;
         lastUnderlying=currentUnderlyingChat();
         var middle=document.getElementById('MiddleColumn');if(!middle)return;
+        var donor=middle.querySelector(':scope > .messages-layout');
+
         middle.classList.add('_twd-feed-host_');
         document.body.classList.add('_twd-feed-open_');
-        feedView=document.createElement('div');feedView.id='_twd-feed-view_';feedView.className='_twd-feed-view_ messages-layout';
+        if(donor){donor.dataset.twdFeedHidden='1';donor.style.visibility='hidden';}
 
-        var header=document.createElement('div');header.className='MiddleHeader _twd-feed-native-header_';
-        var transition=document.createElement('div');transition.className='Transition';
-        var slide=document.createElement('div');slide.className='Transition_slide Transition_slide-active';
-        var wrap=document.createElement('div');wrap.className='chat-info-wrapper';
-        var chatInfo=document.createElement('div');chatInfo.className='ChatInfo';
-        var avatar=document.createElement('div');avatar.className='Avatar size-medium no-photo peer-color-0 _twd-feed-header-avatar_';avatar.style.setProperty('--_size','44px');
-        var avatarInner=document.createElement('div');avatarInner.className='inner';avatarInner.innerHTML='<i class="icon icon-channel Avatar__icon" aria-hidden="true"></i>';avatar.appendChild(avatarInner);
-        var info=document.createElement('div');info.className='info';
-        var titleWrap=document.createElement('div');titleWrap.className='title';
-        var title=document.createElement('h3');title.setAttribute('dir','auto');title.className='fullName';title.textContent=tr('Лента','Feed');titleWrap.appendChild(title);
-        var status=document.createElement('span');status.className='status';var groupStatus=document.createElement('span');groupStatus.className='group-status _twd-feed-native-status_';status.appendChild(groupStatus);
-        info.append(titleWrap,status);chatInfo.append(avatar,info);wrap.appendChild(chatInfo);slide.appendChild(wrap);transition.appendChild(slide);header.appendChild(transition);
+        feedView=document.createElement('div');
+        feedView.id='_twd-feed-view_';
+        feedView.className=(donor?donor.className:'messages-layout')+' _twd-feed-view_';
+        feedView._underLayout=donor||null;
 
-        var tools=document.createElement('div');tools.className='header-tools';
-        var actions=document.createElement('div');actions.className='HeaderActions';
-        var sources=document.createElement('button');sources.className='Button smaller translucent round has-ripple _twd-feed-source-button_';sources.type='button';sources.setAttribute('aria-label',tr('Источники ленты','Feed sources'));sources.title=tr('Источники ленты','Feed sources');
-        sources.innerHTML='<i class="icon icon-more" aria-hidden="true"></i><div class="ripple-container"></div>';sources.addEventListener('click',toggleSourcePanel);
-        actions.appendChild(sources);tools.appendChild(actions);header.appendChild(tools);
+        var donorHeader=donor&&donor.querySelector(':scope > .MiddleHeader');
+        var header=donorHeader?donorHeader.cloneNode(true):document.createElement('div');
+        if(!donorHeader){
+            header.className='MiddleHeader';
+            header.innerHTML='<div class="Transition"><div class="Transition_slide Transition_slide-active"><div class="chat-info-wrapper"><div class="ChatInfo"><div class="Avatar size-medium no-photo peer-color-0" style="--_size:44px"><div class="inner"></div></div><div class="info"><div class="title"><h3 dir="auto" class="fullName"></h3></div><span class="status"></span></div></div></div></div></div><div class="header-tools"><div class="HeaderActions"></div></div>';
+        }
+        header.classList.add('_twd-feed-native-header_');
+        header.querySelectorAll('[id],[data-peer-id]').forEach(function(x){x.removeAttribute('id');x.removeAttribute('data-peer-id');});
+        var avatar=header.querySelector('.Avatar');
+        if(avatar){
+            avatar.className='Avatar size-medium no-photo peer-color-0 _twd-feed-header-avatar_';
+            avatar.style.setProperty('--_size','44px');
+            var ai=avatar.querySelector('.inner')||document.createElement('div');
+            ai.className='inner';ai.innerHTML='<i class="icon icon-channel Avatar__icon" aria-hidden="true"></i>';avatar.replaceChildren(ai);
+        }
+        var hTitle=header.querySelector('.fullName');
+        if(hTitle){hTitle.textContent=tr('Лента','Feed');hTitle.removeAttribute('role');}
+        var hStatus=header.querySelector('.status');
+        if(hStatus){hStatus.innerHTML='';var gs=document.createElement('span');gs.className='group-status _twd-feed-native-status_';hStatus.appendChild(gs);}
+        var actions=header.querySelector('.HeaderActions');
+        if(actions){
+            actions.innerHTML='';
+            var sources=document.createElement('button');sources.className='Button smaller translucent round _twd-feed-source-button_';sources.type='button';
+            sources.setAttribute('aria-label',tr('Источники ленты','Feed sources'));sources.title=tr('Источники ленты','Feed sources');
+            sources.innerHTML='<i class="icon icon-more" aria-hidden="true"></i>';
+            sources.addEventListener('click',toggleSourcePanel);actions.appendChild(sources);
+        }
 
-        var outerTransition=document.createElement('div');outerTransition.className='Transition _twd-feed-list-transition_';
+        var donorOuter=donor&&[...donor.children].find(function(x){return x.classList&&x.classList.contains('Transition')&&x.querySelector('.MessageList');});
+        var donorList=donorOuter&&donorOuter.querySelector('.MessageList');
+        var outerTransition=donorOuter?donorOuter.cloneNode(false):document.createElement('div');
+        outerTransition.classList.add('Transition','_twd-feed-list-transition_');
         var outerSlide=document.createElement('div');outerSlide.className='Transition_slide Transition_slide-active';
-        feedBody=document.createElement('div');feedBody.className='Transition MessageList custom-scroll no-avatars with-default-bg _twd-feed-body_';
+        feedBody=donorList?donorList.cloneNode(false):document.createElement('div');
+        feedBody.classList.add('with-bottom-snap','Transition','MessageList','custom-scroll','no-avatars','with-default-bg','_twd-feed-body_');
+        feedBody.classList.remove('scrolled');
         feedBody.setAttribute('data-list-key','_twd_virtual_feed_');
+        feedBody.style.setProperty('--message-list-bottom-inset','0px');
+        feedBody.style.setProperty('--message-list-bottom-fade','0px');
         var innerSlide=document.createElement('div');innerSlide.className='Transition_slide Transition_slide-active';
         var messages=document.createElement('div');messages.className='messages-container';messages.style.paddingBottom='16px';
+        var backwards=document.createElement('div');backwards.className='backwards-trigger';messages.appendChild(backwards);
         innerSlide.appendChild(messages);feedBody.appendChild(innerSlide);outerSlide.appendChild(feedBody);outerTransition.appendChild(outerSlide);
 
         sourcePanel=document.createElement('aside');sourcePanel.className='_twd-feed-source-panel_';
@@ -435,6 +474,10 @@
     function closeFeed(){
         document.body.classList.remove('_twd-feed-open_');
         var middle=document.getElementById('MiddleColumn');if(middle)middle.classList.remove('_twd-feed-host_');
+        if(feedView&&feedView._underLayout){
+            feedView._underLayout.style.visibility='';
+            delete feedView._underLayout.dataset.twdFeedHidden;
+        }
         if(feedView&&feedView.parentNode)feedView.remove();
         feedView=null;feedBody=null;sourcePanel=null;
         if(feedRow)feedRow.classList.remove('_twd-feed-selected_');
