@@ -1,14 +1,9 @@
-// @name Desktop-like - Wide Messages
-// @version 2.3.3
-// @description Left-aligned messages + avatars, plus wide bubbles and footer panel.
-// @group desktop_like_chat
-
 (function () {
-    // Only for private chats (.MessageList.no-avatars); don't touch .messages-container width/max-width (breaks list virtualization).
+    // Only for private chats (.MessageList.no-avatars); groups render their own avatars, left untouched.
     function ensureStyles() {
-        if (document.getElementById('addon-desktop-wide') || !document.head) return;
+        if (document.getElementById('twd-feature-desktop-standard') || !document.head) return;
         var s = document.createElement('style');
-        s.id = 'addon-desktop-wide';
+        s.id = 'twd-feature-desktop-standard';
         s.textContent = `
             /* --tgdl-rc = width the open right column steals from the middle column (measured in JS). */
             :root { --tgdl-rc: 0px; }
@@ -20,27 +15,21 @@
             }
             /* TG centers the shrunk list and slides it back with a transform; we anchor it left instead. */
             ._tg_right_open #MiddleColumn .MessageList { transform: none !important; }
-            /* Widen + center in all chats. MessageList itself handles the right-column width; this container keeps only the normal 1rem gutters. */
-            html #MiddleColumn .MessageList .messages-container,
-            body #MiddleColumn .MessageList .messages-container,
+            /* Never let a bubble outgrow its row — the list shrinks when the right column opens.
+               Rows shrink-wrap, so a % cap is circular; --tgdl-avail is the row width in px, set from JS. */
+            #MiddleColumn .Message .message-content { max-width: min(var(--max-width, 30rem), var(--tgdl-avail, 100vw)) !important; }
+            #MiddleColumn .Message .message-content-wrapper { max-width: var(--tgdl-avail, none) !important; }
+            /* Left-align via margin only (incl. groups) — width/max-width changes break list virtualization. */
             #MiddleColumn .MessageList .messages-container {
-                /* MessageList itself already shrinks by --tgdl-rc when the
-                   Telegram right column opens. Subtracting it again here
-                   collapsed Wide to ~330px. Keep only the normal 1rem gutters. */
-                max-width: calc(100% - 2rem) !important;
-                width: calc(100% - 2rem) !important;
-                margin-left: auto !important; margin-right: auto !important;
-                box-sizing: border-box !important;
-                align-self: center !important;
-            }
-            /* Remove top fade that becomes visible under header when right panel opens, keep bottom */
-            #MiddleColumn .MessageList {
-                -webkit-mask-image: linear-gradient(to bottom, rgb(0,0,0) 0px, rgb(0,0,0) calc(100% - 64px), rgba(0,0,0,0.24) 100%) !important;
-                mask-image: linear-gradient(to bottom, rgb(0,0,0) 0px, rgb(0,0,0) calc(100% - 64px), rgba(0,0,0,0.24) 100%) !important;
+                margin-left: 0 !important; margin-right: auto !important;
             }
 
-            /* Footer + Composer: robust flex so send button never wraps on long text */
-            #MiddleColumn .middle-column-footer { width: 100% !important; max-width: 100% !important; box-sizing:border-box !important; margin-left: 0 !important; }
+            /* Footer keeps clear of the right column; TG shifts it by half its width instead, so drop that transform. */
+            #MiddleColumn .middle-column-footer {
+                width: calc(100% - var(--tgdl-rc, 0px)) !important; max-width: calc(100% - var(--tgdl-rc, 0px)) !important;
+                box-sizing:border-box !important;
+            }
+            ._tg_right_open #MiddleColumn .middle-column-footer { transform: none !important; }
             /* Keep TG's own composer spacing (send button sits 4px from the edge); only stop it wrapping. */
             /* Plain composer stays on one row. Reply/edit embeds need TG's native wrap;
                forcing nowrap collapses ComposerEmbeddedMessage to 0px and crushes the input. */
@@ -48,28 +37,28 @@
             #MiddleColumn .Composer.with-embedded { box-sizing:border-box !important; }
             #MiddleColumn .Composer .composer-wrapper { min-width:0 !important; }
             #MiddleColumn .Composer #editable-message-text { min-width:0 !important; }
-            /* Footer keeps clear of the right column; TG shifts it by half its width instead, so drop that transform. */
-            #MiddleColumn .middle-column-footer {
-                width: calc(100% - var(--tgdl-rc, 0px)) !important; max-width: calc(100% - var(--tgdl-rc, 0px)) !important;
+
+            /* New TG header is a centered island — left-align it like the messages; keep TG's rounding + top gap. */
+            #MiddleColumn .MiddleHeader { margin-left: 0 !important; margin-right: auto !important; box-sizing:border-box !important; }
+            /* Right column overlay: keep header/composer above it. */
+            #Main.right-column-open #MiddleColumn .MiddleHeader,
+            #Main.right-column-open #MiddleColumn .Composer,
+            ._tg_right_open #MiddleColumn .MiddleHeader,
+            ._tg_right_open #MiddleColumn .Composer { position: relative !important; z-index: 10 !important; }
+            /* Shrink the header island so it stays inside the visible area when the right column is open. */
+            ._tg_right_open #MiddleColumn .MiddleHeader {
+                margin-right: var(--tgdl-rc, 0px) !important;
+                max-width: calc(100% - var(--tgdl-rc, 0px)) !important;
+                transform: none !important;
             }
-            ._tg_right_open #MiddleColumn .middle-column-footer { transform: none !important; }
-
-            /* Widen bubbles to match the input field width. */
-            #MiddleColumn .Message:not(.is-album):not(:has(.message-content.media)) { --max-width: 70rem !important; }
-            /* Never let a bubble outgrow its row — the list shrinks when the right column opens.
-               Rows shrink-wrap, so a % cap is circular; --tgdl-avail is the row width in px, set from JS. */
-            #MiddleColumn .Message .message-content { max-width: min(var(--max-width, 30rem), var(--tgdl-avail, 100vw)) !important; }
-            #MiddleColumn .Message .message-content-wrapper { max-width: var(--tgdl-avail, none) !important; }
-
 
             /* Flip own messages left only in private 1:1 chats (.tgdl-private); skip channels/groups (broken tail otherwise). */
             #MiddleColumn.tgdl-private .MessageList.no-avatars .Message { padding-left: 44px !important; position: relative !important; }
             #MiddleColumn.tgdl-private .MessageList.no-avatars .Message.own { justify-content: flex-start !important; }
             #MiddleColumn.tgdl-private .MessageList.no-avatars .Message.own .message-content-wrapper { margin-left: 0 !important; margin-right: auto !important; }
-            /* Telegram can expand the wrapper of adaptive video/media while the
-               media itself remains fixed-width. After flipping own messages left,
-               that leaves the media aligned to the wrapper's far edge and creates
-               an extra visible indent compared with normal text bubbles. */
+            /* Adaptive video/media can keep a wider wrapper after Telegram's own
+               sizing pass. When own messages are flipped left, pin the actual media
+               to the wrapper's left edge so it lines up with text messages. */
             #MiddleColumn.tgdl-private .MessageList.no-avatars .Message.own:not(.is-in-document-group):has(.message-content.media) .message-content-wrapper {
                 display: flex !important; justify-content: flex-start !important; align-items: flex-start !important;
             }
@@ -99,16 +88,6 @@
             #MiddleColumn.tgdl-private .MessageList.no-avatars .Message.last-in-group .message-content.media,
             #MiddleColumn.tgdl-private .MessageList.no-avatars .Message.last-in-group:not(.is-album) .message-content.media .media-inner,
             #MiddleColumn.tgdl-private .MessageList.no-avatars .Message.last-in-group:not(.is-album) .message-content.media .full-media {
-                border-bottom-left-radius: 0 !important;
-            }
-
-            /* Albums round their outer corners themselves, with the square one on TG's tail side (right). */
-            #MiddleColumn.tgdl-private .MessageList.no-avatars .Message.own .message-content .Album,
-            #MiddleColumn .MessageList:not(.no-avatars) .Message.own .message-content .Album {
-                border-bottom-right-radius: var(--border-radius-messages) !important;
-            }
-            #MiddleColumn.tgdl-private .MessageList.no-avatars .Message.own.last-in-group .message-content .Album,
-            #MiddleColumn .MessageList:not(.no-avatars) .Message.own.last-in-group .message-content .Album {
                 border-bottom-left-radius: 0 !important;
             }
 
@@ -156,25 +135,6 @@
             }
 
             #MiddleColumn .Message .EmbeddedMessage .message-text .embedded-text-wrapper { white-space: pre-wrap !important; }
-
-            /* Keep header buttons clickable after closing the right-side column. */
-            .MiddleHeader .header-tools,
-            .MiddleHeader .HeaderActions { position: relative !important; z-index: 200 !important; }
-            .MiddleHeader .HeaderActions, .MiddleHeader .HeaderActions .Button { pointer-events: all !important; }
-
-            /* New TG header island — stretch wide with equal side gaps; keep TG's rounding + top gap. */
-            #MiddleColumn .MiddleHeader {
-                width: calc(100% - 2rem - var(--tgdl-rc, 0px)) !important;
-                max-width: calc(100% - 2rem - var(--tgdl-rc, 0px)) !important;
-                margin-left: 1rem !important; margin-right: auto !important;
-                box-sizing:border-box !important;
-            }
-            ._tg_right_open #MiddleColumn .MiddleHeader { transform: none !important; }
-            /* Right column overlay: keep header/composer above it. */
-            #Main.right-column-open #MiddleColumn .MiddleHeader,
-            #Main.right-column-open #MiddleColumn .Composer,
-            ._tg_right_open #MiddleColumn .MiddleHeader,
-            ._tg_right_open #MiddleColumn .Composer { position: relative !important; z-index: 10 !important; }
 
             /* Our injected tail: TG hides .svg-appendix unless .message-content has .has-appendix. */
             #MiddleColumn .Message.own .message-content[data-tgdl-appendix] .svg-appendix { display: block !important; }
@@ -337,17 +297,6 @@
             return 'rgb(' + d[0] + ',' + d[1] + ',' + d[2] + ')';
         } catch (e) { return null; }
     }
-    // In an album the bottom-left corner belongs to the last item, not the first.
-    function _bottomLeftMedia(mc) {
-        var list = mc.querySelectorAll('.full-media, .media-inner img, .media-inner video');
-        var r = mc.getBoundingClientRect(), best = null, bestBottom = -Infinity;
-        for (var i = 0; i < list.length; i++) {
-            var b = list[i].getBoundingClientRect();
-            if (b.left <= r.left + 4 && b.bottom >= r.bottom - 4) return list[i];
-            if (b.bottom > bestBottom) { bestBottom = b.bottom; best = list[i]; }
-        }
-        return best;
-    }
     // Own tail is flipped left, but TG sampled its color from the bubble's bottom-RIGHT
     // pixel. Recolor from the true bottom-LEFT corner (matches black letterbox bars, not
     // the gray photo). Cached per src; reasserted when TG re-renders the appendix.
@@ -356,7 +305,7 @@
             + '#MiddleColumn .Message.own .message-content.media[data-tgdl-appendix]').forEach(function (mc) {
             var app = mc.querySelector('.svg-appendix');
             var corner = app && app.querySelector('.corner');
-            var img = _bottomLeftMedia(mc);
+            var img = mc.querySelector('.full-media, .media-inner img');
             var ours = mc.hasAttribute('data-tgdl-appendix');
             if (!corner || !img) return;
             // Ours is always media-colored; TG's own tail only when mirrored to the left.

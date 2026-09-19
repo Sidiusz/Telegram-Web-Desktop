@@ -24,11 +24,6 @@ function addonFileWithinLimit(filePath, ext) {
 
 // ── Папки ─────────────────────────────────────────────────────────────────────
 
-// Встроенные аддоны — внутри пакета, рядом с этим файлом
-function embeddedAddonsDir() {
-    return path.join(__dirname, 'embedded_addons');
-}
-
 // Пользовательские аддоны — в userData
 function userAddonsDir() {
     const dir = path.join(app.getPath('userData'), 'addons');
@@ -56,45 +51,25 @@ function parseMeta(content) {
 
 // ── Состояние включён/выключен ────────────────────────────────────────────────
 
-// Группы с дефолтным аддоном: пока пользователь явно не выбрал другой вариант в
-// группе и явно не отключил дефолт — дефолтный аддон включён «из коробки».
-const GROUP_DEFAULTS = { desktop_like_chat: 'embedded:desktop_like_standart.js' };
-const GROUP_MEMBERS  = { desktop_like_chat: ['embedded:desktop_like_standart.js', 'embedded:desktop_like_wide.js'] };
-
 function isEnabled(addonKey, group) {
     const disabled = addonStore.get('disabled_addons', []);
     const enabled  = addonStore.get('enabled_addons', []);
-    // Явно выключен — выключен
     if (disabled.includes(addonKey)) return false;
-    // Явно включён — включён
     if (enabled.includes(addonKey)) return true;
-    // Аддоны с группой (взаимоисключающие) — по умолчанию выключены, КРОМЕ дефолта
-    // группы: он включён, пока в группе явно не выбран ДРУГОЙ аддон (явное отключение
-    // самого дефолта уже отсечено проверкой disabled выше).
-    if (group) {
-        const def = GROUP_DEFAULTS[group];
-        if (def && addonKey === def) {
-            const members = GROUP_MEMBERS[group] || [];
-            const anotherEnabled = members.some(m => m !== def && enabled.includes(m));
-            if (!anotherEnabled) return true;
-        }
-        return false;
-    }
-    // Остальные — по умолчанию включены (например hide_ads)
-    return true;
+    // User-authored mutually-exclusive groups are opt-in; ordinary add-ons remain
+    // enabled by default for backward compatibility with the existing add-on API.
+    return group ? false : true;
 }
 
 function normalizeAddonKey(addonKey) {
     const raw = String(addonKey || '');
-    const m = /^(embedded|user):([a-zA-Z0-9._-]+\.(?:js|crx))$/i.exec(raw);
+    const m = /^user:([a-zA-Z0-9._-]+\.(?:js|crx))$/i.exec(raw);
     if (!m) return null;
-    const embedded = m[1].toLowerCase() === 'embedded';
-    const name = m[2];
-    const dir = embedded ? embeddedAddonsDir() : userAddonsDir();
-    const fullPath = path.join(dir, name);
+    const name = m[1];
+    const fullPath = path.join(userAddonsDir(), name);
     const ext = path.extname(name).toLowerCase().slice(1);
     if (!addonFileWithinLimit(fullPath, ext)) return null;
-    return (embedded ? 'embedded:' : 'user:') + name;
+    return 'user:' + name;
 }
 
 function toggleAddon(addonKey, enabled) {
@@ -116,7 +91,7 @@ function toggleAddon(addonKey, enabled) {
 
 // ── Список аддонов ────────────────────────────────────────────────────────────
 
-function readAddonsFromDir(dir, embedded) {
+function readAddonsFromDir(dir) {
     const result = [];
     try {
         for (const entry of fs.readdirSync(dir)) {
@@ -124,7 +99,7 @@ function readAddonsFromDir(dir, embedded) {
             if (ext !== 'js' && ext !== 'crx') continue;
             const fullPath = path.join(dir, entry);
             if (!addonFileWithinLimit(fullPath, ext)) continue;
-            const addonKey = (embedded ? 'embedded:' : 'user:') + entry;
+            const addonKey = 'user:' + entry;
             let version = null;
             let displayName = entry;
             let group = null;
@@ -143,7 +118,6 @@ function readAddonsFromDir(dir, embedded) {
                 addon_type:  ext,
                 version,
                 group,
-                embedded,
                 key:         addonKey,
                 enabled:     isEnabled(addonKey, group),
             });
@@ -153,9 +127,7 @@ function readAddonsFromDir(dir, embedded) {
 }
 
 function getAddons() {
-    const embedded = readAddonsFromDir(embeddedAddonsDir(), true);
-    const user     = readAddonsFromDir(userAddonsDir(),     false);
-    return [...embedded, ...user];
+    return readAddonsFromDir(userAddonsDir());
 }
 
 // ── Удаление (только пользовательские) ───────────────────────────────────────
@@ -218,22 +190,20 @@ function extractCrxContentScripts(data) {
 
 // ── Загрузка скриптов (только enabled) ───────────────────────────────────────
 
-function loadScriptsFromDir(dir, embedded) {
+function loadScriptsFromDir(dir) {
     const scripts = [];
     try {
         for (const entry of fs.readdirSync(dir)) {
             const ext      = path.extname(entry).toLowerCase().slice(1);
             if (ext !== 'js' && ext !== 'crx') continue;
-            const addonKey = (embedded ? 'embedded:' : 'user:') + entry;
+            const addonKey = 'user:' + entry;
             const fullPath = path.join(dir, entry);
             if (!addonFileWithinLimit(fullPath, ext)) continue;
 
             if (ext === 'js') {
                 let content;
                 try { content = fs.readFileSync(fullPath, 'utf8'); } catch (e) { continue; }
-                // Группу читаем здесь же. Без неё isEnabled считает grouped-аддоны
-                // включёнными по умолчанию и инжектит ВСЕ из группы, хотя в UI
-                // выбран «Выкл» (баг на свежей установке, до первого выбора).
+                // User add-ons may opt into a mutually-exclusive group via metadata.
                 const group = parseMeta(content).group || null;
                 if (!isEnabled(addonKey, group)) continue;
                 scripts.push(content);
@@ -251,14 +221,11 @@ function loadScriptsFromDir(dir, embedded) {
 }
 
 function loadAddonScripts() {
-    return [
-        ...loadScriptsFromDir(embeddedAddonsDir(), true),
-        ...loadScriptsFromDir(userAddonsDir(),     false),
-    ];
+    return loadScriptsFromDir(userAddonsDir());
 }
 
 module.exports = {
-    addonsDir, userAddonsDir, embeddedAddonsDir,
+    addonsDir, userAddonsDir,
     getAddons, deleteAddon, openAddonsFolder,
     loadAddonScripts, toggleAddon,
 };

@@ -6,6 +6,7 @@ const { configureProxySettings, setProxyMode, resetAutoProxy, forceProxyReconnec
 const { getFallbackInfo } = require('./telegram-web-fallback.cjs');
 const { loadDownloads, saveDownloads, deleteDownload, cancelActive } = require('./downloads.cjs');
 const { getAddons, deleteAddon, openAddonsFolder, toggleAddon } = require('./addons.cjs');
+const { syncSnapshots, markDeleted, getChatRecords, clearHistory } = require('./message-history.cjs');
 const { uniquePath, sanitizeFilename } = require('./utils.cjs');
 const path = require('path');
 const fs = require('fs');
@@ -383,6 +384,16 @@ function registerIpc(getWindow) {
         const win = getWindow();
         if (win) win.webContents.reload();
     });
+
+    handle('apply_features', () => {
+        const win = getWindow();
+        if (win) win.webContents.reload();
+    });
+
+    handle('history_sync', (e, { items, trackEdits }) => syncSnapshots(items, trackEdits === true));
+    handle('history_mark_deleted', (e, { items }) => markDeleted(items));
+    handle('history_get_chat', (e, { chatId }) => getChatRecords(chatId));
+    handle('history_clear', () => clearHistory());
 
     handle('show_image_context_menu', (e, { srcURL, x, y, downloadId }) => {
         const win = getWindow();

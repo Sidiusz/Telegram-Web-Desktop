@@ -86,7 +86,7 @@ waitBody(()=>{
     const _startObs=()=>{ if(document.body) _stObs.observe(document.body,{childList:true,subtree:true}); else setTimeout(_startObs,80); };
     _startObs();
 
-    setupNotificationSettingsSync();
+    setupNativeWidgetCapture();
 
     // «Что нового» — один раз на новую версию (ждём, пока UI прогрузится).
     setTimeout(()=>{ try{ showWhatsNewIfNeeded(); }catch(e){} },2500);
@@ -490,7 +490,7 @@ window.__tgNotif=(function(){
 
 // ── Хуки для меню трея ──────────────────────────────────────────────────────
 // «Настройки» из трея — открыть нашу панель настроек приложения.
-window.__tgOpenAppSettings=function(){ try{ openAppSettingsNative(); }catch(e){} };
+window.__tgOpenAppSettings=function(){ try{ openTwdNative('root'); }catch(e){} };
 // «Прочитать всё» — по очереди (со сдвигом, чтобы меню TG не наслаивались)
 // помечаем прочитанными все непрочитанные чаты вне архива.
 window.__tgMarkAllRead=function(){

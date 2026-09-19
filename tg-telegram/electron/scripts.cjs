@@ -15,7 +15,8 @@ const UI_PARTS = [
     'notifications-settings.js', // built-in notification settings
     'modal.js',                  // escaped dialogs + native radio picker
     'native-panels.js',          // native "Downloads" / "App settings" panels
-    'settings-render.js',        // render app settings + auto-save
+    'settings-render.js',        // shared native Settings builders
+    'twd-settings-native.js',    // Telegram Web Desktop native Settings hierarchy
     'notif-ui.js',               // corner notifications, update progress, download indicator
     'ui-lab.js',                 // hidden service-only native component laboratory
     'inject.js',                 // injectMenu / injectSettingsRows

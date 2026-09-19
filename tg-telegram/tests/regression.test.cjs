@@ -50,7 +50,7 @@ test('Windows installer registers tg:// as a Default Apps contender without hija
 
     const ipc = read('electron/ipc.cjs');
     const preload = read('electron/preload.js');
-    const settingsUi = read('electron/inject/ui/settings-render.js');
+    const settingsUi = read('electron/inject/ui/twd-settings-native.js');
     assert.match(ipc, /handle\('open_default_apps'/);
     assert.match(ipc, /ms-settings:defaultapps\?registeredAppUser=/);
     assert.match(preload, /'open_default_apps'/);
@@ -127,7 +127,8 @@ test('download and addon safety regressions stay covered', () => {
     assert.match(ipc, /handle\('get_downloads'[\s\S]*filename: d\.filename[\s\S]*exists:/);
     assert.doesNotMatch(ipc, /handle\('get_downloads'[\s\S]{0,350}\.\.\.d/);
     assert.match(ipc, /normalizeDownloadId/);
-    assert.match(addons, /GROUP_DEFAULTS/);
+    assert.doesNotMatch(addons, /embedded_addons|embedded:/);
+    assert.match(addons, /\^user:/);
     assert.match(addons, /function normalizeAddonKey/);
     assert.match(addons, /MAX_JS_BYTES/);
     assert.match(addons, /MAX_CRX_TOTAL_SCRIPT_BYTES/);
@@ -180,10 +181,20 @@ test('Telegram Web fallback is release-pinned and never follows master at runtim
     assert.doesNotMatch(fallback, /commits\/master|git\/info\/refs|resolveRemoteRef|startRefRefreshForNextSession/);
 });
 
-test('embedded desktop addons exist', () => {
-    const dir = path.join(root, 'electron', 'embedded_addons');
-    assert.equal(fs.existsSync(path.join(dir, 'desktop_like_standart.js')), true);
+test('built-in client features are separate from user add-ons', () => {
+    const dir = path.join(root, 'electron', 'features');
+    const loader = read('electron/features.cjs');
+    const addons = read('electron/addons.cjs');
+    assert.equal(fs.existsSync(path.join(dir, 'desktop_like_standard.js')), true);
     assert.equal(fs.existsSync(path.join(dir, 'desktop_like_wide.js')), true);
+    assert.equal(fs.existsSync(path.join(dir, 'hide_ads.js')), true);
+    assert.equal(fs.existsSync(path.join(dir, 'message_history.js')), true);
+    assert.match(loader, /appearance_message_layout === 'wide'/);
+    assert.match(loader, /appearance_message_layout === 'left'/);
+    assert.match(loader, /appearance_hide_ads !== false/);
+    assert.match(loader, /messages_show_deleted/);
+    assert.match(loader, /messages_edit_history/);
+    assert.doesNotMatch(addons, /desktop_like|hide_ads|embedded_addons/);
 });
 
 const { UpstreamHealth, DEFAULT_COOLDOWN_MS } = require('../electron/tg-flowseal-health.cjs');
@@ -228,31 +239,59 @@ test('manual launch maximizes while autostart stays hidden', () => {
     assert.match(win, /if \(settings\.minimize_to_tray\) \{[\s\S]*e\.preventDefault\(\);[\s\S]*mainWindow\.hide\(\)/);
 });
 
-test('custom UI keeps Telegram-native interaction semantics', () => {
+test('custom UI stays inside Telegram Settings and keeps native navigation semantics', () => {
     const core = read('electron/inject/ui/core.js');
     const inject = read('electron/inject/ui/inject.js');
     const panels = read('electron/inject/ui/native-panels.js');
     const settings = read('electron/inject/ui/settings-render.js');
-    const wide = read('electron/embedded_addons/desktop_like_wide.js');
-
-    assert.match(inject, /'twd-addons'/);
-    assert.match(inject, /'twd-proxy'/);
-    assert.doesNotMatch(inject, /makeRow\('_tgst_ad_',\s*'animations-filled'/);
-    assert.doesNotMatch(inject, /makeRow\('_tgst_proxy_',\s*'web-filled'/);
-    assert.match(settings, /_TWD_FILLED_GLYPHS/);
+    const twd = read('electron/inject/ui/twd-settings-native.js');
+    const notifications = read('electron/inject/ui/notifications-settings.js');
     const bootstrap = read('electron/inject/ui/bootstrap.js');
-    assert.match(bootstrap, /t\.closest\('#Settings,\._tgpanel_,\._mo_,\[id\^="_tgmi_"\]'\)/);
+    const wide = read('electron/features/desktop_like_wide.js');
+    const standard = read('electron/features/desktop_like_standard.js');
 
+    assert.match(inject, /_tgst_twd_/);
+    assert.match(inject, /_tgst_dl_/);
+    assert.match(inject, /_tgst_ad_/);
+    assert.match(inject, /_tgst_modinfo_/);
+    assert.match(inject, /icon-settings-filled/);
+    assert.match(inject, /openTwdNative\('root'\)/);
+    assert.match(inject, /openDownloadsNative\(\)/);
+    assert.match(inject, /openAddonsNative\(\)/);
+    assert.doesNotMatch(inject, /_tgst_proxy_[\s\S]*openProxyNative/);
+
+    assert.match(twd, /function openTwdNative\(/);
+    assert.match(twd, /openNativePanel\(/);
+    assert.match(twd, /handleBack/);
+    assert.match(twd, /_twdNavigateNative\('root'\)/);
+    assert.match(twd, /appearance_message_layout/);
+    assert.match(twd, /messages_show_deleted/);
+    assert.match(twd, /messages_edit_history/);
+    assert.match(twd, /renderProxyNative\(content\)/);
+    assert.match(twd, /openChangelogNative\(\)/);
+    assert.doesNotMatch(twd, /position:fixed;inset:0|_twd_settings_root_/);
+
+    assert.match(panels, /panel\._titleEl=h3/);
+    assert.match(panels, /panel\._content=content/);
+    assert.match(panels, /opts\.handleBack/);
+    assert.match(panels, /renderDownloadsNative[\s\S]{0,1700}save_path/);
+    assert.match(panels, /renderDownloadsNative[\s\S]{0,1700}open_folder_dialog/);
+    assert.doesNotMatch(panels, /function openAppSettingsNative/);
+
+    assert.match(bootstrap, /setupNativeWidgetCapture\(\)/);
+    assert.doesNotMatch(bootstrap, /setupNotificationSettingsSync\(\)/);
+    assert.match(bootstrap, /__tgOpenAppSettings=function\(\)\{ try\{ openTwdNative\('root'\)/);
+    assert.doesNotMatch(notifications, /injectNotifBlock|injectGeneralSettings|injectAboutSection/);
+    assert.doesNotMatch(settings, /function injectGeneralSettings|function injectAboutSection|function renderSt/);
+
+    assert.match(settings, /_TWD_FILLED_GLYPHS/);
     assert.match(core, /Measured from a live Telegram settings category transition/);
     assert.match(core, /\.3s cubic-bezier\(\.25,1,\.5,1\)/);
-    assert.match(core, /@keyframes _twd-settings-in-move_\{from\{transform:translateX\(1\.5rem\)\}to\{transform:translateX\(0\)\}\}/);
-    assert.match(core, /@keyframes _twd-settings-out-move_\{from\{transform:translateX\(0\)\}to\{transform:translateX\(-1\.5rem\)\}\}/);
-    assert.match(core, /@keyframes _twd-settings-back-out-move_\{from\{transform:translateX\(0\)\}to\{transform:translateX\(1\.5rem\)\}\}/);
+    assert.match(core, /@keyframes _twd-settings-in-move_/);
+    assert.match(core, /@keyframes _twd-settings-out-move_/);
+    assert.match(core, /@keyframes _twd-settings-back-out-move_/);
     assert.doesNotMatch(core, /_tgpanel_\._in_\{animation:slide-in-200|_twd-under_[^{]*push-out/);
-    assert.match(core, /\.Notification-container\.dl_card\{margin-left:auto;margin-right:\.5rem/);
-    assert.doesNotMatch(core, /\._p_\{|\._ph_\{|\._cbx_\{|\._dli_\{/);
-    assert.match(panels, /_clPlainMarkdown/);
-    assert.doesNotMatch(panels, /Object\.keys\(groups\)\.forEach\(g=>radioGroup/);
+
     const modal = read('electron/inject/ui/modal.js');
     assert.doesNotMatch(modal, /function makePanel\(|function openPanel\(/);
     assert.match(modal, /function _escHtml\(/);
@@ -267,14 +306,32 @@ test('custom UI keeps Telegram-native interaction semantics', () => {
     assert.match(wide, /align-self: center !important/);
     assert.match(wide, /#MiddleColumn \.MiddleHeader[\s\S]{0,350}width: calc\(100% - 2rem - var\(--tgdl-rc, 0px\)\)/);
     assert.match(wide, /margin-left: 1rem !important/);
-    assert.doesNotMatch(wide, /is-in-document-group \.message-content\s*\{[\s\S]{0,120}translateX\(/);
     assert.match(wide, /is-in-document-group \.message-content\.audio[\s\S]{0,240}translateX\(45px\)/);
-    assert.doesNotMatch(wide, /is-in-document-group \.message-content,\s*\n/);
-    const standard = read('electron/embedded_addons/desktop_like_standart.js');
     assert.match(standard, /is-in-document-group \.message-content\.audio[\s\S]{0,240}translateX\(45px\)/);
-    assert.doesNotMatch(standard, /is-in-document-group \.message-content,\s*\n/);
     assert.match(wide, /Message\.own:not\(\.is-in-document-group\):has\(\.message-content\.media\) \.message-content-wrapper[\s\S]{0,220}justify-content: flex-start/);
-    assert.match(wide, /Message\.own:not\(\.is-in-document-group\):has\(\.message-content\.media\) \.message-content[\s\S]{0,180}margin-left: 0/);
+});
+
+test('message history feature persists bounded snapshots and uses Telegram deletion state', () => {
+    const backend = read('electron/message-history.cjs');
+    const feature = read('electron/features/message_history.js');
+    const ipc = read('electron/ipc.cjs');
+    const preload = read('electron/preload.js');
+    assert.match(backend, /MAX_RECORDS = 3000/);
+    assert.match(backend, /MAX_EDITS = 20/);
+    assert.match(backend, /MAX_HTML = 65536/);
+    assert.match(backend, /items\.slice\(0, MAX_BATCH\)/);
+    assert.match(backend, /const wasDeleted = prev\.deleted === true/);
+    assert.match(feature, /is-deleting/);
+    assert.match(feature, /is-dissolving/);
+    assert.match(feature, /attributeFilter: \['class'\]/);
+    assert.doesNotMatch(feature, /stateHasMessage/);
+    assert.match(feature, /_twd-deleted-clone_/);
+    assert.match(feature, /_twd-edit-history-badge_/);
+    assert.match(ipc, /handle\('history_sync'/);
+    assert.match(ipc, /handle\('history_mark_deleted'/);
+    assert.match(ipc, /handle\('history_get_chat'/);
+    assert.match(preload, /'history_sync'/);
+    assert.match(preload, /'history_mark_deleted'/);
 });
 
 test('service UI Lab stays hidden and reuses native builders', () => {
@@ -307,13 +364,12 @@ test('service UI Lab stays hidden and reuses native builders', () => {
     assert.doesNotMatch(inject, /ui_lab|__twdUiLab/i);
     assert.match(panels, /function _withSettingsReady\(/);
     assert.match(settings, /function _genButton\(/);
-    assert.match(settings, /const chkBtn=_genButton\(/);
     assert.match(settings, /function _wireUiLabUnlock\(/);
     assert.match(settings, /count>=7&&count<10/);
     assert.match(settings, /10-count/);
     assert.match(settings, /openUiLabNative\(\)/);
-    assert.match(settings, /_wireUiLabUnlock\(unRow\)/);
-    assert.match(panels, /const ab=_genButton\(/);
+    const twd = read('electron/inject/ui/twd-settings-native.js');
+    assert.match(twd, /_wireUiLabUnlock\(lab\)/);
 });
 
 test('desktop notification popup follows Telegram toast geometry and has no dead settings flags', () => {

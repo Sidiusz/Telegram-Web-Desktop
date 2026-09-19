@@ -62,7 +62,13 @@ function openNativePanel(opts){
         const h3=document.createElement('h3'); h3.textContent=opts.title||'';
         hdr.appendChild(back); hdr.appendChild(h3);
         if(opts.renderHeader) opts.renderHeader(hdr);
-        back.addEventListener('click',()=>{ closeNativePanel(); if(opts.onBack)opts.onBack(); });
+        back.addEventListener('click',()=>{
+            if(opts.handleBack && opts.handleBack(panel,content)===true) return;
+            closeNativePanel();
+            if(opts.onBack)opts.onBack();
+        });
+        panel._titleEl=h3;
+        panel._backButton=back;
         panel.appendChild(hdr);
     }
     // Контент: тот же класс, что у нативного раздела (custom-scroll + with-notch),
@@ -71,6 +77,7 @@ function openNativePanel(opts){
     content.className='settings-content custom-scroll with-notch';
     content.id='_tgpc_';
     panel.appendChild(content);
+    panel._content=content;
     // Кладём поверх колонки настроек (та же геометрия, что у слайдов).
     settings.style.position=settings.style.position||'relative';
     panel._under=settings.querySelector('.Transition_slide-active, .Transition__slide--active');
@@ -84,15 +91,6 @@ function openNativePanel(opts){
     if(panel._under)panel._under.classList.add('_twd-under_');
     panel.classList.add('_in_');
     return panel;
-}
-
-// ── «Настройки приложения» как нативный раздел (#5) ────────────────────────
-// Контент — renderSt (настройки приложения), шапка без доп.кнопок.
-function openAppSettingsNative(){
-    return _withSettingsReady(()=>openNativePanel({
-        title:T('app_settings'),
-        renderContent(content){ renderSt(content); },
-    }));
 }
 
 // ── «Загрузки» как нативный раздел (#5) ────────────────────────────────────
@@ -381,44 +379,36 @@ async function renderChangelogNative(content){
 // Эталон строки: <div class="ListItem multiline"><div class="ListItem-button">…</div></div>.
 async function renderDownloadsNative(content){
     if(!content)return;captureWidgetTpl();
-    const cardCls=_genCardCls(),liEl=document.querySelector('#Settings .ListItem.narrow')||document.querySelector('#Settings .ListItem');
+    const cardCls=_genCardCls(),headerTpl=_genHeaderTpl(),liEl=document.querySelector('#Settings .ListItem.narrow')||document.querySelector('#Settings .ListItem');
     if(!cardCls||!liEl){setTimeout(()=>{if(content.isConnected)renderDownloadsNative(content);},120);return;}
+    let settings={};try{settings=await INV('get_settings')||{};}catch(e){}
     const merged=await collectDownloads();content.innerHTML='';
-    if(!merged.length){const empty=document.createElement('div');empty.className='_tpempty_';empty.textContent=T('dl_empty');content.appendChild(empty);return;}
-    const card=_genCard(cardCls);card.classList.add('_twd-panel-card_');merged.forEach(d=>card.appendChild(_nativeDlRow(d,()=>renderDownloadsNative(content),liEl)));content.appendChild(card);
-}
-function _nativeDlRow(d,cb,liEl){
-    const done=d.status==='completed',active=d.status==='downloading'||d.status==='pending';
-    const fmt=window.__tgdl&&window.__tgdl.fmtProgress||function(){return '';},fb=window.__tgdl&&window.__tgdl.fmtBytes||function(){return '';};
-    let sub=active?(d.status==='pending'?T('dl_waiting'):fmt(d.recv,d.total)):(done?(T('dl_done')+(d.total?(' · '+fb(d.total)):'')):sLabel(d.status));
-    const row=_genNativeSettingRow(liEl,d.filename||'—',sub,'',null);if(row._value)row._value.remove();const btn=row.querySelector('.ListItem-button');btn.querySelectorAll('.Switcher,.Switch,.Toggle,.icon-next,.icon-arrow-right').forEach(x=>x.remove());
-    const ext=_fileExt(d.filename),ico=document.createElement('div');ico.className='ListItem-main-icon _twd-filetype_';ico.style.background=_extColor(ext);ico.textContent=(ext||'?').slice(0,4);btn.prepend(ico);
-    const actions=document.createElement('div');actions.className='_twd-row-actions_';
-    if(done&&d.id!=null){const fld=_genIconButton('folder',T('dl_show_folder'),'tiny',false);fld.addEventListener('click',e=>{e.stopPropagation();INV('open_download_folder',{id:d.id}).then(r=>{if(r&&r.error)toast(T('dl_not_found'));}).catch(()=>{});});actions.appendChild(fld);}
-    if(d.id!=null){const del=_genIconButton('delete',T('dl_delete'),'tiny',true);del.addEventListener('click',e=>{e.stopPropagation();showModal({title:T('dl_del_t'),msg:'«'+(d.filename||'')+'»?',okText:T('del_upper'),okDanger:true,onOk:async()=>{await INV('delete_download',{id:d.id});cb();}});});actions.appendChild(del);}
-    if(actions.childNodes.length)btn.appendChild(actions);
-    if(done&&d.id!=null){row.classList.remove('is-static');btn.setAttribute('role','button');btn.setAttribute('tabindex','0');btn.addEventListener('click',()=>INV('open_download_file',{id:d.id}).then(r=>{if(r&&r.error){toast(T('dl_not_found'));cb();}}).catch(()=>{}));}
-    else{row.classList.add('is-static');btn.removeAttribute('role');btn.removeAttribute('tabindex');}
-    return row;
-}
+    const addSection=(title,card)=>content.append(_genHeader(headerTpl,title),card);
 
+    const cfg=_genCard(cardCls);cfg.classList.add('_twd-panel-card_');
+    const folderRow=_genNativeSettingRow(
+        liEl,
+        T('st_folder'),
+        settings.save_path||T('twd_download_default_folder'),
+        '',
+        async()=>{
+            const p=await INV('open_folder_dialog');
+            if(!p)return;
+            const current=await INV('get_settings')||{};
+            await INV('save_settings',{settings:Object.assign({},current,{save_path:p})});
+            if(content.isConnected)renderDownloadsNative(content);
+        }
+    );
+    cfg.appendChild(folderRow);
+    addSection(T('sec_downloads'),cfg);
 
-function sLabel(s){return{pending:T('dl_st_pending'),downloading:T('dl_st_downloading'),completed:T('dl_st_completed'),failed:T('dl_st_failed'),cancelled:T('dl_st_cancelled')}[s]||s;}
-function sColor(s){return{pending:'#aaa',downloading:'var(--color-primary,#5288c1)',completed:'#4caf50',failed:'#e53935',cancelled:'#aaa'}[s]||'#aaa';}
-
-// Расширение файла → цвет иконки (упрощённая палитра TG)
-function _fileExt(name){ var m=(name||'').match(/.([a-z0-9]+)$/i); return m?m[1].toLowerCase():''; }
-function _extColor(ext){
-    return ({
-        zip:'#c77b41',rar:'#7e57c2','7z':'#5288c1',gz:'#66bb6a',tar:'#8d6e63',
-        exe:'#e53935',msi:'#ef6c00',dmg:'#42a5f5',apk:'#8bc34a',deb:'#ef5350',
-        pdf:'#e53935',doc:'#2b5278',docx:'#2b5278',xls:'#4caf50',xlsx:'#4caf50',
-        ppt:'#ff9800',pptx:'#ff9800',
-        mp3:'#ec407a',wav:'#ec407a',flac:'#ec407a',ogg:'#ec407a',
-        mp4:'#5c6bc0',mov:'#5c6bc0',avi:'#5c6bc0',mkv:'#5c6bc0',
-        jpg:'#ffa726',jpeg:'#ffa726',png:'#ffa726',gif:'#ffa726',webp:'#ffa726',svg:'#ffa726',
-        txt:'#90a4ae',js:'#fdd835',ts:'#5288c1',json:'#fdd835',
-    })[ext]||'#5288c1';
+    const history=_genCard(cardCls);history.classList.add('_twd-panel-card_');
+    if(!merged.length){
+        const empty=document.createElement('div');empty.className='_tpempty_';empty.textContent=T('dl_empty');history.appendChild(empty);
+    }else{
+        merged.forEach(d=>history.appendChild(_nativeDlRow(d,()=>renderDownloadsNative(content),liEl)));
+    }
+    addSection(T('twd_download_history'),history);
 }
 
 // Объединяет активные (registry) + сохранённые (get_downloads), без дублей по id.

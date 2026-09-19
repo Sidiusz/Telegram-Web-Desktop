@@ -1,11 +1,7 @@
-// @name Hide Channel Ads
-// @version 1.0.0
-// @description Скрывает встроенную на каналах рекламу
-
 setInterval(function() {
-    if (document.getElementById('addon-hide-ads') || !document.head) return;
+    if (document.getElementById('twd-feature-hide-ads') || !document.head) return;
 
-    document.head.insertAdjacentHTML('beforeend', `<style id="addon-hide-ads">
+    document.head.insertAdjacentHTML('beforeend', `<style id="twd-feature-hide-ads">
         /* Вырезаем рекламный блок полностью */
         .SponsoredMessage,
         .sponsored-media-image-container,

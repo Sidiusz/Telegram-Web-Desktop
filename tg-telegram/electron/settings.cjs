@@ -2,6 +2,7 @@
 const Store = require('electron-store').default;
 
 const store = new Store({ name: 'settings' });
+const legacyAddonStore = new Store({ name: 'addon-states' });
 
 const DEFAULTS = {
     save_path: null,
@@ -21,6 +22,10 @@ const DEFAULTS = {
     devtools_enabled: false,
     update_check_interval: '1h',
     skipped_version: null,
+    appearance_message_layout: 'left',
+    appearance_hide_ads: true,
+    messages_show_deleted: false,
+    messages_edit_history: false,
     proxy_mode: 'auto',
     proxy_auto_latched: false,
     proxy_domain_source: 'flowseal',
@@ -41,7 +46,32 @@ function cloneDefault(value) {
     return value;
 }
 
+function migrateLegacyBuiltinFeatures() {
+    if (store.get('_builtin_features_migrated_131', false) === true) return;
+    const disabled = legacyAddonStore.get('disabled_addons', []);
+    const enabled = legacyAddonStore.get('enabled_addons', []);
+    const standard = 'embedded:desktop_like_standart.js';
+    const wide = 'embedded:desktop_like_wide.js';
+    const ads = 'embedded:hide_ads.js';
+
+    if (!store.has('appearance_message_layout')) {
+        let layout = 'left';
+        if (enabled.includes(wide) && !disabled.includes(wide)) layout = 'wide';
+        else if (disabled.includes(standard) && !enabled.includes(standard)) layout = 'native';
+        store.set('appearance_message_layout', layout);
+    }
+    if (!store.has('appearance_hide_ads')) {
+        store.set('appearance_hide_ads', !disabled.includes(ads));
+    }
+
+    // Built-ins are no longer add-ons. Keep only actual user add-on state.
+    legacyAddonStore.set('disabled_addons', disabled.filter(k => !String(k).startsWith('embedded:')));
+    legacyAddonStore.set('enabled_addons', enabled.filter(k => !String(k).startsWith('embedded:')));
+    store.set('_builtin_features_migrated_131', true);
+}
+
 function loadSettings() {
+    migrateLegacyBuiltinFeatures();
     const out = {};
     for (const key of Object.keys(DEFAULTS)) {
         const fallback = DEFAULTS[key];
@@ -59,10 +89,12 @@ function loadSettings() {
 const BOOL_KEYS = new Set([
     'minimize_to_tray','popup_notifications','notif_sound','notif_cat_private',
     'notif_cat_group','notif_cat_channel','notif_hide_text','notif_hide_sender',
-    'devtools_enabled','proxy_auto_latched','proxy_worker_enabled',
+    'devtools_enabled','appearance_hide_ads','messages_show_deleted','messages_edit_history',
+    'proxy_auto_latched','proxy_worker_enabled',
     'proxy_web_fallback','proxy_web_fallback_latched',
 ]);
 const UPDATE_INTERVALS = new Set(['30m','1h','12h','24h','3d','7d','30d','never']);
+const MESSAGE_LAYOUTS = new Set(['native','left','wide']);
 const PROXY_MODES = new Set(['auto','always','off']);
 const PROXY_DOMAIN_SOURCES = new Set(['flowseal','custom']);
 const INVALID = Symbol('invalid-setting');
@@ -82,6 +114,7 @@ function normalizeSetting(k, v) {
         const n = Number(v); return Number.isFinite(n) ? Math.max(3, Math.min(120, Math.round(n))) : INVALID;
     }
     if (k === 'update_check_interval') return UPDATE_INTERVALS.has(v) ? v : INVALID;
+    if (k === 'appearance_message_layout') return MESSAGE_LAYOUTS.has(v) ? v : INVALID;
     if (k === 'proxy_mode') return PROXY_MODES.has(v) ? v : INVALID;
     if (k === 'proxy_domain_source') return PROXY_DOMAIN_SOURCES.has(v) ? v : INVALID;
     if (k === 'save_path') return typeof v === 'string' && v.length <= 32767 ? v : INVALID;

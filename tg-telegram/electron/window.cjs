@@ -5,6 +5,7 @@ const fs = require('fs');
 
 const { getScripts } = require('./scripts.cjs');
 const { loadAddonScripts } = require('./addons.cjs');
+const { loadFeatureScripts } = require('./features.cjs');
 const { saveDownloads, trackActive, untrackActive } = require('./downloads.cjs');
 const { loadSettings } = require('./settings.cjs');
 const { uniquePath } = require('./utils.cjs');
@@ -240,7 +241,8 @@ function createWindow(state, onTelegramLink, options = {}) {
             // Keep ordering deterministic and avoid piling many executeJavaScript
             // calls onto WebContents while a load is still settling.
             const { NOTIF_INTERCEPT_JS, EXTERNAL_JS, AUDIO_JS, UI_JS } = getScripts();
-            const allScripts = [NOTIF_INTERCEPT_JS, EXTERNAL_JS, AUDIO_JS, UI_JS, ...loadAddonScripts()];
+            const settings = loadSettings();
+            const allScripts = [NOTIF_INTERCEPT_JS, EXTERNAL_JS, AUDIO_JS, UI_JS, ...loadFeatureScripts(settings), ...loadAddonScripts()];
             for (const script of allScripts) {
                 if (!mainWindow || mainWindow.isDestroyed()) break;
                 try { await mainWindow.webContents.executeJavaScript(script); }

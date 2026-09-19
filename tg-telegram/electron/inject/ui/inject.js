@@ -82,59 +82,75 @@ function injectMenu(){
 // поэтому находим список через якорь-строку (icon-unmute = «Уведомления») и клонируем
 // её узел → меня иконку/текст → вставляем. Так вид 1-в-1 как родной и переживёт сборку.
 function injectSettingsRows(){
-    // ТОЛЬКО экран Настроек (#Settings). В профиле собеседника (#RightColumn) тоже
-    // есть строки «Уведомления»/медиа с теми же иконками — туда вставлять нельзя.
-    const settings = document.getElementById('Settings');
-    if(!settings) return;
-    // Telegram redesign: icons changed (icon-unmute -> icon-notifications-filled, icon-data -> icon-piechart-filled)
-    // Find anchor by text content to survive icon renames.
-    const allRows = settings.querySelectorAll('.ListItem');
-    let notif = null, data = null;
-    for(const row of allRows){
-        const txt = (row.textContent||'').trim();
-        if(!notif && /Уведомления|Notifications/i.test(txt)) notif = row;
-        if(!data && /Данные и память|Data and Storage/i.test(txt)) data = row;
-        if(notif && data) break;
-    }
-    // Fallback to old icon selectors
-    if(!notif) notif = settings.querySelector('.ListItem.narrow .ListItem-button .icon-unmute')?.closest('.ListItem.narrow');
-    else notif = notif.closest ? notif.closest('.ListItem.narrow') : notif;
-    if(!data) data = settings.querySelector('.ListItem.narrow .ListItem-button .icon-data')?.closest('.ListItem.narrow');
-    else if(data && !data.classList?.contains('ListItem')) data = data.closest('.ListItem.narrow');
-    const anchorEl = notif || data;
-    if(!anchorEl || anchorEl.closest('#RightColumn, .RightColumn')) return;
-    const list  = anchorEl.parentElement;
-    if(!list) return;
-    if(list.querySelector('#_tgst_ad_')) return;   // уже вставлено
+    const settings=document.getElementById('Settings');
+    if(!settings)return;
+    const scroll=settings.querySelector('.settings-main-scroll');
+    if(!scroll)return;
 
-    // Clone live native row — keep exact card styling.
-    const tmpl = anchorEl.closest('.ListItem.narrow') || anchorEl;
-    function makeRow(id, iconName, label, sub, tone, onClick){
-        const row=_genDecoratedRow(iconName,label,'',onClick||null,tone,sub,false);
-        row.id=id;
-        return row;
+    // Current Web A: the root settings category card is the direct child of
+    // .settings-main-scroll that contains the native settings-filled row.
+    // We intentionally do not depend on Telegram's hashed class names or labels.
+    const rootWrap=Array.from(scroll.children).find(function(el){
+        return !!el.querySelector('.ListItem .icon-settings-filled') &&
+               el.querySelectorAll('.ListItem.narrow').length>=6;
+    });
+    if(!rootWrap)return;
+
+    const groups=Array.from(rootWrap.children).filter(function(el){
+        return !!el.querySelector('.ListItem');
+    });
+    if(!groups.length)return;
+    const mainGroup=groups.find(function(el){return !!el.querySelector('.icon-settings-filled');});
+    if(!mainGroup)return;
+    const nativeGeneral=mainGroup.querySelector('.icon-settings-filled')?.closest('.ListItem');
+    if(!nativeGeneral)return;
+
+    function row(id,icon,title,sub,tone,cb){
+        const r=_genDecoratedRow(icon,title,'',cb,tone,sub,false);
+        r.id=id;
+        return r;
     }
 
-    // #3: «Настройки приложения» как отдельный пункт убрали — её секции теперь
-    // встраиваются прямо в «Общие настройки» (injectGeneralSettings). В главном
-    // списке оставляем «Дополнения», а «Проверить обновления» кладём в самый низ.
+    let twd=mainGroup.querySelector('#_tgst_twd_');
+    let dl=mainGroup.querySelector('#_tgst_dl_');
+    let ad=mainGroup.querySelector('#_tgst_ad_');
 
-    // «Дополнения» — сразу под «Общие настройки» (первая строка списка), иначе в начало.
-    const adRow = makeRow('_tgst_ad_', 'twd-addons', T('addons'), T('addons_desc'), 'purple', () => openAddonsNative());
-    const proxyRow = makeRow('_tgst_proxy_', 'twd-proxy', T('proxy'), T('proxy_desc'), 'blue', () => openProxyNative());
-    let generalAnchor = null;
-    for(const r of list.querySelectorAll('.ListItem')){
-        if(/Общие настройки|General Settings/i.test(r.textContent||'')){ generalAnchor = r; break; }
-    }
-    if(!generalAnchor) generalAnchor = list.querySelector('.ListItem');
-    if(generalAnchor && generalAnchor !== tmpl){
-        generalAnchor.after(adRow);
-    } else {
-        list.insertBefore(adRow, list.firstChild);
-    }
-    adRow.after(proxyRow);
+    // Remove the old direct Proxy row from pre-1.3.1 layouts; Proxy now belongs
+    // inside Telegram Web Desktop.
+    const oldProxy=rootWrap.querySelector('#_tgst_proxy_');
+    if(oldProxy)oldProxy.remove();
 
-    // «Проверить обновления» и «О приложении» — отдельной категорией-облачком в
-    // самом низу главного экрана настроек (injectAboutSection), не строками здесь.
+    if(!twd){
+        twd=row('_tgst_twd_','settings','Telegram Web Desktop',T('twd_settings_desc'),'blue',function(){openTwdNative('root');});
+        nativeGeneral.after(twd);
+    }else{
+        if(twd._title)twd._title.textContent='Telegram Web Desktop';
+        if(twd._subtitle)twd._subtitle.textContent=T('twd_settings_desc');
+    }
+    if(!dl){
+        dl=row('_tgst_dl_','download',T('downloads'),T('downloads_desc'),'green',function(){openDownloadsNative();});
+        twd.after(dl);
+    }else if(dl._subtitle)dl._subtitle.textContent=T('downloads_desc');
+    if(!ad){
+        ad=row('_tgst_ad_','twd-addons',T('addons'),T('addons_desc'),'purple',function(){openAddonsNative();});
+        dl.after(ad);
+    }else{
+        if(ad._title)ad._title.textContent=T('addons');
+        if(ad._subtitle)ad._subtitle.textContent=T('addons_desc');
+    }
+
+    // Information about the modification is always the last row of the root
+    // Settings list, below Telegram's own help/privacy rows.
+    const bottomGroup=groups[groups.length-1]||mainGroup;
+    let info=rootWrap.querySelector('#_tgst_modinfo_');
+    if(!info){
+        info=row('_tgst_modinfo_','info','Telegram Web Desktop',T('twd_mod_info'),'blue',function(){openTwdNative('about');});
+        bottomGroup.appendChild(info);
+        INV('get_app_info').then(function(appInfo){
+            if(info.isConnected && info._subtitle && appInfo && appInfo.version){
+                info._subtitle.textContent='v'+appInfo.version+' · '+T('twd_mod_info');
+            }
+        }).catch(function(){});
+    }
 }
 // ─────────────────────────────────────────────────────────────────────────────
