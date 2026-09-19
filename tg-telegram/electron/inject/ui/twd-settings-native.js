@@ -80,15 +80,62 @@ function _twdFeatureApplyBar(content){
 
 var _twdNativePanel=null;
 var _twdNativePage='root';
+var _twdNativeTransitioning=false;
+
+function _twdWrapNativePage(panel){
+    if(!panel||panel._twdPage)return panel&&panel._twdPage;
+    var hdr=panel.querySelector(':scope > .left-header');
+    var content=panel._content||panel.querySelector(':scope > .settings-content');
+    if(!hdr||!content)return null;
+    var page=document.createElement('div');
+    page.className='_twd-native-page_';
+    panel.insertBefore(page,hdr);
+    page.append(hdr,content);
+    panel.classList.add('_twd-menu-panel_');
+    panel._twdPage=page;
+    return page;
+}
+function _twdWireInnerBack(header,page){
+    var back=header&&header.querySelector('button');
+    if(!back)return;
+    back.addEventListener('click',function(e){
+        e.preventDefault();e.stopPropagation();
+        if(_twdNativeTransitioning)return;
+        if(page==='root')closeNativePanel();
+        else _twdNavigateNative('root',true);
+    });
+}
+function _twdCloneInnerPage(panel,page){
+    var current=panel&&panel._twdPage;
+    if(!current)return null;
+    var oldHeader=current.querySelector('.left-header');
+    var oldContent=panel._content||current.querySelector('.settings-content');
+    if(!oldHeader||!oldContent)return null;
+    var next=document.createElement('div');
+    next.className='_twd-native-page_';
+    next.style.visibility='hidden';
+    var header=oldHeader.cloneNode(true);
+    var title=header.querySelector('h3');
+    if(title)title.textContent=_twdNativeTitle(page);
+    _twdWireInnerBack(header,page);
+    var content=oldContent.cloneNode(false);
+    oldContent.id='_tgpc_old_';
+    content.id='_tgpc_';
+    content.innerHTML='';
+    next.append(header,content);
+    panel.appendChild(next);
+    return {page:next,header:header,title:title,content:content};
+}
 
 function openTwdNative(initialPage){
     if(!document.getElementById('Settings')) return _withSettingsReady(function(){return openTwdNative(initialPage);});
     _twdNativePage=initialPage||'root';
+    _twdNativeTransitioning=false;
     var panel=openNativePanel({
         title:'Telegram Web Desktop',
         handleBack:function(){
             if(_twdNativePage!=='root'){
-                _twdNavigateNative('root');
+                _twdNavigateNative('root',true);
                 return true;
             }
             return false;
@@ -99,7 +146,10 @@ function openTwdNative(initialPage){
         }
     });
     _twdNativePanel=panel;
-    if(panel&&panel._titleEl)panel._titleEl.textContent=_twdNativeTitle(_twdNativePage);
+    if(panel){
+        _twdWrapNativePage(panel);
+        if(panel._titleEl)panel._titleEl.textContent=_twdNativeTitle(_twdNativePage);
+    }
     return panel;
 }
 function _twdNativeTitle(page){
@@ -115,12 +165,44 @@ function _twdNativeTitle(page){
     };
     return map[page]||'Telegram Web Desktop';
 }
-function _twdNavigateNative(page){
-    if(!_twdNativePanel||!_twdNativePanel.isConnected)return;
-    _twdNativePage=page||'root';
-    if(_twdNativePanel._titleEl)_twdNativePanel._titleEl.textContent=_twdNativeTitle(_twdNativePage);
-    var content=_twdNativePanel._content||document.getElementById('_tgpc_');
-    if(content)_twdRenderNativePage(content,_twdNativePage);
+async function _twdNavigateNative(page,backwards){
+    if(!_twdNativePanel||!_twdNativePanel.isConnected||_twdNativeTransitioning)return;
+    page=page||'root';
+    if(page===_twdNativePage)return;
+    var panel=_twdNativePanel;
+    var oldPage=panel._twdPage||_twdWrapNativePage(panel);
+    var next=_twdCloneInnerPage(panel,page);
+    if(!oldPage||!next)return;
+    _twdNativeTransitioning=true;
+    _twdNativePage=page;
+    panel._titleEl=next.title;
+    panel._content=next.content;
+    try{
+        await _twdRenderNativePage(next.content,page);
+    }catch(_){}
+    if(!panel.isConnected||!next.page.isConnected){
+        _twdNativeTransitioning=false;
+        return;
+    }
+    var isBack=backwards===true;
+    oldPage.classList.add(isBack?'_twd-page-back-from_':'_twd-page-forward-from_');
+    next.page.classList.add(isBack?'_twd-page-back-to_':'_twd-page-forward-to_');
+    void next.page.offsetWidth;
+    next.page.style.visibility='';
+    var done=false;
+    function finish(e){
+        if(e&&e.target!==next.page)return;
+        if(done)return;done=true;
+        oldPage.remove();
+        next.page.classList.remove('_twd-page-forward-to_','_twd-page-back-to_');
+        next.page.classList.add('_twd-native-page-active_');
+        panel._twdPage=next.page;
+        panel._titleEl=next.title;
+        panel._content=next.content;
+        _twdNativeTransitioning=false;
+    }
+    next.page.addEventListener('animationend',finish,{once:true});
+    setTimeout(function(){finish();},380);
 }
 async function _twdRenderNativePage(content,page){
     if(!content)return;
