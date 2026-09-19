@@ -193,77 +193,150 @@
     }
     function fmtTime(sec){
         if(!sec)return '';
-        try{return new Date(sec*1000).toLocaleString([], {day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'});}catch(_){return '';}
+        try{return new Date(sec*1000).toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'});}catch(_){return '';}
+    }
+    function dateKey(sec){
+        var d=new Date((Number(sec)||0)*1000);
+        if(!Number.isFinite(d.getTime()))return '';
+        return [d.getFullYear(),String(d.getMonth()+1).padStart(2,'0'),String(d.getDate()).padStart(2,'0')].join('-');
+    }
+    function dateLabel(sec){
+        if(!sec)return '';
+        try{return new Date(sec*1000).toLocaleDateString([], {day:'numeric',month:'long'});}catch(_){return '';}
+    }
+    function appendixSvg(){
+        var ns='http://www.w3.org/2000/svg';
+        var svg=document.createElementNS(ns,'svg');svg.setAttribute('width','9');svg.setAttribute('height','20');svg.setAttribute('class','svg-appendix');
+        var path=document.createElementNS(ns,'path');path.setAttribute('d','M3 17h6V0c-.193 2.84-.876 5.767-2.05 8.782-.904 2.325-2.446 4.485-4.625 6.48A1 1 0 003 17z');path.setAttribute('class','corner');
+        svg.appendChild(path);return svg;
     }
     function makePost(item){
         var src=sourceById(item.chatId)||{id:item.chatId,title:item.chatId};
-        var post=document.createElement('article');post.className='_twd-feed-post_';
+        var post=document.createElement('div');
+        post.id='_twd-feed-message-'+String(item.chatId).replace(/\D/g,'')+'-'+String(item.messageId);
+        post.className='Message message-list-item first-in-group allow-selection last-in-group shown open _twd-feed-message_';
+        if(item.viewsCount)post.classList.add('has-views');
         post.dataset.chatId=item.chatId;post.dataset.messageId=item.messageId;
 
-        var forwarded=document.createElement('button');forwarded.className='_twd-feed-forward_';forwarded.type='button';
-        var fi=document.createElement('i');fi.className='icon icon-forward';fi.setAttribute('aria-hidden','true');
-        var fn=document.createElement('span');fn.textContent=src.title||('@'+src.username)||item.chatId;
-        forwarded.append(fi,fn);forwarded.addEventListener('click',function(){openSource(item);});
-        post.appendChild(forwarded);
+        var select=document.createElement('div');select.className='message-select-control no-selection';
+        var wrapper=document.createElement('div');wrapper.className='message-content-wrapper can-select-text';
+        var classes=['message-content','peer-color-0','is-forwarded','has-shadow','has-background','has-appendix','_twd-feed-native-bubble_'];
+        if(item.media)classes.push('media','has-adaptive-width');
+        if(item.text)classes.push('text');
+        if(!item.media&&!item.text)classes.push('text');
+        var bubble=document.createElement('div');bubble.className=classes.join(' ');bubble.setAttribute('dir','auto');
+        var inner=document.createElement('div');inner.className='content-inner forwarded-message';inner.setAttribute('dir','auto');
+
+        var title=document.createElement('div');title.className='message-title interactive _twd-feed-forward-title_';
+        var titleWrap=document.createElement('span');titleWrap.className='message-title-name-container';
+        var forward=document.createElement('span');forward.className='forward-title';forward.textContent=tr('Переслано от','Forwarded from');
+        var sender=document.createElement('span');sender.className='sender-title';sender.textContent=src.title||('@'+src.username)||item.chatId;
+        titleWrap.append(forward,sender);title.appendChild(titleWrap);
+        title.addEventListener('click',function(){openSource(item);});
+        inner.appendChild(title);
 
         if(item.media){
             if(item.media.thumbnail){
-                var img=document.createElement('img');img.className='_twd-feed-thumb_';img.src=item.media.thumbnail;img.alt=mediaLabel(item.media.type);post.appendChild(img);
+                var media=document.createElement('div');media.className='media-inner interactive _twd-feed-native-media_';
+                var img=document.createElement('img');img.className='_twd-feed-native-thumb_';img.src=item.media.thumbnail;img.alt=mediaLabel(item.media.type);img.draggable=false;
+                media.appendChild(img);
+                if(item.media.type==='video'||item.media.type==='animation'){
+                    var play=document.createElement('i');play.className='icon icon-large-play _twd-feed-play_';play.setAttribute('aria-hidden','true');media.appendChild(play);
+                }
+                if(item.media.duration){
+                    var dur=document.createElement('div');dur.className='message-media-duration _twd-feed-duration_';
+                    var secs=Math.round(item.media.duration),mins=Math.floor(secs/60);dur.textContent=mins+':'+String(secs%60).padStart(2,'0');media.appendChild(dur);
+                }
+                inner.appendChild(media);
             }else{
-                var media=document.createElement('div');media.className='_twd-feed-media-placeholder_';
+                var file=document.createElement('div');file.className='_twd-feed-media-placeholder_';
                 var mi=document.createElement('i');mi.className='icon '+(item.media.type==='photo'?'icon-photo':item.media.type==='video'?'icon-video':'icon-document');mi.setAttribute('aria-hidden','true');
                 var ml=document.createElement('span');ml.textContent=item.media.fileName||mediaLabel(item.media.type);
-                media.append(mi,ml);post.appendChild(media);
+                file.append(mi,ml);inner.appendChild(file);
             }
         }
         if(item.text){
-            var text=document.createElement('div');text.className='_twd-feed-text_';text.textContent=item.text;post.appendChild(text);
+            var text=document.createElement('div');text.className='text-content _twd-feed-text_';text.setAttribute('dir','auto');text.textContent=item.text;inner.appendChild(text);
         }else if(!item.media){
-            var empty=document.createElement('div');empty.className='_twd-feed-text_ _twd-feed-muted_';empty.textContent=tr('[пост без текста]','[post without text]');post.appendChild(empty);
+            var empty=document.createElement('div');empty.className='text-content _twd-feed-text_ _twd-feed-muted_';empty.textContent=tr('[пост без текста]','[post without text]');inner.appendChild(empty);
         }
+        bubble.appendChild(inner);
+
+        var meta=document.createElement('span');meta.className='MessageMeta';meta.setAttribute('dir','ltr');meta.setAttribute('data-ignore-on-paste','true');
+        if(item.viewsCount){
+            var views=document.createElement('span');views.className='message-views';views.textContent=String(item.viewsCount);meta.appendChild(views);
+            var vi=document.createElement('i');vi.className='icon icon-channelviews';vi.setAttribute('aria-hidden','true');meta.appendChild(vi);
+        }
+        if(item.forwardsCount){
+            var fw=document.createElement('span');fw.className='_twd-feed-forwards_';fw.textContent='↗ '+String(item.forwardsCount);meta.appendChild(fw);
+        }
+        if(item.isEdited){
+            var ed=document.createElement('span');ed.className='_twd-feed-edited_';ed.textContent=tr('ред.','edited');meta.appendChild(ed);
+        }
+        var time=document.createElement('span');time.className='message-time';time.textContent=fmtTime(item.date);meta.appendChild(time);
+        bubble.appendChild(meta);
+
+        var actionsWrap=document.createElement('div');actionsWrap.className='message-action-buttons-container';
+        var stickyZone=document.createElement('div');stickyZone.className='message-action-buttons-sticky-zone';
+        var sticky=document.createElement('div');sticky.className='message-action-buttons message-action-button-sticky';stickyZone.appendChild(sticky);
+        var actions=document.createElement('div');actions.className='message-action-buttons';
+        var open=document.createElement('button');open.type='button';open.className='Button message-action-button default translucent-white round';open.setAttribute('aria-label',tr('Открыть исходный канал','Open source channel'));open.title=tr('Открыть исходный канал','Open source channel');
+        var oi=document.createElement('i');oi.className='icon icon-share-filled';oi.setAttribute('aria-hidden','true');open.appendChild(oi);open.addEventListener('click',function(e){e.preventDefault();e.stopPropagation();openSource(item);});
+        actions.appendChild(open);actionsWrap.append(stickyZone,actions);bubble.appendChild(actionsWrap);
+        bubble.appendChild(appendixSvg());
 
         if(item.reactions&&item.reactions.length){
-            var reacts=document.createElement('div');reacts.className='_twd-feed-reactions_';
+            var reacts=document.createElement('div');reacts.className='Reactions is-outside _twd-feed-reactions_';reacts.setAttribute('dir','ltr');
             item.reactions.slice(0,8).forEach(function(r){
-                var pill=document.createElement('span');pill.className='_twd-feed-reaction_';pill.textContent=(r.emoji||'•')+' '+String(r.count||0);reacts.appendChild(pill);
+                var pill=document.createElement('button');pill.type='button';pill.className='Button message-reaction tiny primary _twd-feed-reaction_';pill.tabIndex=-1;
+                var emoji=document.createElement('span');emoji.className='_twd-feed-reaction-emoji_';emoji.textContent=r.emoji||'•';
+                var count=document.createElement('span');count.textContent=String(r.count||0);
+                pill.append(emoji,count);reacts.appendChild(pill);
             });
-            post.appendChild(reacts);
+            bubble.appendChild(reacts);
         }
 
-        var meta=document.createElement('div');meta.className='_twd-feed-meta_';
-        var bits=[];
-        if(item.viewsCount)bits.push('◉ '+item.viewsCount);
-        if(item.forwardsCount)bits.push('↗ '+item.forwardsCount);
-        if(item.isEdited)bits.push(tr('ред.','edited'));
-        bits.push(fmtTime(item.date));
-        meta.textContent=bits.filter(Boolean).join(' · ');
-        post.appendChild(meta);
+        wrapper.appendChild(bubble);post.append(select,wrapper);
         return post;
     }
 
     async function renderFeed(){
         if(!feedView||!feedBody)return;
         var seq=++renderSeq;
-        feedBody.innerHTML='';
+        var container=feedBody.querySelector('.messages-container');
+        if(!container)return;
+        container.innerHTML='';
         if(!feedSources.length){
             var empty=document.createElement('div');empty.className='_twd-feed-empty_';
             var h=document.createElement('h3');h.textContent=tr('Лента пока пустая','Your feed is empty');
             var p=document.createElement('p');p.textContent=tr('Нажмите ПКМ по каналу или группе в списке чатов и выберите «Добавить в ленту».','Right-click a channel or group in the chat list and choose “Add to feed”.');
-            empty.append(h,p);feedBody.appendChild(empty);return;
+            empty.append(h,p);container.appendChild(empty);updateFeedHeader();return;
         }
-        var loading=document.createElement('div');loading.className='_twd-feed-empty_';loading.textContent=tr('Загрузка постов…','Loading posts…');feedBody.appendChild(loading);
+        var loading=document.createElement('div');loading.className='_twd-feed-empty_';loading.textContent=tr('Загрузка постов…','Loading posts…');container.appendChild(loading);
         var items=await collectFeedItems();
         if(seq!==renderSeq||!feedBody)return;
-        feedBody.innerHTML='';
+        container.innerHTML='';
         if(!items.length){
-            var none=document.createElement('div');none.className='_twd-feed-empty_';none.textContent=tr('В кэше Telegram пока нет постов из выбранных источников. Новые публикации появятся здесь автоматически.','Telegram has no cached posts from these sources yet. New posts will appear here automatically.');feedBody.appendChild(none);
+            var none=document.createElement('div');none.className='_twd-feed-empty_';none.textContent=tr('В кэше Telegram пока нет постов из выбранных источников. Новые публикации появятся здесь автоматически.','Telegram has no cached posts from these sources yet. New posts will appear here automatically.');container.appendChild(none);
         }else{
-            var group=document.createElement('div');group.className='_twd-feed-posts_';
-            items.forEach(function(item){group.appendChild(makePost(item));});
-            feedBody.appendChild(group);
+            var current='',dateGroup=null,first=true;
+            items.forEach(function(item){
+                var dk=dateKey(item.date);
+                if(dk!==current){
+                    current=dk;
+                    dateGroup=document.createElement('div');
+                    dateGroup.className='message-date-group'+(first?' first-message-date-group':'');
+                    first=false;
+                    var sticky=document.createElement('div');sticky.className='sticky-date interactive _twd-feed-sticky-date_';
+                    var label=document.createElement('span');label.setAttribute('dir','auto');label.textContent=dateLabel(item.date);
+                    sticky.appendChild(label);dateGroup.appendChild(sticky);container.appendChild(dateGroup);
+                }
+                dateGroup.appendChild(makePost(item));
+            });
             requestAnimationFrame(function(){if(feedBody)feedBody.scrollTop=feedBody.scrollHeight;});
         }
         updateFeedRow(items);
+        updateFeedHeader(items);
     }
 
     function renderSourcePanel(){
@@ -298,6 +371,16 @@
         sourcePanel.classList.toggle('open');
         if(sourcePanel.classList.contains('open'))renderSourcePanel();
     }
+    function updateFeedHeader(items){
+        if(!feedView)return;
+        var status=feedView.querySelector('._twd-feed-native-status_');
+        if(status){
+            var n=feedSources.length,count=Array.isArray(items)?items.length:null;
+            status.textContent=n
+                ? (n+' '+tr('источника','sources')+(count!=null?' · '+count+' '+tr('постов','posts'):''))
+                : tr('Источники не выбраны','No sources selected');
+        }
+    }
 
     function openFeed(){
         if(feedView&&feedView.isConnected)return;
@@ -305,21 +388,39 @@
         var middle=document.getElementById('MiddleColumn');if(!middle)return;
         middle.classList.add('_twd-feed-host_');
         document.body.classList.add('_twd-feed-open_');
-        feedView=document.createElement('div');feedView.id='_twd-feed-view_';feedView.className='_twd-feed-view_';
+        feedView=document.createElement('div');feedView.id='_twd-feed-view_';feedView.className='_twd-feed-view_ messages-layout';
 
-        var header=document.createElement('header');header.className='_twd-feed-header_';
-        var avatar=document.createElement('div');avatar.className='_twd-feed-header-avatar_';avatar.innerHTML='<i class="icon icon-channel"></i>';
-        var info=document.createElement('div');info.className='_twd-feed-header-info_';
-        var title=document.createElement('h3');title.textContent=tr('Лента','Feed');
-        var sub=document.createElement('div');sub.className='_twd-feed-header-sub_';sub.textContent=tr('Локальная лента публикаций','Local post feed');
-        info.append(title,sub);
-        var sources=document.createElement('button');sources.className='Button smaller round _twd-feed-source-button_';sources.type='button';sources.title=tr('Источники','Sources');sources.innerHTML='<i class="icon icon-settings"></i>';sources.addEventListener('click',toggleSourcePanel);
-        header.append(avatar,info,sources);
+        var header=document.createElement('div');header.className='MiddleHeader _twd-feed-native-header_';
+        var transition=document.createElement('div');transition.className='Transition';
+        var slide=document.createElement('div');slide.className='Transition_slide Transition_slide-active';
+        var wrap=document.createElement('div');wrap.className='chat-info-wrapper';
+        var chatInfo=document.createElement('div');chatInfo.className='ChatInfo';
+        var avatar=document.createElement('div');avatar.className='Avatar size-medium no-photo peer-color-0 _twd-feed-header-avatar_';avatar.style.setProperty('--_size','44px');
+        var avatarInner=document.createElement('div');avatarInner.className='inner';avatarInner.innerHTML='<i class="icon icon-channel Avatar__icon" aria-hidden="true"></i>';avatar.appendChild(avatarInner);
+        var info=document.createElement('div');info.className='info';
+        var titleWrap=document.createElement('div');titleWrap.className='title';
+        var title=document.createElement('h3');title.setAttribute('dir','auto');title.className='fullName';title.textContent=tr('Лента','Feed');titleWrap.appendChild(title);
+        var status=document.createElement('span');status.className='status';var groupStatus=document.createElement('span');groupStatus.className='group-status _twd-feed-native-status_';status.appendChild(groupStatus);
+        info.append(titleWrap,status);chatInfo.append(avatar,info);wrap.appendChild(chatInfo);slide.appendChild(wrap);transition.appendChild(slide);header.appendChild(transition);
 
-        feedBody=document.createElement('div');feedBody.className='_twd-feed-body_ custom-scroll';
+        var tools=document.createElement('div');tools.className='header-tools';
+        var actions=document.createElement('div');actions.className='HeaderActions';
+        var sources=document.createElement('button');sources.className='Button smaller translucent round has-ripple _twd-feed-source-button_';sources.type='button';sources.setAttribute('aria-label',tr('Источники ленты','Feed sources'));sources.title=tr('Источники ленты','Feed sources');
+        sources.innerHTML='<i class="icon icon-more" aria-hidden="true"></i><div class="ripple-container"></div>';sources.addEventListener('click',toggleSourcePanel);
+        actions.appendChild(sources);tools.appendChild(actions);header.appendChild(tools);
+
+        var outerTransition=document.createElement('div');outerTransition.className='Transition _twd-feed-list-transition_';
+        var outerSlide=document.createElement('div');outerSlide.className='Transition_slide Transition_slide-active';
+        feedBody=document.createElement('div');feedBody.className='Transition MessageList custom-scroll no-avatars with-default-bg _twd-feed-body_';
+        feedBody.setAttribute('data-list-key','_twd_virtual_feed_');
+        var innerSlide=document.createElement('div');innerSlide.className='Transition_slide Transition_slide-active';
+        var messages=document.createElement('div');messages.className='messages-container';messages.style.paddingBottom='16px';
+        innerSlide.appendChild(messages);feedBody.appendChild(innerSlide);outerSlide.appendChild(feedBody);outerTransition.appendChild(outerSlide);
+
         sourcePanel=document.createElement('aside');sourcePanel.className='_twd-feed-source-panel_';
-        feedView.append(header,feedBody,sourcePanel);middle.appendChild(feedView);
+        feedView.append(header,outerTransition,sourcePanel);middle.appendChild(feedView);
         if(feedRow)feedRow.classList.add('_twd-feed-selected_');
+        updateFeedHeader();
         renderFeed();
     }
     function closeFeed(){

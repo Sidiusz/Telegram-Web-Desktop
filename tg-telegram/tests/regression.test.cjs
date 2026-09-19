@@ -414,7 +414,11 @@ test('virtual feed is local, source-driven and reuses Telegram cached messages',
     assert.match(feed, /indexedDB\.open\('tt-data'\)/);
     assert.match(feed, /state\.messages&&state\.messages\.byChatId/);
     assert.match(feed, /_twd-feed-chat_/);
-    assert.match(feed, /_twd-feed-post_/);
+    assert.match(feed, /Message message-list-item first-in-group allow-selection last-in-group shown open _twd-feed-message_/);
+    assert.match(feed, /message-content','peer-color-0','is-forwarded','has-shadow','has-background','has-appendix/);
+    assert.match(feed, /Transition MessageList custom-scroll no-avatars with-default-bg _twd-feed-body_/);
+    assert.match(feed, /MiddleHeader _twd-feed-native-header_/);
+    assert.match(feed, /message-action-button default translucent-white round/);
     assert.match(feed, /_twd-feed-source-menu_/);
     assert.match(feed, /Добавить в ленту/);
     assert.match(feed, /window\.__twdFeedApi/);
