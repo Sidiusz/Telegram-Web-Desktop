@@ -26,10 +26,35 @@ function _twdSwitchRow(ctx,title,sub,checked,onChange){
     }
     return r;
 }
+function _twdRangeRow(ctx,title,sub,value,min,max,step,format,onChange){
+    value=Number(value);min=Number(min);max=Number(max);step=Number(step)||1;
+    if(!Number.isFinite(value))value=min;
+    value=Math.max(min,Math.min(max,value));
+    var r=_twdStaticRow(ctx,title,sub||'','',null,'notifications','red');
+    if(r._value)r._value.remove();
+    var b=r.querySelector('.ListItem-button');
+    if(!b)return r;
+    b.classList.add('_twd-range-row_');
+    b.removeAttribute('role');b.removeAttribute('tabindex');
+    b.querySelectorAll('.Switcher,.Switch,.Toggle,.icon-next,.icon-arrow-right').forEach(function(x){x.remove();});
+    var wrap=document.createElement('div');wrap.className='_twd-range-control_';
+    var input=document.createElement('input');input.type='range';input.className='_twd-range-input_';
+    input.min=String(min);input.max=String(max);input.step=String(step);input.value=String(value);
+    input.setAttribute('aria-label',title||'');
+    var label=document.createElement('span');label.className='_twd-range-value_';
+    var paint=function(){var n=Number(input.value);label.textContent=format?format(n):String(n);};
+    input.addEventListener('input',paint);
+    input.addEventListener('change',function(){var n=Number(input.value);if(onChange)onChange(n);});
+    paint();wrap.append(input,label);b.appendChild(wrap);return r;
+}
+var _twdSaveQueue=Promise.resolve();
 function _twdSave(patch){
-    return INV('get_settings').then(function(s){
-        return INV('save_settings',{settings:Object.assign({},s||{},patch)});
+    _twdSaveQueue=_twdSaveQueue.catch(function(){}).then(function(){
+        return INV('get_settings').then(function(s){
+            return INV('save_settings',{settings:Object.assign({},s||{},patch)});
+        });
     });
+    return _twdSaveQueue;
 }
 function _twdFeatureApplyBar(content){
     var bar=document.createElement('div');
@@ -78,7 +103,6 @@ function _twdNativeTitle(page){
         messages:T('twd_messages'),
         notifications:T('twd_notifications'),
         proxy:T('proxy'),
-        updates:T('sec_updates'),
         data:T('sec_data'),
         about:T('sec_about')
     };
@@ -112,7 +136,6 @@ async function _twdRenderNativePage(content,page){
     if(page==='appearance')return _twdRenderAppearance(content,ctx,s);
     if(page==='messages')return _twdRenderMessages(content,ctx,s);
     if(page==='notifications')return _twdRenderNotifications(content,ctx,s);
-    if(page==='updates')return _twdRenderUpdates(content,ctx,s);
     if(page==='data')return _twdRenderData(content,ctx,s);
     if(page==='about')return _twdRenderAbout(content,ctx,s);
     return _twdRenderRoot(content,ctx);
@@ -125,7 +148,6 @@ function _twdRenderRoot(content,ctx){
         ['messages','chat',T('twd_messages'),T('twd_messages_desc'),'green'],
         ['notifications','notifications',T('twd_notifications'),T('twd_notifications_desc'),'red'],
         ['proxy','lock',T('proxy'),T('proxy_desc'),'blue'],
-        ['updates','reload',T('sec_updates'),T('twd_updates_desc'),'green'],
         ['data','piechart',T('sec_data'),T('twd_data_desc'),'orange'],
         ['about','info',T('sec_about'),T('twd_about_desc'),'purple']
     ].forEach(function(x){
@@ -204,25 +226,17 @@ function _twdRenderNotifications(content,ctx,s){
     basic.appendChild(_twdSwitchRow(ctx,T('ns_popup'),' ',s.popup_notifications!==false,function(v){_twdSave({popup_notifications:v});}));
     basic.appendChild(_twdSwitchRow(ctx,T('ns_sound'),' ',s.notif_sound!==false,function(v){_twdSave({notif_sound:v});}));
     var duration=Number(s.notif_duration)||6;
-    var drow=_twdStaticRow(ctx,T('ns_duration'),' ',String(duration)+T('unit_sec'),function(v){
-        var vals=[3,5,6,8,10,15,20];
-        pickModal({
-            title:T('ns_duration'),current:String(duration),
-            options:vals.map(function(n){return{value:String(n),label:String(n)+T('unit_sec')};}),
-            onSave:function(x){duration=Number(x)||6;v.textContent=String(duration)+T('unit_sec');_twdSave({notif_duration:duration});}
-        });
-    },'notifications','red');
-    basic.appendChild(drow);
+    basic.appendChild(_twdRangeRow(
+        ctx,T('ns_duration'),' ',duration,2,30,1,
+        function(v){return String(Math.round(v))+T('unit_sec');},
+        function(v){_twdSave({notif_duration:Math.round(v)});}
+    ));
     var volume=Math.round((Number(s.notif_volume)||0.8)*100);
-    var vrow=_twdStaticRow(ctx,T('twd_notif_volume'),' ',volume+'%',function(v){
-        var vals=[0,25,50,75,100];
-        pickModal({
-            title:T('twd_notif_volume'),current:String(volume),
-            options:vals.map(function(n){return{value:String(n),label:n+'%'};}),
-            onSave:function(x){volume=Number(x)||0;v.textContent=volume+'%';_twdSave({notif_volume:volume/100});}
-        });
-    },'notifications','red');
-    basic.appendChild(vrow);
+    basic.appendChild(_twdRangeRow(
+        ctx,T('twd_notif_volume'),' ',volume,0,100,5,
+        function(v){return String(Math.round(v))+'%';},
+        function(v){_twdSave({notif_volume:Math.max(0,Math.min(100,v))/100});}
+    ));
     ctx.section(T('ns_section'),basic);
 
     var cats=ctx.card();
@@ -236,7 +250,7 @@ function _twdRenderNotifications(content,ctx,s){
     privacy.appendChild(_twdSwitchRow(ctx,T('ns_hide_sender'),' ',s.notif_hide_sender===true,function(v){_twdSave({notif_hide_sender:v});}));
     ctx.section(T('twd_privacy'),privacy);
 }
-function _twdRenderUpdates(content,ctx,s){
+function _twdAppendUpdates(content,ctx,s){
     var card=ctx.card();
     var keys=['30m','1h','12h','24h','3d','7d','30d','never'];
     var lbl={'30m':'iv_30m','1h':'iv_1h','12h':'iv_12h','24h':'iv_24h','3d':'iv_3d','7d':'iv_7d','30d':'iv_30d','never':'iv_never'};
@@ -249,11 +263,8 @@ function _twdRenderUpdates(content,ctx,s){
         try{var r=await INV('check_update_manual');if(!r||r.upToDate)toast(T('st_uptodate'),'icon-check');else if(r.error)toast(T('error')+': '+r.error,'icon-close');}
         catch(e){toast(T('st_check_err'),'icon-close');}
     },'reload','green'));
+    card.appendChild(_twdStaticRow(ctx,T('changelog'),T('twd_changelog_desc'),' ',function(){openChangelogNative();},'info','blue'));
     ctx.section(T('sec_updates'),card);
-
-    var cl=ctx.card();
-    cl.appendChild(_twdStaticRow(ctx,T('changelog'),T('twd_changelog_desc'),' ',function(){openChangelogNative();},'info','blue'));
-    ctx.section(T('changelog'),cl);
 }
 function _twdRenderData(content,ctx,s){
     var card=ctx.card();
@@ -276,4 +287,5 @@ function _twdRenderAbout(content,ctx,s){
     card.appendChild(lab);
     ctx.section('Telegram Web Desktop',card);
     INV('get_app_info').then(function(info){if(info&&info.version&&ver._value)ver._value.textContent=info.version;}).catch(function(){});
+    _twdAppendUpdates(content,ctx,s);
 }

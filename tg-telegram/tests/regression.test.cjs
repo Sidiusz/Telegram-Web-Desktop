@@ -267,6 +267,16 @@ test('custom UI stays inside Telegram Settings and keeps native navigation seman
     assert.match(twd, /appearance_message_layout/);
     assert.match(twd, /messages_show_deleted/);
     assert.match(twd, /messages_edit_history/);
+    assert.match(twd, /function _twdRangeRow\(/);
+    assert.match(twd, /var _twdSaveQueue=Promise\.resolve\(\)/);
+    assert.match(twd, /_twdSaveQueue=_twdSaveQueue\.catch/);
+    assert.match(twd, /input\.type='range'/);
+    assert.match(twd, /notif_duration:Math\.round\(v\)/);
+    assert.match(twd, /notif_volume:Math\.max\(0,Math\.min\(100,v\)\)\/100/);
+    assert.doesNotMatch(twd, /\['updates','reload'/);
+    assert.doesNotMatch(twd, /if\(page==='updates'\)/);
+    assert.match(twd, /function _twdAppendUpdates\(/);
+    assert.match(twd, /function _twdRenderAbout[\s\S]*_twdAppendUpdates\(content,ctx,s\)/);
     assert.match(twd, /renderProxyNative\(content\)/);
     assert.match(twd, /openChangelogNative\(\)/);
     assert.doesNotMatch(twd, /position:fixed;inset:0|_twd_settings_root_/);
@@ -290,6 +300,8 @@ test('custom UI stays inside Telegram Settings and keeps native navigation seman
     assert.match(core, /@keyframes _twd-settings-in-move_/);
     assert.match(core, /@keyframes _twd-settings-out-move_/);
     assert.match(core, /@keyframes _twd-settings-back-out-move_/);
+    assert.match(core, /_twd-range-input_/);
+    assert.match(core, /accent-color:var\(--color-primary/);
     assert.doesNotMatch(core, /_tgpanel_\._in_\{animation:slide-in-200|_twd-under_[^{]*push-out/);
 
     const modal = read('electron/inject/ui/modal.js');
