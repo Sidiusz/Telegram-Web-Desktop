@@ -1,5 +1,5 @@
 # Telegram Web Desktop
 
-Десктопное приложение, которое переносит браузерную версию Telegram (`web.telegram.org`) на ПК
+Неофициальный desktop-клиент Telegram для Windows на базе Telegram Web A и Electron.
 
-Работает с **zapret + hosts** - VPN не нужен
+Добавляет системный трей, desktop-уведомления, загрузки, автообновление, дополнения, поддержку `tg://` и встроенный Flowseal-прокси.
