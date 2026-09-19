@@ -57,7 +57,7 @@ try {
                 feedSourceIds.clear();
                 ids.map(String).filter(Boolean).forEach(id => feedSourceIds.add(id));
             });
-            function feedText(content) {
+            function feedFormatted(content) {
                 try {
                     const candidates = [
                         content && content.text,
@@ -68,11 +68,22 @@ try {
                         content && content.animation && content.animation.caption
                     ];
                     for (const value of candidates) {
-                        if (typeof value === 'string' && value) return value;
-                        if (value && value.text != null && String(value.text)) return String(value.text);
+                        if (typeof value === 'string' && value) return { text: value, entities: [] };
+                        if (value && value.text != null && String(value.text)) {
+                            return {
+                                text: String(value.text),
+                                entities: Array.isArray(value.entities) ? value.entities.map(e => ({
+                                    type: String(e && e.type || ''),
+                                    offset: Number(e && e.offset) || 0,
+                                    length: Number(e && e.length) || 0,
+                                    url: e && e.url ? String(e.url) : '',
+                                    language: e && e.language ? String(e.language) : '',
+                                })).filter(e => e.type && e.length > 0) : [],
+                            };
+                        }
                     }
                 } catch (_) {}
-                return '';
+                return { text: '', entities: [] };
             }
             function feedMedia(content) {
                 if (!content || typeof content !== 'object') return null;
@@ -81,6 +92,13 @@ try {
                     const media = content[type];
                     if (!media) continue;
                     const thumb = media.thumbnail && media.thumbnail.dataUri ? String(media.thumbnail.dataUri) : '';
+                    const sizes = Array.isArray(media.sizes) ? media.sizes.map(x => ({ width: Number(x && x.width) || 0, height: Number(x && x.height) || 0, type: String(x && x.type || '') })) : [];
+                    const previewPhotoSizes = Array.isArray(media.previewPhotoSizes) ? media.previewPhotoSizes.map(x => ({ width: Number(x && x.width) || 0, height: Number(x && x.height) || 0, type: String(x && x.type || '') })) : [];
+                    const dims = [{ width: Number(media.width) || 0, height: Number(media.height) || 0 }, ...sizes, ...previewPhotoSizes, {
+                        width: Number(media.thumbnail && media.thumbnail.width) || 0,
+                        height: Number(media.thumbnail && media.thumbnail.height) || 0,
+                    }].sort((a, b) => (b.width * b.height) - (a.width * a.height));
+                    const best = dims[0] || { width: 0, height: 0 };
                     return {
                         type,
                         id: media.id != null ? String(media.id) : '',
@@ -88,11 +106,11 @@ try {
                         fileName: media.fileName ? String(media.fileName) : '',
                         duration: Number(media.duration) || 0,
                         mimeType: media.mimeType ? String(media.mimeType) : '',
-                        width: Number(media.width || (media.thumbnail && media.thumbnail.width)) || 0,
-                        height: Number(media.height || (media.thumbnail && media.thumbnail.height)) || 0,
+                        width: Number(best.width) || 0,
+                        height: Number(best.height) || 0,
                         size: Number(media.size) || 0,
-                        sizes: Array.isArray(media.sizes) ? media.sizes.map(x => ({ width: Number(x && x.width) || 0, height: Number(x && x.height) || 0, type: String(x && x.type || '') })) : [],
-                        previewPhotoSizes: Array.isArray(media.previewPhotoSizes) ? media.previewPhotoSizes.map(x => ({ width: Number(x && x.width) || 0, height: Number(x && x.height) || 0, type: String(x && x.type || '') })) : [],
+                        sizes,
+                        previewPhotoSizes,
                     };
                 }
                 return null;
@@ -108,16 +126,18 @@ try {
                         });
                     }
                 } catch (_) {}
+                const formatted = feedFormatted(message && message.content);
                 return {
                     chatId: String(chatId),
                     messageId: String(messageId),
-                    text: feedText(message && message.content),
+                    text: formatted.text,
+                    entities: formatted.entities,
                     date: Number(message && message.date) || Math.floor(Date.now() / 1000),
                     media: feedMedia(message && message.content),
                     viewsCount: Number(message && message.viewsCount) || 0,
                     forwardsCount: Number(message && message.forwardsCount) || 0,
                     reactions,
-                    isEdited: !!(message && (message.isEdited || message.editDate)),
+                    isEdited: !!(message && message.isEdited === true),
                 };
             }
             function feedEmit(detail) {
