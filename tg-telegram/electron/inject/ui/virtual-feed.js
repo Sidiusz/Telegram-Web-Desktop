@@ -162,7 +162,7 @@
         liveItems.forEach(function(item,k){
             if(sources.has(String(item.chatId))&&!deletedKeys.has(k))map.set(k,item);
         });
-        return Array.from(map.values()).sort(function(a,b){
+        return Array.from(map.values()).filter(function(item){return !!(item&&((item.text&&String(item.text).trim())||item.media));}).sort(function(a,b){
             var d=(Number(a.date)||0)-(Number(b.date)||0);
             if(d)return d;
             return Number(a.messageId)-Number(b.messageId);
@@ -212,18 +212,24 @@
     }
     function makePost(item){
         var src=sourceById(item.chatId)||{id:item.chatId,title:item.chatId};
+        var hasText=!!item.text,hasMedia=!!item.media;
+
         var post=document.createElement('div');
         post.id='_twd-feed-message-'+String(item.chatId).replace(/\D/g,'')+'-'+String(item.messageId);
         post.className='Message message-list-item first-in-group allow-selection last-in-group shown open _twd-feed-message_';
         if(item.viewsCount)post.classList.add('has-views');
+        if(item.isEdited)post.classList.add('was-edited');
         post.dataset.chatId=item.chatId;post.dataset.messageId=item.messageId;
 
         var select=document.createElement('div');select.className='message-select-control no-selection';
         var wrapper=document.createElement('div');wrapper.className='message-content-wrapper can-select-text';
-        var classes=['message-content','peer-color-0','is-forwarded','has-shadow','has-background','has-appendix','_twd-feed-native-bubble_'];
-        if(item.media)classes.push('media','has-adaptive-width');
-        if(item.text)classes.push('text');
-        if(!item.media&&!item.text)classes.push('text');
+        var peerColor=0;
+        try{peerColor=Number((BigInt(String(item.chatId).replace('-',''))%7n));}catch(_){}
+        var classes=['message-content','peer-color-'+peerColor,'is-forwarded','has-action-button','has-shadow','has-solid-background','has-appendix','_twd-feed-native-bubble_'];
+        if(hasMedia)classes.push('media','has-adaptive-width','with-wide-media');
+        else classes.push('text','has-footer');
+        if(hasMedia&&hasText)classes.push('text','has-footer');
+        else if(hasMedia)classes.push('no-text','no-footer');
         var bubble=document.createElement('div');bubble.className=classes.join(' ');bubble.setAttribute('dir','auto');
         var inner=document.createElement('div');inner.className='content-inner forwarded-message';inner.setAttribute('dir','auto');
 
@@ -235,10 +241,10 @@
         title.addEventListener('click',function(){openSource(item);});
         inner.appendChild(title);
 
-        if(item.media){
+        if(hasMedia){
             if(item.media.thumbnail){
                 var media=document.createElement('div');media.className='media-inner interactive _twd-feed-native-media_';
-                var img=document.createElement('img');img.className='_twd-feed-native-thumb_';img.src=item.media.thumbnail;img.alt=mediaLabel(item.media.type);img.draggable=false;
+                var img=document.createElement('img');img.className='full-media opacity-transition slow shown open _twd-feed-native-thumb_';img.src=item.media.thumbnail;img.alt=mediaLabel(item.media.type);img.draggable=false;
                 media.appendChild(img);
                 if(item.media.type==='video'||item.media.type==='animation'){
                     var play=document.createElement('i');play.className='icon icon-large-play _twd-feed-play_';play.setAttribute('aria-hidden','true');media.appendChild(play);
@@ -255,26 +261,27 @@
                 file.append(mi,ml);inner.appendChild(file);
             }
         }
-        if(item.text){
-            var text=document.createElement('div');text.className='text-content _twd-feed-text_';text.setAttribute('dir','auto');text.textContent=item.text;inner.appendChild(text);
-        }else if(!item.media){
-            var empty=document.createElement('div');empty.className='text-content _twd-feed-text_ _twd-feed-muted_';empty.textContent=tr('[пост без текста]','[post without text]');inner.appendChild(empty);
+
+        function buildMeta(){
+            var meta=document.createElement('span');meta.className='MessageMeta';meta.setAttribute('dir','ltr');meta.setAttribute('data-ignore-on-paste','true');
+            if(item.viewsCount){
+                var views=document.createElement('span');views.className='message-views';views.textContent=String(item.viewsCount);meta.appendChild(views);
+                var vi=document.createElement('i');vi.className='icon icon-channelviews';vi.setAttribute('aria-hidden','true');meta.appendChild(vi);
+            }
+            if(item.forwardsCount){
+                var fw=document.createElement('span');fw.className='_twd-feed-forwards_';fw.textContent='↗ '+String(item.forwardsCount);meta.appendChild(fw);
+            }
+            var time=document.createElement('span');time.className='message-time';
+            time.textContent=(item.isEdited?tr('изменено ','edited '):'')+fmtTime(item.date);meta.appendChild(time);
+            return meta;
+        }
+
+        if(hasText){
+            var text=document.createElement('div');text.className='text-content clearfix with-meta _twd-feed-text_';text.setAttribute('dir','auto');
+            text.append(document.createTextNode(item.text),buildMeta());inner.appendChild(text);
         }
         bubble.appendChild(inner);
-
-        var meta=document.createElement('span');meta.className='MessageMeta';meta.setAttribute('dir','ltr');meta.setAttribute('data-ignore-on-paste','true');
-        if(item.viewsCount){
-            var views=document.createElement('span');views.className='message-views';views.textContent=String(item.viewsCount);meta.appendChild(views);
-            var vi=document.createElement('i');vi.className='icon icon-channelviews';vi.setAttribute('aria-hidden','true');meta.appendChild(vi);
-        }
-        if(item.forwardsCount){
-            var fw=document.createElement('span');fw.className='_twd-feed-forwards_';fw.textContent='↗ '+String(item.forwardsCount);meta.appendChild(fw);
-        }
-        if(item.isEdited){
-            var ed=document.createElement('span');ed.className='_twd-feed-edited_';ed.textContent=tr('ред.','edited');meta.appendChild(ed);
-        }
-        var time=document.createElement('span');time.className='message-time';time.textContent=fmtTime(item.date);meta.appendChild(time);
-        bubble.appendChild(meta);
+        if(hasMedia&&!hasText)bubble.appendChild(buildMeta());
 
         var actionsWrap=document.createElement('div');actionsWrap.className='message-action-buttons-container';
         var stickyZone=document.createElement('div');stickyZone.className='message-action-buttons-sticky-zone';
@@ -285,18 +292,20 @@
         actions.appendChild(open);actionsWrap.append(stickyZone,actions);bubble.appendChild(actionsWrap);
         bubble.appendChild(appendixSvg());
 
+        wrapper.appendChild(bubble);
+
         if(item.reactions&&item.reactions.length){
             var reacts=document.createElement('div');reacts.className='Reactions is-outside _twd-feed-reactions_';reacts.setAttribute('dir','ltr');
             item.reactions.slice(0,8).forEach(function(r){
-                var pill=document.createElement('button');pill.type='button';pill.className='Button message-reaction tiny primary _twd-feed-reaction_';pill.tabIndex=-1;
+                var pill=document.createElement('button');pill.type='button';pill.className='_twd-feed-reaction_';pill.tabIndex=-1;
                 var emoji=document.createElement('span');emoji.className='_twd-feed-reaction-emoji_';emoji.textContent=r.emoji||'•';
-                var count=document.createElement('span');count.textContent=String(r.count||0);
+                var count=document.createElement('span');count.className='_twd-feed-reaction-count_';count.textContent=String(r.count||0);
                 pill.append(emoji,count);reacts.appendChild(pill);
             });
-            bubble.appendChild(reacts);
+            wrapper.appendChild(reacts);
         }
 
-        wrapper.appendChild(bubble);post.append(select,wrapper);
+        post.append(select,wrapper);
         return post;
     }
 
