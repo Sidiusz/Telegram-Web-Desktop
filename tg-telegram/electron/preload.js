@@ -3,10 +3,8 @@ const { contextBridge, ipcRenderer } = require('electron');
 
 let _proxyBootstrap = { active: false, domains: [], revision: 0 };
 let _historyBootstrap = { showDeleted: false, editHistory: false };
-let _feedBootstrap = { sources: [] };
 try { const boot = ipcRenderer.sendSync('get_proxy_bootstrap'); if (boot && typeof boot === 'object') _proxyBootstrap = boot; } catch (_) {}
 try { const boot = ipcRenderer.sendSync('get_history_bootstrap'); if (boot && typeof boot === 'object') _historyBootstrap = boot; } catch (_) {}
-try { const boot = ipcRenderer.sendSync('get_feed_bootstrap'); if (boot && typeof boot === 'object') _feedBootstrap = boot; } catch (_) {}
 function publishProxyState(payload) {
     _proxyBootstrap = payload && typeof payload === 'object' ? payload : _proxyBootstrap;
     try {
@@ -28,16 +26,10 @@ contextBridge.exposeInMainWorld('__twdProxyRouter', { get: () => ({ ..._proxyBoo
 
 try {
     contextBridge.executeInMainWorld({
-        func: (initial, historyConfig, feedConfig) => {
+        func: (initial, historyConfig) => {
             window.__twdProxyState = initial;
             const proxyWorkers = new Set();
             const historyEnabled = !!(historyConfig && (historyConfig.showDeleted || historyConfig.editHistory));
-            const feedSourceIds = new Set(Array.isArray(feedConfig && feedConfig.sources) ? feedConfig.sources.map(String) : []);
-            const feedByMessageId = new Map();
-            const feedMediaRequests = new Map();
-            const feedMediaCache = new Map();
-            let feedApiWorker = null;
-            let feedMediaSeq = 0;
             const historyTracked = new Map();
             const historyByMessageId = new Map();
             const historyDeletedByChat = new Map();
@@ -52,194 +44,6 @@ try {
                     catch (_) { proxyWorkers.delete(worker); }
                 }
             });
-            window.addEventListener('__twd_feed_config', e => {
-                const ids = e && e.detail && Array.isArray(e.detail.sources) ? e.detail.sources : [];
-                feedSourceIds.clear();
-                ids.map(String).filter(Boolean).forEach(id => feedSourceIds.add(id));
-            });
-            function feedFormatted(content) {
-                try {
-                    const candidates = [
-                        content && content.text,
-                        content && content.caption,
-                        content && content.photo && content.photo.caption,
-                        content && content.video && content.video.caption,
-                        content && content.document && content.document.caption,
-                        content && content.animation && content.animation.caption
-                    ];
-                    for (const value of candidates) {
-                        if (typeof value === 'string' && value) return { text: value, entities: [] };
-                        if (value && value.text != null && String(value.text)) {
-                            return {
-                                text: String(value.text),
-                                entities: Array.isArray(value.entities) ? value.entities.map(e => ({
-                                    type: String(e && e.type || ''),
-                                    offset: Number(e && e.offset) || 0,
-                                    length: Number(e && e.length) || 0,
-                                    url: e && e.url ? String(e.url) : '',
-                                    language: e && e.language ? String(e.language) : '',
-                                })).filter(e => e.type && e.length > 0) : [],
-                            };
-                        }
-                    }
-                } catch (_) {}
-                return { text: '', entities: [] };
-            }
-            function feedMedia(content) {
-                if (!content || typeof content !== 'object') return null;
-                const keys = ['photo','video','animation','document','audio','voice','sticker','poll','location','contact'];
-                for (const type of keys) {
-                    const media = content[type];
-                    if (!media) continue;
-                    const thumb = media.thumbnail && media.thumbnail.dataUri ? String(media.thumbnail.dataUri) : '';
-                    const sizes = Array.isArray(media.sizes) ? media.sizes.map(x => ({ width: Number(x && x.width) || 0, height: Number(x && x.height) || 0, type: String(x && x.type || '') })) : [];
-                    const previewPhotoSizes = Array.isArray(media.previewPhotoSizes) ? media.previewPhotoSizes.map(x => ({ width: Number(x && x.width) || 0, height: Number(x && x.height) || 0, type: String(x && x.type || '') })) : [];
-                    const dims = [{ width: Number(media.width) || 0, height: Number(media.height) || 0 }, ...sizes, ...previewPhotoSizes, {
-                        width: Number(media.thumbnail && media.thumbnail.width) || 0,
-                        height: Number(media.thumbnail && media.thumbnail.height) || 0,
-                    }].sort((a, b) => (b.width * b.height) - (a.width * a.height));
-                    const best = dims[0] || { width: 0, height: 0 };
-                    return {
-                        type,
-                        id: media.id != null ? String(media.id) : '',
-                        thumbnail: thumb,
-                        fileName: media.fileName ? String(media.fileName) : '',
-                        duration: Number(media.duration) || 0,
-                        mimeType: media.mimeType ? String(media.mimeType) : '',
-                        width: Number(best.width) || 0,
-                        height: Number(best.height) || 0,
-                        size: Number(media.size) || 0,
-                        sizes,
-                        previewPhotoSizes,
-                    };
-                }
-                return null;
-            }
-            function feedPackMessage(message, chatId, messageId) {
-                const reactions = [];
-                try {
-                    for (const r of (message && message.reactions && message.reactions.results) || []) {
-                        if (!r || !r.reaction) continue;
-                        reactions.push({
-                            count: Number(r.count) || 0,
-                            emoji: r.reaction.emoticon ? String(r.reaction.emoticon) : '',
-                        });
-                    }
-                } catch (_) {}
-                const formatted = feedFormatted(message && message.content);
-                return {
-                    chatId: String(chatId),
-                    messageId: String(messageId),
-                    text: formatted.text,
-                    entities: formatted.entities,
-                    date: Number(message && message.date) || Math.floor(Date.now() / 1000),
-                    media: feedMedia(message && message.content),
-                    viewsCount: Number(message && message.viewsCount) || 0,
-                    forwardsCount: Number(message && message.forwardsCount) || 0,
-                    reactions,
-                    isEdited: !!(message && message.isEdited === true),
-                };
-            }
-            function feedEmit(detail) {
-                if (!detail) return;
-                const q = window.__twdFeedUpdateQueue || (window.__twdFeedUpdateQueue = []);
-                q.push(detail);
-                if (q.length > 1500) q.splice(0, q.length - 1500);
-                try { window.dispatchEvent(new CustomEvent('__twd_feed_update', { detail })); } catch (_) {}
-            }
-            function feedHandleMethodPayload(payload) {
-                if (!payload || payload.type !== 'methodResponse' || !payload.messageId) return false;
-                const req = feedMediaRequests.get(String(payload.messageId));
-                if (!req) return false;
-                feedMediaRequests.delete(String(payload.messageId));
-                clearTimeout(req.timer);
-                if (payload.error) {
-                    req.reject(new Error(String(payload.error.message || 'Media request failed')));
-                    return true;
-                }
-                try {
-                    const response = payload.response || {};
-                    const blob = response.dataBlob instanceof Blob ? response.dataBlob : null;
-                    if (!blob) throw new Error('Media response did not contain a blob');
-                    const objectUrl = URL.createObjectURL(blob);
-                    feedMediaCache.set(req.url, objectUrl);
-                    req.resolve(objectUrl);
-                } catch (e) { req.reject(e); }
-                return true;
-            }
-            function feedWaitForApiWorker(timeoutMs) {
-                if (feedApiWorker) return Promise.resolve(feedApiWorker);
-                const deadline = Date.now() + (Number(timeoutMs) || 15000);
-                return new Promise((resolve, reject) => {
-                    const tick = () => {
-                        if (feedApiWorker) { resolve(feedApiWorker); return; }
-                        if (Date.now() >= deadline) { reject(new Error('Telegram API worker is not ready')); return; }
-                        setTimeout(tick, 100);
-                    };
-                    tick();
-                });
-            }
-            async function feedLoadMedia(url) {
-                url = String(url || '');
-                if (!url) throw new Error('Missing media hash');
-                if (feedMediaCache.has(url)) return feedMediaCache.get(url);
-                const worker = await feedWaitForApiWorker(15000);
-                if (feedMediaCache.has(url)) return feedMediaCache.get(url);
-                const messageId = '__twd_feed_media_' + Date.now().toString(36) + '_' + (++feedMediaSeq).toString(36);
-                return new Promise((resolve, reject) => {
-                    const timer = setTimeout(() => {
-                        feedMediaRequests.delete(messageId);
-                        reject(new Error('Media request timed out'));
-                    }, 45000);
-                    feedMediaRequests.set(messageId, { resolve, reject, timer, url });
-                    try {
-                        worker.postMessage({ payloads: [{
-                            type: 'callMethod',
-                            messageId,
-                            name: 'downloadMedia',
-                            args: [{ url, mediaFormat: 0, isHtmlAllowed: false }],
-                        }] });
-                    } catch (e) {
-                        clearTimeout(timer);
-                        feedMediaRequests.delete(messageId);
-                        reject(e);
-                    }
-                });
-            }
-            window.__twdFeedMediaApi = {
-                load: feedLoadMedia,
-                has: (url) => feedMediaCache.has(String(url || '')),
-            };
-            function feedHandleWorkerMessage(event) {
-                const payloads = event && event.data && event.data.payloads;
-                if (!Array.isArray(payloads)) return;
-                payloads.forEach(payload => {
-                    if (feedHandleMethodPayload(payload)) return;
-                    if (!feedSourceIds.size || !payload || payload.type !== 'updates' || !Array.isArray(payload.updates)) return;
-                    payload.updates.forEach(update => {
-                        if (!update || typeof update !== 'object') return;
-                        if (update['@type'] === 'updateMessage') {
-                            const message = update.message;
-                            const chatId = String(update.chatId != null ? update.chatId : message && message.chatId != null ? message.chatId : '');
-                            const messageId = String(update.id != null ? update.id : message && message.id != null ? message.id : '');
-                            if (!message || !chatId || !messageId || !feedSourceIds.has(chatId)) return;
-                            feedByMessageId.set(messageId, chatId);
-                            feedEmit({ kind: update.isFromNew === true ? 'new' : 'edit', item: feedPackMessage(message, chatId, messageId) });
-                            return;
-                        }
-                        if (update['@type'] === 'deleteMessages' && Array.isArray(update.ids)) {
-                            const explicitChat = update.chatId != null ? String(update.chatId) : '';
-                            update.ids.forEach(rawId => {
-                                const messageId = String(rawId);
-                                const chatId = explicitChat || feedByMessageId.get(messageId) || '';
-                                if (!chatId || !feedSourceIds.has(chatId)) return;
-                                feedByMessageId.delete(messageId);
-                                feedEmit({ kind: 'delete', chatId, messageId });
-                            });
-                        }
-                    });
-                });
-            }
             function historyActiveChatId() {
                 try {
                     const avatar = document.querySelector('#MiddleColumn .MiddleHeader .Avatar[data-peer-id]');
@@ -467,22 +271,9 @@ try {
                             }
                         } catch (_) {}
                         super(target, options);
-                        try {
-                            const twdWorker = this;
-                            this.addEventListener('message', function(event) {
-                                try {
-                                    const payloads = event && event.data && event.data.payloads;
-                                    if (Array.isArray(payloads) && payloads.some(p => p && (p.type === 'updates' || p.type === 'methodResponse'))) {
-                                        if (!feedApiWorker) {
-                                            feedApiWorker = twdWorker;
-                                            try { window.dispatchEvent(new Event('__twd_feed_media_ready')); } catch (_) {}
-                                        } else feedApiWorker = twdWorker;
-                                    }
-                                } catch (_) {}
-                                feedHandleWorkerMessage(event);
-                                historyHandleWorkerMessage(event);
-                            });
-                        } catch (_) {}
+                        if (historyEnabled) {
+                            try { this.addEventListener('message', historyHandleWorkerMessage); } catch (_) {}
+                        }
                         if (tagged) { proxyWorkers.add(this); try { this.postMessage({ __twdProxyConfig: window.__twdProxyState }); } catch (_) {} }
                     }
                 };
@@ -492,7 +283,7 @@ try {
                 if (!window.__twdProxyChannel) window.__twdProxyChannel = new BroadcastChannel('__twd_proxy_v1');
                 window.__twdProxyChannel.postMessage(initial);
             } catch (_) {}
-        }, args: [_proxyBootstrap, _historyBootstrap, _feedBootstrap],
+        }, args: [_proxyBootstrap, _historyBootstrap],
     });
 } catch (_) {}
 

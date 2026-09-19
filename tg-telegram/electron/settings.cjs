@@ -54,7 +54,6 @@ const DEFAULTS = {
     appearance_hide_ads: true,
     messages_show_deleted: false,
     messages_edit_history: false,
-    feed_sources: [],
     proxy_mode: 'auto',
     proxy_auto_latched: false,
     proxy_domain_source: 'flowseal',
@@ -153,23 +152,6 @@ function normalizeSetting(k, v) {
     }
     if (k === 'proxy_pinned_domain') {
         return typeof v === 'string' && v.length <= 253 ? v : INVALID;
-    }
-    if (k === 'feed_sources') {
-        if (!Array.isArray(v) || v.length > 200) return INVALID;
-        const out = [];
-        const seen = new Set();
-        for (const item of v) {
-            if (!item || typeof item !== 'object' || Array.isArray(item)) return INVALID;
-            const id = String(item.id == null ? '' : item.id);
-            let n;
-            try { n = BigInt(id); } catch (_) { return INVALID; }
-            if (n >= 0n || seen.has(id)) continue;
-            const title = typeof item.title === 'string' ? item.title.slice(0, 160) : '';
-            const username = typeof item.username === 'string' ? item.username.replace(/^@/, '').slice(0, 64) : '';
-            seen.add(id);
-            out.push({ id, title, username });
-        }
-        return out;
     }
     if (k === 'proxy_custom_domains' || k === 'proxy_worker_domains') {
         if (!Array.isArray(v) || v.length > 64) return INVALID;
