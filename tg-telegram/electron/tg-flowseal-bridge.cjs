@@ -7,6 +7,7 @@ const { UpstreamHealth, DEFAULT_COOLDOWN_MS } = require('./tg-flowseal-health.cj
 const {
     getProxyBootstrap, setBridgeEndpoint,
     reportBridgeRoute, reportBridgeError,
+    reportBridgePreferredDomain, clearBridgePreferredDomain,
 } = require('./tg-flowseal-route.cjs');
 
 let server = null;
@@ -103,17 +104,30 @@ function upstreamCandidates(cfg, dc, media) {
     }));
 }
 
-const upstreamHealth = new UpstreamHealth();
+const controlUpstreamHealth = new UpstreamHealth();
+const mediaUpstreamHealth = new UpstreamHealth();
+const MEDIA_SLOW_RESPONSE_MS = 3_000;
+const MEDIA_RESPONSE_TIMEOUT_MS = 6_000;
+const MEDIA_THROUGHPUT_SAMPLE_BYTES = 128 * 1024;
+const MEDIA_MIN_THROUGHPUT_BPS = 96 * 1024;
+const MEDIA_THROUGHPUT_IDLE_MS = 900;
+const MEDIA_THROUGHPUT_WINDOW_MS = 4_000;
 
-function noteUpstreamFailure(candidate, reason) {
+function healthFor(media) {
+    return media ? mediaUpstreamHealth : controlUpstreamHealth;
+}
+function noteUpstreamFailure(candidate, reason, media = false) {
     const domain = candidate && candidate.domain;
     if (!domain) return;
-    upstreamHealth.markFailure(domain);
-    console.warn(`[TG-PROXY-BRIDGE] ${domain} cooling down for ${Math.round(DEFAULT_COOLDOWN_MS / 1000)}s: ${reason}`);
+    healthFor(media).markFailure(domain);
+    clearBridgePreferredDomain(domain, media);
+    console.warn(`[TG-PROXY-BRIDGE] ${domain} ${media ? 'media ' : ''}cooling down for ${Math.round(DEFAULT_COOLDOWN_MS / 1000)}s: ${reason}`);
 }
 
 function openUpstream(cfg, dc, media) {
-    const candidates = upstreamHealth.rank(upstreamCandidates(cfg, dc, media));
+    const health = healthFor(media);
+    health.seedPreferred(media ? cfg.preferredMediaDomain : cfg.preferredControlDomain);
+    const candidates = health.rank(upstreamCandidates(cfg, dc, media));
     return new Promise((resolve, reject) => {
         if (!candidates.length) return reject(new Error('no upstream routes'));
         const startedAt = Date.now();
@@ -134,7 +148,7 @@ function openUpstream(cfg, dc, media) {
         };
         const failed = (candidate, message) => {
             errors.push(`${candidate.domain}: ${message}`);
-            noteUpstreamFailure(candidate, message);
+            noteUpstreamFailure(candidate, message, media);
             finished++;
             if (!settled && finished >= candidates.length) {
                 settled = true;
@@ -166,7 +180,13 @@ function openUpstream(cfg, dc, media) {
                 done = true;
                 settled = true;
                 clearTimeout(timer);
-                upstreamHealth.markSuccess(candidate.domain);
+                // A media socket is not considered healthy merely because the
+                // WebSocket handshake succeeded. Its domain earns preference only
+                // after it actually returns MTProto data for a media request.
+                if (!media) {
+                    health.markSuccess(candidate.domain);
+                    reportBridgePreferredDomain(candidate.domain, false);
+                }
                 const latencyMs = Date.now() - startedAt;
                 cleanup(upstream);
                 console.log(`[TG-PROXY-BRIDGE] upstream ${candidate.domain} opened in ${latencyMs}ms`);
@@ -215,12 +235,36 @@ function handleLocalConnection(local, request) {
     let ctx = null;
     let closed = false;
     let chain = Promise.resolve();
+    let mediaProbeTimer = null;
+    let mediaProbeStartedAt = 0;
+    let mediaProbeDone = !media;
+    let mediaConnectionPenalized = false;
+    let mediaSampleActive = false;
+    let mediaSampleStartedAt = 0;
+    let mediaSampleBytes = 0;
+    let mediaSampleIdleTimer = null;
+    let mediaSampleWindowTimer = null;
     const initialCfg = getProxyBootstrap();
     const upstreamReady = initialCfg.active
         ? openUpstream(initialCfg, dc, media).then(opened => ({ opened }), error => ({ error }))
         : null;
 
+    const clearMediaProbe = () => {
+        if (mediaProbeTimer) clearTimeout(mediaProbeTimer);
+        mediaProbeTimer = null;
+    };
+    const clearMediaSample = () => {
+        if (mediaSampleIdleTimer) clearTimeout(mediaSampleIdleTimer);
+        if (mediaSampleWindowTimer) clearTimeout(mediaSampleWindowTimer);
+        mediaSampleIdleTimer = null;
+        mediaSampleWindowTimer = null;
+        mediaSampleActive = false;
+        mediaSampleBytes = 0;
+        mediaSampleStartedAt = 0;
+    };
     const fail = err => {
+        clearMediaProbe();
+        clearMediaSample();
         if (closed) return;
         const message = err?.message || String(err || 'bridge failure');
         reportBridgeError(dc, message);
@@ -231,7 +275,88 @@ function handleLocalConnection(local, request) {
     const noteActiveFailure = reason => {
         if (upstreamFailureNoted) return;
         upstreamFailureNoted = true;
-        noteUpstreamFailure(upstreamCandidate, reason);
+        noteUpstreamFailure(upstreamCandidate, reason, media);
+    };
+    const armMediaProbe = () => {
+        if (!media || mediaProbeDone || mediaProbeTimer || !upstreamCandidate) return;
+        mediaProbeStartedAt = Date.now();
+        mediaProbeTimer = setTimeout(() => {
+            mediaProbeTimer = null;
+            if (closed || mediaProbeDone) return;
+            const reason = `media first response timeout after ${MEDIA_RESPONSE_TIMEOUT_MS}ms`;
+            noteActiveFailure(reason);
+            fail(new Error(reason));
+        }, MEDIA_RESPONSE_TIMEOUT_MS);
+        if (mediaProbeTimer.unref) mediaProbeTimer.unref();
+    };
+    const finishMediaSample = (reason) => {
+        if (!mediaSampleActive || !upstreamCandidate) return;
+        const elapsedMs = Math.max(1, Date.now() - mediaSampleStartedAt);
+        const bytes = mediaSampleBytes;
+        const bps = Math.round(bytes * 1000 / elapsedMs);
+        const shouldEvaluate = reason === 'window' || bytes >= MEDIA_THROUGHPUT_SAMPLE_BYTES;
+        clearMediaSample();
+        if (!shouldEvaluate) return;
+
+        if (bps < MEDIA_MIN_THROUGHPUT_BPS) {
+            const why = `slow media throughput ${Math.round(bps / 1024)}KiB/s`;
+            mediaConnectionPenalized = true;
+            noteActiveFailure(why);
+            console.warn(`[TG-PROXY-BRIDGE] ${upstreamCandidate.domain} ${why}`);
+            // Forward the current chunk first, then rotate this media socket so
+            // Telegram can immediately retry the request through another upstream.
+            const timer = setTimeout(() => {
+                if (!closed) fail(new Error(why));
+            }, 0);
+            if (timer.unref) timer.unref();
+            return;
+        }
+
+        if (!mediaConnectionPenalized) {
+            mediaUpstreamHealth.markSuccess(upstreamCandidate.domain);
+            reportBridgePreferredDomain(upstreamCandidate.domain, true);
+        }
+        console.log(`[TG-PROXY-BRIDGE] ${upstreamCandidate.domain} media throughput ${Math.round(bps / 1024)}KiB/s`);
+    };
+    const addMediaSampleBytes = count => {
+        if (!mediaSampleActive || !Number.isFinite(count) || count <= 0) return;
+        mediaSampleBytes += count;
+        if (mediaSampleIdleTimer) clearTimeout(mediaSampleIdleTimer);
+        mediaSampleIdleTimer = setTimeout(() => {
+            // A short response (thumbnail, small metadata packet) is not a useful
+            // throughput sample and must never penalize a healthy route.
+            finishMediaSample('idle');
+        }, MEDIA_THROUGHPUT_IDLE_MS);
+        if (mediaSampleIdleTimer.unref) mediaSampleIdleTimer.unref();
+        if (mediaSampleBytes >= MEDIA_THROUGHPUT_SAMPLE_BYTES) finishMediaSample('sample');
+    };
+    const startMediaSample = initialBytes => {
+        if (!media || mediaSampleActive || !upstreamCandidate) return;
+        mediaSampleActive = true;
+        mediaSampleStartedAt = Date.now();
+        mediaSampleBytes = 0;
+        mediaSampleWindowTimer = setTimeout(() => {
+            if (mediaSampleActive) finishMediaSample('window');
+        }, MEDIA_THROUGHPUT_WINDOW_MS);
+        if (mediaSampleWindowTimer.unref) mediaSampleWindowTimer.unref();
+        addMediaSampleBytes(initialBytes);
+    };
+    const finishMediaProbe = initialBytes => {
+        if (!media || mediaProbeDone || !mediaProbeTimer || !upstreamCandidate) return;
+        const responseMs = Math.max(0, Date.now() - mediaProbeStartedAt);
+        clearMediaProbe();
+        mediaProbeDone = true;
+        if (responseMs > MEDIA_SLOW_RESPONSE_MS) {
+            mediaConnectionPenalized = true;
+            upstreamFailureNoted = true;
+            noteUpstreamFailure(upstreamCandidate, `slow media first response ${responseMs}ms`, true);
+            console.warn(`[TG-PROXY-BRIDGE] ${upstreamCandidate.domain} media response slow: ${responseMs}ms`);
+        } else {
+            mediaUpstreamHealth.markSuccess(upstreamCandidate.domain);
+            reportBridgePreferredDomain(upstreamCandidate.domain, true);
+            console.log(`[TG-PROXY-BRIDGE] ${upstreamCandidate.domain} media first response ${responseMs}ms`);
+        }
+        startMediaSample(initialBytes);
     };
 
     local.on('message', data => {
@@ -261,6 +386,8 @@ function handleLocalConnection(local, request) {
                 upstream.on('message', incoming => {
                     try {
                         const raw = Buffer.from(incoming);
+                        if (!mediaProbeDone) finishMediaProbe(raw.length);
+                        else addMediaSampleBytes(raw.length);
                         const plain = ctx.relayIn.update(raw);
                         const clientCipher = ctx.clientIn.update(plain);
                         if (local.readyState === WebSocket.OPEN) local.send(clientCipher, { binary: true });
@@ -283,10 +410,16 @@ function handleLocalConnection(local, request) {
             if (!upstream || upstream.readyState !== WebSocket.OPEN) throw new Error('upstream is not open');
             const plain = ctx.clientOut.update(chunk);
             const relayed = ctx.relayOut.update(plain);
+            if (media) {
+                if (!mediaProbeDone) armMediaProbe();
+                else if (!mediaSampleActive) startMediaSample(0);
+            }
             upstream.send(relayed, { binary: true });
         }).catch(fail);
     });
     local.on('close', () => {
+        clearMediaProbe();
+        clearMediaSample();
         closed = true;
         if (upstream) {
             try { upstream.close(1000, 'local closed'); } catch (_) {}

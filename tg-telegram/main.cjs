@@ -1,5 +1,5 @@
 'use strict';
-const { app, Menu, powerSaveBlocker } = require('electron');
+const { app, Menu } = require('electron');
 const path = require('path');
 
 // Do not grant CSP-bypass privileges to the global http/https schemes.
@@ -7,10 +7,6 @@ const path = require('path');
 // place where CSP is relaxed for compatibility with our injected UI.
 
 app.commandLine.appendSwitch('autoplay-policy', 'no-user-gesture-required');
-app.commandLine.appendSwitch('disable-renderer-backgrounding');
-// Keep timers alive (our incoming-message interceptor) when window is backgrounded/hidden
-app.commandLine.appendSwitch('disable-background-timer-throttling');
-app.commandLine.appendSwitch('disable-backgrounding-occluded-windows');
 // Dev/test only: expose CDP for local UI/smoke testing. Packaged test builds may opt in
 // explicitly with TWD_ALLOW_MULTI_INSTANCE + TWD_CDP_PORT; normal shipped runs never do.
 if (!app.isPackaged || (process.env.TWD_ALLOW_MULTI_INSTANCE === '1' && process.env.TWD_CDP_PORT)) {
@@ -89,7 +85,6 @@ if (!gotLock) {
 
 if (gotLock) {
 app.whenReady().then(async () => {
-    try { powerSaveBlocker.start('prevent-app-suspension'); } catch(e) {}
     initState();
     try { await startEmbeddedFlowsealBridge(); } catch (e) { console.error('[TG-PROXY-BRIDGE] startup failed:', e); }
     const state = getState();

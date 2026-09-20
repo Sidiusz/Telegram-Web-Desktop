@@ -61,9 +61,9 @@ function isOnline() {
 // setInterval drifts across sleep/hibernate, so re-arm a timeout after every run.
 function scheduleChecks() {
     if (_checkTimer) { clearTimeout(_checkTimer); _checkTimer = null; }
-    const key = loadSettings().update_check_interval || '1h';
+    const key = loadSettings().update_check_interval || '24h';
     if (key === 'never') { _armCheck = null; return; }
-    const ms = INTERVALS[key] || INTERVALS['1h'];
+    const ms = INTERVALS[key] || INTERVALS['24h'];
 
     const arm = (delay) => {
         if (_checkTimer) clearTimeout(_checkTimer);

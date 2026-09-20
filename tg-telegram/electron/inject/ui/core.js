@@ -20,9 +20,14 @@ const CSS=`
 ._mo_ ._wn_intro_{color:var(--color-text-secondary,#aaa);font-size:.9375rem;line-height:1.4;}
 ._mo_ ._wn_item_{display:flex;gap:.625rem;align-items:flex-start;margin-top:.75rem;font-size:.9375rem;line-height:1.4;}
 ._mo_ ._wn_bullet_{color:var(--color-primary,#8774e1);font-size:1.125rem;line-height:1.3;flex-shrink:0;}
-._mo_ .dialog-buttons{flex-flow:row-reverse wrap;justify-content:flex-start;gap:.5rem 1rem;display:flex;margin-top:.25rem;}
+._mo_ .dialog-footer{display:flex;align-items:center;gap:1rem;margin-top:.25rem;padding-top:.75rem;border-top:1px solid var(--color-borders,rgba(255,255,255,.1));}
+._mo_ .dialog-footer-note{color:var(--color-text-secondary,#aaa);font-size:.8125rem;line-height:1.3;flex:1 1 auto;min-width:0;}
+._mo_ .dialog-buttons{flex-flow:row-reverse wrap;justify-content:flex-start;gap:.5rem 1rem;display:flex;margin-left:auto;flex:0 0 auto;}
 ._mo_ .confirm-dialog-button{width:auto;height:auto;font-weight:var(--font-weight-semibold,500);text-align:right;white-space:pre-wrap;flex:none;}
 ._mo_ .dialog-checkbox{margin:.25rem -1.125rem 0;}
+._twd-chat-privacy-separator_{height:1px!important;margin:5px 10px!important;background:rgba(255,255,255,.35)!important;border:0!important;border-radius:0!important;pointer-events:none!important;flex:none!important;}
+._twd-crossed-pencil_{position:relative!important;}
+._twd-crossed-pencil_::after{content:'';position:absolute;width:1.15rem;height:1.5px;left:.15rem;top:.68rem;background:currentColor;border-radius:0!important;transform:rotate(-45deg);transform-origin:center;pointer-events:none;}
 /* «Прочитать всё» из трея: помечаем чаты прочитанными через скрытое контекстное
    меню TG — пока идёт операция, прячем любые контекст-меню (синтетические клики
    через dispatchEvent проходят несмотря на pointer-events:none). */
@@ -122,8 +127,7 @@ html._tgreading_ .bubble.menu-container.shown{opacity:0 !important;pointer-event
 ._twd-row-actions_{margin-inline-start:auto;display:flex;align-items:center;gap:.125rem;flex-shrink:0;}
 .ListItem-main-icon ._twd-filled-glyph_{width:1.5rem;height:1.5rem;display:block;fill:#fff;color:#fff;}
 ._twd-filetype_{width:1.875rem!important;height:1.875rem!important;border-radius:.625rem!important;display:flex!important;align-items:center!important;justify-content:center!important;flex-shrink:0;font-size:.625rem!important;font-weight:700;color:#fff!important;text-transform:uppercase;}
-._twd-apply-bar_{position:sticky;bottom:0;z-index:2;display:flex;justify-content:flex-end;padding:.75rem 0;background:var(--color-background-secondary,#0f0f0f);}
-._twd-apply-bar_[hidden]{display:none!important;}
+._twd-clarification_{margin:.5rem 1rem 0!important;padding:.75rem 0 .25rem!important;border-top:1px solid var(--color-borders,rgba(255,255,255,.1));}
 ._twd-panel-card_{margin-top:.5rem;}
 ._twd-range-row_ .multiline-item{min-width:9rem;}
 ._twd-range-control_{margin-inline-start:auto;display:flex;align-items:center;gap:.75rem;width:22rem;min-width:22rem;flex:0 0 22rem;}

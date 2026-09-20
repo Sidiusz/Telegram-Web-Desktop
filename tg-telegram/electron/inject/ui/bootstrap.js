@@ -291,24 +291,20 @@ document.addEventListener('contextmenu', function(e) {
 // ──────────────────────────────────────────────────────────────────────────
 
 // ── Скачивание медиа из просмотрщика (blob:) ───────────────────────────────
-// Кнопка «Загрузка» в просмотрщике — это <a download href="blob:...">. В Electron
-// клик по нему НЕ скачивает: webContents.downloadURL(blob:) не работает (blob живёт
-// в рендерере и недоступен из main) — раньше клик «пытался открыть blob». Чиним в
-// рендерере: сами fetch'им blob → dataURL и отдаём байты в main (save_blob).
+// blob: живёт в renderer и недоступен из main. Передаём URL preload'у: он читает
+// ReadableStream и шлёт в main по MessagePort только один chunk за раз с ACK после
+// записи на диск. Полный файл и base64-копия больше не создаются в памяти.
 document.addEventListener('click', function(e){
     var a = (e.target && e.target.closest) ? e.target.closest('a[download]') : null;
     if(!a) return;
     var href = a.href || a.getAttribute('href') || '';
     if(href.indexOf('blob:')!==0) return;            // только blob; обычные ссылки не трогаем
     e.preventDefault();                              // отменяем сломанное нативное скачивание
-    e.stopImmediatePropagation();                    // и глушим обработчик external.js — иначе он
-                                                     // зовёт open_url(blob:) → диалог Windows «открыть blob»
+    e.stopImmediatePropagation();                    // и глушим external.js для blob:
     var name = a.getAttribute('download') || a.download || 'file';
-    fetch(href).then(function(r){ return r.blob(); }).then(function(b){
-        var fr = new FileReader();
-        fr.onload = function(){ INV('save_blob', { dataUrl: fr.result, filename: name }).catch(function(){}); };
-        fr.readAsDataURL(b);
-    }).catch(function(){});
+    if(window.tgBridge && typeof window.tgBridge.saveBlob==='function'){
+        window.tgBridge.saveBlob(href,name).catch(function(){});
+    }
 }, true);
 // ──────────────────────────────────────────────────────────────────────────
 
@@ -430,8 +426,11 @@ window.__tgNotif=(function(){
     // Фолбэк — эмуляция через контекст-меню, если рантайм TG недоступен.
     function markRead(pid){
         try{ pid=String(pid); }catch(e){ return; }
-        if(_callAction('markChatMessagesRead', { id: pid })) return;
-        markReadViaMenu(pid);
+        try{if(window.__twdAllowUnreadRemoval)window.__twdAllowUnreadRemoval(pid);}catch(_){}
+        INV('privacy_allow_read_once',{peerId:pid}).catch(function(){}).then(function(){
+            if(_callAction('markChatMessagesRead', { id: pid })) return;
+            markReadViaMenu(pid);
+        });
     }
     // Фолбэк: ПКМ по строке → нативное меню TG → «Отметить как прочитанное».
     // Чат НЕ открывается, текущий активный чат не меняется.
@@ -483,6 +482,200 @@ window.__tgNotif=(function(){
     }
     return {openChat:openChat, markRead:markRead};
 })();
+// При активной нечиталке Web A оптимистично снимает unread-badge ещё до RPC.
+// Сохраняем точную нативную копию badge. MutationObserver отрабатывает до paint,
+// поэтому визуального провала нет; при явном прочтении копия удаляется заранее.
+(function(){
+    var lastCtx={peerId:'',ts:0},replaying=new WeakSet();
+    var privacyCfg=null,unreadKeep=new Map(),badgeAllowRemovalUntil=new Map(),badgeObserver=null;
+
+    function setPrivacyCfg(s){
+        if(!s)return;
+        privacyCfg=s;
+        restoreUnreadBadges();
+    }
+    function refreshPrivacyCfg(){
+        try{INV('get_settings').then(setPrivacyCfg).catch(function(){});}catch(_){}
+    }
+    window.addEventListener('__twd_privacy_config',function(e){
+        var d=e&&e.detail||{},s=privacyCfg||{};
+        s=Object.assign({},s,{
+            privacy_no_read_receipts:d.noReadReceipts===true,
+            privacy_no_typing:d.noTyping===true,
+            privacy_no_read_force_on:d.noReadForceOn||[],
+            privacy_no_read_force_off:d.noReadForceOff||[],
+            privacy_no_typing_force_on:d.noTypingForceOn||[],
+            privacy_no_typing_force_off:d.noTypingForceOff||[]
+        });
+        setPrivacyCfg(s);
+    });
+
+    function peerIdFromRow(row){
+        var a=row&&row.querySelector&&row.querySelector('.Avatar[data-peer-id],[data-peer-id]');
+        return a&&a.getAttribute('data-peer-id')||'';
+    }
+    function effective(s,peerId,baseKey,onKey,offKey){
+        var on=(s[onKey]||[]).map(String),off=(s[offKey]||[]).map(String);
+        if(off.indexOf(peerId)>=0)return false;
+        if(on.indexOf(peerId)>=0)return true;
+        return s[baseKey]===true;
+    }
+    function patchRule(s,peerId,baseKey,onKey,offKey,next){
+        var on=(s[onKey]||[]).map(String).filter(function(x){return x!==peerId;});
+        var off=(s[offKey]||[]).map(String).filter(function(x){return x!==peerId;});
+        var base=s[baseKey]===true;
+        if(next!==base)(next?on:off).push(peerId);
+        var p={};p[onKey]=on;p[offKey]=off;return p;
+    }
+    function readEnabled(peerId){
+        return !!privacyCfg&&effective(privacyCfg,peerId,'privacy_no_read_receipts','privacy_no_read_force_on','privacy_no_read_force_off');
+    }
+    function clearUnreadKeep(peerId){
+        peerId=String(peerId||'');if(!peerId)return;
+        unreadKeep.delete(peerId);
+        var row=null,rows=document.querySelectorAll('#LeftColumn .ListItem.Chat');
+        for(var i=0;i<rows.length;i++){
+            if(String(peerIdFromRow(rows[i])||'')===peerId){row=rows[i];break;}
+        }
+        if(row)row.querySelectorAll('._twd-unread-keep_').forEach(function(x){x.remove();});
+    }
+    window.__twdClearUnreadKeep=clearUnreadKeep;
+    function allowUnreadRemoval(peerId){
+        peerId=String(peerId||'');if(!peerId)return;
+        badgeAllowRemovalUntil.set(peerId,Date.now()+3000);
+        clearUnreadKeep(peerId);
+    }
+    window.__twdAllowUnreadRemoval=allowUnreadRemoval;
+
+    function restoreUnreadBadges(){
+        if(!privacyCfg)return;
+        var now=Date.now();
+        document.querySelectorAll('#LeftColumn .ListItem.Chat').forEach(function(row){
+            var peerId=String(peerIdFromRow(row)||'');if(!peerId)return;
+            var enabled=readEnabled(peerId);
+            if((badgeAllowRemovalUntil.get(peerId)||0)>now){
+                row.querySelectorAll('._twd-unread-keep_').forEach(function(x){x.remove();});
+                unreadKeep.delete(peerId);
+                return;
+            }
+            var all=[].slice.call(row.querySelectorAll('.chat-badge-transition,.Badge'));
+            var fake=all.find(function(x){return x.classList.contains('_twd-unread-keep_');});
+            var real=all.find(function(x){
+                return !x.classList.contains('_twd-unread-keep_')&&/^\d+$/.test((x.textContent||'').trim());
+            });
+            if(!enabled){
+                if(fake)fake.remove();
+                unreadKeep.delete(peerId);
+                return;
+            }
+            if(real){
+                if(fake)fake.remove();
+                var currentCount=parseInt((real.textContent||'').trim(),10)||0;
+                var previous=unreadKeep.get(peerId);
+                if(previous&&now-previous.ts<=30000&&currentCount<previous.count){
+                    var value=String(previous.count);
+                    var textNode=real.querySelector('span')||real;
+                    if((textNode.textContent||'').trim()!==value)textNode.textContent=value;
+                    return;
+                }
+                var clone=real.cloneNode(true);clone.classList.remove('_twd-unread-keep_');
+                unreadKeep.set(peerId,{node:clone,ts:now,count:currentCount});
+                return;
+            }
+            var snap=unreadKeep.get(peerId);
+            if(!snap||now-snap.ts>30000){
+                if(fake)fake.remove();
+                unreadKeep.delete(peerId);
+                return;
+            }
+            if(fake)return;
+            var host=row.querySelector('.subtitle');
+            if(!host)return;
+            var node=snap.node.cloneNode(true);
+            node.classList.add('_twd-unread-keep_');
+            host.appendChild(node);
+        });
+    }
+    function bindBadgeObserver(){
+        var list=document.querySelector('#LeftColumn .chat-list,#LeftColumn');
+        if(!list){setTimeout(bindBadgeObserver,250);return;}
+        if(badgeObserver)return;
+        badgeObserver=new MutationObserver(restoreUnreadBadges);
+        badgeObserver.observe(list,{childList:true,subtree:true,characterData:true});
+        restoreUnreadBadges();
+    }
+    refreshPrivacyCfg();
+    bindBadgeObserver();
+
+    function closeMenu(){
+        try{document.dispatchEvent(new KeyboardEvent('keydown',{key:'Escape',keyCode:27,which:27,bubbles:true}));}catch(_){}
+    }
+    function makeItem(cls,icon,label,onClick){
+        var el=document.createElement('div');
+        el.className='MenuItem compact '+cls;el.setAttribute('role','menuitem');el.tabIndex=0;
+        el.innerHTML='<i class="icon '+icon+'" aria-hidden="true"></i><span></span>';
+        var sp=el.querySelector('span');if(sp)sp.textContent=label;
+        el.addEventListener('click',function(e){e.preventDefault();e.stopPropagation();onClick();});
+        return el;
+    }
+    function injectPrivacyItems(peerId){
+        INV('get_settings').then(function(s){
+            if(!s||!peerId||Date.now()-lastCtx.ts>2500)return;
+            var menu=document.querySelector('.bubble.menu-container.shown.open,.Menu.context-menu .bubble.shown.open');
+            if(!menu||menu.querySelector('._twd-chat-privacy-read_'))return;
+            var host=menu.querySelector('.MenuItem')&&menu.querySelector('.MenuItem').parentElement||menu;
+            var nativeRead=[].slice.call(host.querySelectorAll('.MenuItem,[role="menuitem"]')).find(function(x){
+                return !!x.querySelector('.icon-readchats,.icon-unread') ||
+                    /пометить (?:не)?прочитанн|отметить как (?:не)?прочитанн|mark as (?:un)?read/i.test((x.textContent||'').trim());
+            });
+            var typingOn=effective(s,peerId,'privacy_no_typing','privacy_no_typing_force_on','privacy_no_typing_force_off');
+            var readOn=effective(s,peerId,'privacy_no_read_receipts','privacy_no_read_force_on','privacy_no_read_force_off');
+            var typing=makeItem('_twd-chat-privacy-typing_',typingOn?'icon-edit':'icon-edit _twd-crossed-pencil_',T(typingOn?'ctx_no_typing_off':'ctx_no_typing_on'),function(){
+                var patch=patchRule(s,peerId,'privacy_no_typing','privacy_no_typing_force_on','privacy_no_typing_force_off',!typingOn);
+                INV('save_settings',{settings:patch}).catch(function(){});closeMenu();
+            });
+            var read=makeItem('_twd-chat-privacy-read_',readOn?'icon-eye':'icon-eye-crossed',T(readOn?'ctx_no_read_off':'ctx_no_read_on'),function(){
+                var patch=patchRule(s,peerId,'privacy_no_read_receipts','privacy_no_read_force_on','privacy_no_read_force_off',!readOn);
+                if(readOn)clearUnreadKeep(peerId);
+                INV('save_settings',{settings:patch}).then(refreshPrivacyCfg).catch(function(){});closeMenu();
+            });
+            var sepTop=document.createElement('div');sepTop.className='_twd-chat-privacy-separator_';
+            var sepBottom=document.createElement('div');sepBottom.className='_twd-chat-privacy-separator_';
+            if(nativeRead){host.insertBefore(sepTop,nativeRead);host.insertBefore(typing,nativeRead);host.insertBefore(read,nativeRead);host.insertBefore(sepBottom,nativeRead);}
+            else{host.appendChild(sepTop);host.appendChild(typing);host.appendChild(read);host.appendChild(sepBottom);}
+            try{_twdFitMenuViewport(host);}catch(_){}
+        }).catch(function(){});
+    }
+
+    document.addEventListener('contextmenu',function(e){
+        var row=e.target&&e.target.closest&&e.target.closest('#LeftColumn .ListItem.Chat');
+        if(!row||row.classList.contains('chat-item-archive'))return;
+        var peerId=peerIdFromRow(row);if(!peerId)return;
+        lastCtx={peerId:String(peerId),ts:Date.now()};
+        setTimeout(function(){injectPrivacyItems(lastCtx.peerId);},0);
+        setTimeout(function(){injectPrivacyItems(lastCtx.peerId);},70);
+        setTimeout(function(){injectPrivacyItems(lastCtx.peerId);},160);
+    },true);
+
+    // Явное «Пометить прочитанным» обходит нечиталку ровно для следующего read-RPC.
+    document.addEventListener('click',function(e){
+        if(!lastCtx.peerId||Date.now()-lastCtx.ts>2500)return;
+        var item=e.target&&e.target.closest&&e.target.closest('.MenuItem,[role="menuitem"],button');
+        if(!item||item.classList.contains('_twd-chat-privacy-read_'))return;
+        if(replaying.has(item)){replaying.delete(item);return;}
+        var text=(item.textContent||'').trim();
+        var explicitRead=!!item.querySelector('i.icon-readchats,.icon-readchats') ||
+            /пометить прочитанн|отметить как прочитанн|mark as read/i.test(text);
+        if(!explicitRead)return;
+        allowUnreadRemoval(lastCtx.peerId);
+        e.preventDefault();e.stopPropagation();
+        if(e.stopImmediatePropagation)e.stopImmediatePropagation();
+        INV('privacy_allow_read_once',{peerId:lastCtx.peerId}).catch(function(){}).then(function(){
+            replaying.add(item);try{item.click();}catch(_){}
+        });
+    },true);
+})();
+
 // ──────────────────────────────────────────────────────────────────────────
 
 // Сообщаем main язык интерфейса TG (для локализации меню трея). Шлём при смене.

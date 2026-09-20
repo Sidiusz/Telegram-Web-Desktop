@@ -16,13 +16,32 @@ function _twdNativeContext(content){
 function _twdStaticRow(ctx,title,sub,value,onClick,icon,tone){
     return _genDecoratedRow(icon||'settings',title,value||'',onClick||null,tone||'blue',sub||'',false);
 }
+function _twdPassiveText(text){
+    var src=document.querySelector('#Settings .settings-item-description');
+    var el=src?src.cloneNode(false):document.createElement('p');
+    el.className=(src?src.className:'settings-item-description')+' _twd-clarification_';
+    el.textContent=String(text||'');
+    return el;
+}
 function _twdSwitchRow(ctx,title,sub,checked,onChange){
     var r=_genNativeSettingRow(ctx.liEl,title,sub||'','',null);
     if(r._value)r._value.remove();
     var b=r.querySelector('.ListItem-button');
     if(b){
         b.querySelectorAll('.Switcher,.Switch,.Toggle,.icon-next,.icon-arrow-right').forEach(function(x){x.remove();});
-        b.appendChild(_genSwitcher(!!checked,onChange,title));
+        var sw=_genSwitcher(!!checked,onChange,title),inp=sw.querySelector('input[type="checkbox"]');
+        b.appendChild(sw);
+        b.setAttribute('role','button');
+        b.setAttribute('tabindex','0');
+        b.addEventListener('click',function(e){
+            if(!inp||e.target.closest('.Switcher,.Switch,.Toggle,input,button,a'))return;
+            inp.click();
+        });
+        b.addEventListener('keydown',function(e){
+            if(!inp||e.target!==b||(e.key!=='Enter'&&e.key!==' '))return;
+            e.preventDefault();
+            inp.click();
+        });
     }
     return r;
 }
@@ -30,7 +49,7 @@ function _twdRangeRow(ctx,title,sub,value,min,max,step,format,onChange){
     value=Number(value);min=Number(min);max=Number(max);step=Number(step)||1;
     if(!Number.isFinite(value))value=min;
     value=Math.max(min,Math.min(max,value));
-    var r=_twdStaticRow(ctx,title,sub||'','',null,'notifications','red');
+    var r=_genNativeSettingRow(ctx.liEl,title,sub||'','',null);
     if(r._value)r._value.remove();
     var b=r.querySelector('.ListItem-button');
     if(!b)return r;
@@ -63,19 +82,24 @@ function _twdClearMessageHistory(){
     }
     return Promise.resolve({ok:true});
 }
-function _twdFeatureApplyBar(content){
-    var bar=document.createElement('div');
-    bar.className='_twd-apply-bar_';
-    var btn=_genButton(T('twd_apply'),'reload','primary');
-    btn.addEventListener('click',async function(){
-        if(btn.disabled)return;
-        btn.disabled=true;
-        try{await INV('apply_features');}
-        finally{btn.disabled=false;}
+function _twdConfigureHistory(patch){
+    var map={
+        messages_show_deleted:'showDeleted',messages_show_disappearing:'showDisappearing',
+        messages_save_deleted:'saveDeleted',messages_save_disappearing:'saveDisappearing',
+        messages_edit_history:'editHistory',messages_history_scope:'scope'
+    };
+    var next={};
+    Object.keys(patch||{}).forEach(function(k){if(map[k])next[map[k]]=patch[k];});
+    return _twdSave(patch).then(function(){
+        window.__twdMessageHistoryConfig=Object.assign({},window.__twdMessageHistoryConfig||{},next);
+        try{var api=window.__twdMessageHistoryApi;if(api&&typeof api.configure==='function')api.configure(next);}catch(_){}
+        try{window.dispatchEvent(new CustomEvent('__twd_history_config',{detail:next}));}catch(_){}
     });
-    bar.appendChild(btn);
-    content.appendChild(bar);
-    return bar;
+}
+function _twdSetHideAds(enabled){
+    return _twdSave({appearance_hide_ads:enabled}).then(function(){
+        try{window.dispatchEvent(new CustomEvent('__twd_hide_ads_config',{detail:{enabled:enabled===true}}));}catch(_){}
+    });
 }
 
 var _twdNativePanel=null;
@@ -262,7 +286,7 @@ function _twdRenderAppearance(content,ctx,s){
     var card=ctx.card();
     var layout=s.appearance_message_layout||'left';
     var labels={native:T('twd_layout_native'),left:T('twd_layout_left'),wide:T('twd_layout_wide')};
-    var row=_twdStaticRow(ctx,T('twd_layout'),T('twd_layout_desc'),labels[layout]||labels.left,function(v){
+    var row=_genNativeSettingRow(ctx.liEl,T('twd_layout'),T('twd_layout_desc'),labels[layout]||labels.left,function(v){
         pickModal({
             title:T('twd_layout'),
             current:layout,
@@ -271,29 +295,62 @@ function _twdRenderAppearance(content,ctx,s){
                 {value:'left',label:labels.left},
                 {value:'wide',label:labels.wide}
             ],
+            footerNote:T('twd_reload_notice'),
             onSave:function(next){
+                if(next===layout)return;
                 layout=next;
                 v.textContent=labels[next]||labels.left;
-                _twdSave({appearance_message_layout:next});
+                _twdSave({appearance_message_layout:next}).then(function(){return INV('apply_features');}).catch(function(){});
             }
         });
-    },'visual_interface','purple');
+    });
     card.appendChild(row);
     card.appendChild(_twdSwitchRow(ctx,T('twd_hide_ads'),T('twd_hide_ads_desc'),s.appearance_hide_ads!==false,function(v){
-        _twdSave({appearance_hide_ads:v});
+        _twdSetHideAds(v);
     }));
     ctx.section(T('twd_appearance'),card);
-    _twdFeatureApplyBar(content);
 }
 function _twdRenderMessages(content,ctx,s){
+    var privacy=ctx.card();
+    privacy.appendChild(_twdSwitchRow(ctx,T('twd_no_read'),T('twd_no_read_desc'),s.privacy_no_read_receipts===true,function(v){
+        _twdSave({privacy_no_read_receipts:v});
+    }));
+    privacy.appendChild(_twdSwitchRow(ctx,T('twd_no_typing'),T('twd_no_typing_desc'),s.privacy_no_typing===true,function(v){
+        _twdSave({privacy_no_typing:v});
+    }));
+    ctx.section(T('twd_privacy'),privacy);
+
     var card=ctx.card();
     card.appendChild(_twdSwitchRow(ctx,T('twd_show_deleted'),T('twd_show_deleted_desc'),!!s.messages_show_deleted,function(v){
-        _twdSave({messages_show_deleted:v});
+        _twdConfigureHistory({messages_show_deleted:v});
     }));
-    card.appendChild(_twdSwitchRow(ctx,T('twd_edit_history'),T('twd_edit_history_desc'),!!s.messages_edit_history,function(v){
-        _twdSave({messages_edit_history:v});
+    card.appendChild(_twdSwitchRow(ctx,T('twd_show_disappearing'),T('twd_show_disappearing_desc'),!!s.messages_show_disappearing,function(v){
+        _twdConfigureHistory({messages_show_disappearing:v});
     }));
     ctx.section(T('twd_messages'),card);
+
+    var saved=ctx.card();
+    saved.appendChild(_twdSwitchRow(ctx,T('twd_save_deleted'),T('twd_save_deleted_desc'),!!s.messages_save_deleted,function(v){
+        _twdConfigureHistory({messages_save_deleted:v});
+    }));
+    saved.appendChild(_twdSwitchRow(ctx,T('twd_save_disappearing'),T('twd_save_disappearing_desc'),!!s.messages_save_disappearing,function(v){
+        _twdConfigureHistory({messages_save_disappearing:v});
+    }));
+    saved.appendChild(_twdSwitchRow(ctx,T('twd_edit_history'),T('twd_edit_history_desc'),!!s.messages_edit_history,function(v){
+        _twdConfigureHistory({messages_edit_history:v});
+    }));
+    var scopes={chat:T('twd_history_scope_chat'),client:T('twd_history_scope_client'),always:T('twd_history_scope_always')};
+    var scope=s.messages_history_scope||'client';
+    var scopeRow=_genNativeSettingRow(ctx.liEl,T('twd_history_scope'),'',scopes[scope]||scopes.client,function(v){
+        pickModal({
+            title:T('twd_history_scope'),current:scope,
+            options:[{value:'chat',label:scopes.chat},{value:'client',label:scopes.client},{value:'always',label:scopes.always}],
+            onSave:function(next){scope=next;v.textContent=scopes[next]||scopes.client;_twdConfigureHistory({messages_history_scope:next});}
+        });
+    });
+    saved.appendChild(scopeRow);
+    saved.appendChild(_twdPassiveText(T('twd_history_limits')));
+    ctx.section(T('twd_message_storage'),saved);
 
     var data=ctx.card();
     var clear=_twdStaticRow(ctx,T('twd_clear_history'),T('twd_clear_history_desc'),'',function(){
@@ -302,13 +359,13 @@ function _twdRenderMessages(content,ctx,s){
             msg:T('twd_clear_history_confirm'),
             okText:T('del_upper'),
             okDanger:true,
+            footerNote:T('twd_reload_notice'),
             onOk:function(){toast(T('twd_history_cleared'),'icon-check');return _twdClearMessageHistory();}
         });
     },'trash_bin','red');
     clear.classList.add('destructive');
     data.appendChild(clear);
     ctx.section(T('twd_local_data'),data);
-    _twdFeatureApplyBar(content);
 }
 function _twdRenderNotifications(content,ctx,s){
     var basic=ctx.card();
@@ -337,14 +394,15 @@ function _twdRenderNotifications(content,ctx,s){
     var privacy=ctx.card();
     privacy.appendChild(_twdSwitchRow(ctx,T('ns_hide_text'),' ',s.notif_hide_text===true,function(v){_twdSave({notif_hide_text:v});}));
     privacy.appendChild(_twdSwitchRow(ctx,T('ns_hide_sender'),' ',s.notif_hide_sender===true,function(v){_twdSave({notif_hide_sender:v});}));
+    privacy.appendChild(_twdSwitchRow(ctx,T('ns_hide_avatar'),' ',s.notif_hide_avatar===true,function(v){_twdSave({notif_hide_avatar:v});}));
     ctx.section(T('twd_privacy'),privacy);
 }
 function _twdAppendUpdates(content,ctx,s){
     var card=ctx.card();
     var keys=['30m','1h','12h','24h','3d','7d','30d','never'];
     var lbl={'30m':'iv_30m','1h':'iv_1h','12h':'iv_12h','24h':'iv_24h','3d':'iv_3d','7d':'iv_7d','30d':'iv_30d','never':'iv_never'};
-    var cur=s.update_check_interval||'1h';
-    card.appendChild(_twdStaticRow(ctx,T('st_auto_check'),' ',T(lbl[cur]||'iv_1h'),function(v){
+    var cur=s.update_check_interval||'24h';
+    card.appendChild(_twdStaticRow(ctx,T('st_auto_check'),' ',T(lbl[cur]||'iv_24h'),function(v){
         pickModal({title:T('st_auto_check'),current:cur,options:keys.map(function(k){return{value:k,label:T(lbl[k])};}),onSave:function(x){cur=x;v.textContent=T(lbl[x]);_twdSave({update_check_interval:x});}});
     },'reload','green'));
     card.appendChild(_twdStaticRow(ctx,T('st_check_now'),' ','',async function(){
@@ -352,7 +410,7 @@ function _twdAppendUpdates(content,ctx,s){
         try{var r=await INV('check_update_manual');if(!r||r.upToDate)toast(T('st_uptodate'),'icon-check');else if(r.error)toast(T('error')+': '+r.error,'icon-close');}
         catch(e){toast(T('st_check_err'),'icon-close');}
     },'reload','green'));
-    card.appendChild(_twdStaticRow(ctx,T('changelog'),T('twd_changelog_desc'),' ',function(){openChangelogNative();},'info','blue'));
+    card.appendChild(_twdStaticRow(ctx,T('changelog'),T('twd_changelog_desc'),' ',function(){openChangelogNative('about');},'info','blue'));
     ctx.section(T('sec_updates'),card);
 }
 function _twdRenderData(content,ctx,s){
@@ -361,7 +419,7 @@ function _twdRenderData(content,ctx,s){
     clear.classList.add('destructive');
     card.appendChild(clear);
     var hist=_twdStaticRow(ctx,T('twd_clear_history'),T('twd_clear_history_desc'),' ',function(){
-        showModal({title:T('twd_clear_history'),msg:T('twd_clear_history_confirm'),okText:T('del_upper'),okDanger:true,onOk:function(){toast(T('twd_history_cleared'),'icon-check');return _twdClearMessageHistory();}});
+        showModal({title:T('twd_clear_history'),msg:T('twd_clear_history_confirm'),okText:T('del_upper'),okDanger:true,footerNote:T('twd_reload_notice'),onOk:function(){toast(T('twd_history_cleared'),'icon-check');return _twdClearMessageHistory();}});
     },'trash_bin','red');
     hist.classList.add('destructive');
     card.appendChild(hist);

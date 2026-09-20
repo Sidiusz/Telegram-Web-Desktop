@@ -57,22 +57,28 @@ function createWindow(state, onTelegramLink, options = {}) {
             if (mainWindow && !mainWindow.isDestroyed()) mainWindow.loadURL(TG_URL);
         }, 50);
     }
+    const WEB_A_ENTRY_TIMEOUT_MS = 8000;
     async function fetchTelegramAsset(request, url) {
         if (webAMode === 'fallback') return fetchTelegramWebAFallback(url);
+        const entry = isWebAEntry(url);
+        const timeoutSignal = entry ? AbortSignal.timeout(WEB_A_ENTRY_TIMEOUT_MS) : null;
         try {
-            const response = await net.fetch(request, { bypassCustomProtocolHandlers: true });
-            if (isWebAEntry(url) && webAMode === 'auto') webAMode = 'direct';
+            const response = await net.fetch(request, {
+                bypassCustomProtocolHandlers: true,
+                ...(timeoutSignal ? { signal: timeoutSignal } : {}),
+            });
+            if (entry && webAMode === 'auto') webAMode = 'direct';
             return response;
         } catch (e) {
             noteTelegramLoadFailure(e && e.message ? e.message : e);
             if (!isWebFallbackEnabled()) throw e;
-            const entry = isWebAEntry(url);
             webAMode = 'fallback';
-            // Restart the shell once so every worker/resource belongs to the same
-            // pinned fallback session and receives the embedded proxy transform.
+            // If the entry document itself failed/timed out, serve the pinned build
+            // directly in this same navigation. For a later asset failure, restart the
+            // shell once so the whole page comes from one consistent source.
+            if (entry) return fetchTelegramWebAFallback(url);
             scheduleFallbackReload();
-            if (!entry) throw e;
-            return fetchTelegramWebAFallback(url);
+            throw e;
         }
     }
 
@@ -367,24 +373,43 @@ function createWindow(state, onTelegramLink, options = {}) {
         const savePath = item.getSavePath();
         const filename = path.basename(savePath) || originalFilename;
 
-        state.downloads.push({ id, url: item.getURL(), filename, path: savePath, status: 'downloading' });
+        state.downloads.push({
+            id, url: item.getURL(), filename, path: savePath, status: 'downloading',
+            recv: 0, total: Math.max(0, Number(item.getTotalBytes()) || 0),
+        });
         saveDownloads(state.downloads);
         trackActive(id, item);
 
         // origName is the name as sent in the message (renderer matches mid by it); filename is the actual saved name (for the manager).
-        mainWindow.webContents.send('download-event', { type: 'start', id, filename, origName: originalFilename });
+        mainWindow.webContents.send('download-event', {
+            type: 'start', id, filename, origName: originalFilename,
+            total: Math.max(0, Number(item.getTotalBytes()) || 0),
+        });
 
         item.on('updated', (event, dlState) => {
             if (dlState === 'interrupted') {
                 const dl = state.downloads.find(d => d.id === id);
-                if (dl) { dl.status = 'failed'; saveDownloads(state.downloads); }
-                mainWindow.webContents.send('download-event', { type: 'done', id, status: 'failed' });
+                if (dl) {
+                    dl.status = 'failed';
+                    dl.recv = Math.max(0, Number(item.getReceivedBytes()) || 0);
+                    dl.total = Math.max(0, Number(item.getTotalBytes()) || 0);
+                    saveDownloads(state.downloads);
+                }
+                mainWindow.webContents.send('download-event', {
+                    type: 'done', id, status: 'failed',
+                    received: Math.max(0, Number(item.getReceivedBytes()) || 0),
+                    total: Math.max(0, Number(item.getTotalBytes()) || 0),
+                });
             } else {
+                const received = Math.max(0, Number(item.getReceivedBytes()) || 0);
+                const total = Math.max(0, Number(item.getTotalBytes()) || 0);
+                const dl = state.downloads.find(d => d.id === id);
+                if (dl) { dl.recv = received; dl.total = total; }
                 mainWindow.webContents.send('download-event', {
                     type: 'progress',
                     id,
-                    received: item.getReceivedBytes(),
-                    total: item.getTotalBytes(),
+                    received,
+                    total,
                 });
             }
         });
@@ -398,9 +423,15 @@ function createWindow(state, onTelegramLink, options = {}) {
             if (dl) {
                 dl.status = status;
                 dl.path = item.getSavePath();
+                dl.recv = Math.max(0, Number(item.getReceivedBytes()) || 0);
+                dl.total = Math.max(0, Number(item.getTotalBytes()) || 0);
                 saveDownloads(state.downloads);
             }
-            mainWindow.webContents.send('download-event', { type: 'done', id, status });
+            mainWindow.webContents.send('download-event', {
+                type: 'done', id, status,
+                received: Math.max(0, Number(item.getReceivedBytes()) || 0),
+                total: Math.max(0, Number(item.getTotalBytes()) || 0),
+            });
         });
     });
 
@@ -489,8 +520,26 @@ function createWindow(state, onTelegramLink, options = {}) {
     });
     // Taskbar badge vanishes on cold start (button doesn't exist yet when setBadgeCount runs) and on restore from tray — reapplied on show/restore.
     const reapplyBadge = () => { try { app.setBadgeCount(state.lastNotificationCount || 0); } catch (e) {} };
-    mainWindow.on('show', () => { reapplyBadge(); wakeTelegramForeground(); });
-    mainWindow.on('restore', () => { reapplyBadge(); wakeTelegramForeground(); });
+
+    // Chromium can occasionally keep a valid, fully rendered DOM while the Windows
+    // compositor surface stays blank after a renderer reload. Force a few full paints
+    // around load/show/restore instead of making the user minimize or restart the app.
+    let repaintTimers = [];
+    function repaintWindowSurface() {
+        if (!mainWindow || mainWindow.isDestroyed()) return;
+        for (const timer of repaintTimers) clearTimeout(timer);
+        repaintTimers = [];
+        const repaint = () => {
+            if (!mainWindow || mainWindow.isDestroyed()) return;
+            try { mainWindow.webContents.invalidate(); } catch (_) {}
+        };
+        repaint();
+        repaintTimers.push(setTimeout(repaint, 60));
+        repaintTimers.push(setTimeout(repaint, 220));
+    }
+
+    mainWindow.on('show', () => { reapplyBadge(); wakeTelegramForeground(); repaintWindowSurface(); });
+    mainWindow.on('restore', () => { reapplyBadge(); wakeTelegramForeground(); repaintWindowSurface(); });
 
     // TG's column layout caches window width via ResizeObserver and won't recompute after a
     // monitor change or mid-transition reload (chat stays narrow); a synthetic resize event doesn't trigger it, but nudging zoom by 0.001 does (no visible jump, unlike resizing the frame).
@@ -498,11 +547,16 @@ function createWindow(state, onTelegramLink, options = {}) {
     function nudgeRelayout() {
         if (_nudging || !mainWindow || mainWindow.isDestroyed()) return;
         _nudging = true;
+        repaintWindowSurface();
         try {
             const wc = mainWindow.webContents;
             const z = wc.getZoomFactor();
             wc.setZoomFactor(z + 0.001);
-            setTimeout(() => { try { wc.setZoomFactor(z); } catch (e) {} _nudging = false; }, 50);
+            setTimeout(() => {
+                try { wc.setZoomFactor(z); } catch (e) {}
+                repaintWindowSurface();
+                _nudging = false;
+            }, 50);
         } catch (e) { _nudging = false; }
     }
     let _lastDisplayId = null;
@@ -513,7 +567,11 @@ function createWindow(state, onTelegramLink, options = {}) {
             if (d && d.id !== _lastDisplayId) { _lastDisplayId = d.id; nudgeRelayout(); }
         } catch (e) {}
     });
-    mainWindow.webContents.on('did-finish-load', () => { setTimeout(nudgeRelayout, 500); });
+    mainWindow.webContents.on('did-finish-load', () => {
+        repaintWindowSurface();
+        setTimeout(nudgeRelayout, 500);
+    });
+    mainWindow.webContents.on('did-stop-loading', repaintWindowSurface);
     mainWindow.on('hide', () => {
         if (!mainWindow || mainWindow.isDestroyed()) return;
         mainWindow.webContents.executeJavaScript(`try{window.__tgHiddenCtrl&&window.__tgHiddenCtrl.setHasFocus(false)}catch(e){}`).catch(()=>{});

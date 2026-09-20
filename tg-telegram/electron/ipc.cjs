@@ -92,14 +92,35 @@ function registerIpc(getWindow) {
     initUpdater(getWindow);
     scheduleChecks();
 
-    handle('get_settings', () => state.settings);
+    handle('get_settings', () => {
+        state.settings = loadSettings();
+        return state.settings;
+    });
     ipcMain.on('get_history_bootstrap', (event) => {
         try {
             const win = getWindow();
             const s = state.settings || loadSettings();
             event.returnValue = win && !win.isDestroyed() && event.sender === win.webContents ? {
                 showDeleted: s.messages_show_deleted === true,
+                showDisappearing: s.messages_show_disappearing === true,
+                saveDeleted: s.messages_save_deleted === true,
+                saveDisappearing: s.messages_save_disappearing === true,
                 editHistory: s.messages_edit_history === true,
+                scope: s.messages_history_scope || 'client',
+            } : null;
+        } catch (_) { event.returnValue = null; }
+    });
+    ipcMain.on('get_privacy_bootstrap', (event) => {
+        try {
+            const win = getWindow();
+            const s = state.settings || loadSettings();
+            event.returnValue = win && !win.isDestroyed() && event.sender === win.webContents ? {
+                noReadReceipts: s.privacy_no_read_receipts === true,
+                noTyping: s.privacy_no_typing === true,
+                noReadForceOn: s.privacy_no_read_force_on || [],
+                noReadForceOff: s.privacy_no_read_force_off || [],
+                noTypingForceOn: s.privacy_no_typing_force_on || [],
+                noTypingForceOff: s.privacy_no_typing_force_off || [],
             } : null;
         } catch (_) { event.returnValue = null; }
     });
@@ -115,6 +136,13 @@ function registerIpc(getWindow) {
     handle('get_app_info', () => ({
         version: app.getVersion(),
     }));
+    handle('get_window_state', () => {
+        const win = getWindow();
+        return win && !win.isDestroyed() ? {
+            visible: win.isVisible(),
+            minimized: win.isMinimized(),
+        } : { visible: false, minimized: true };
+    });
 
     handle('get_proxy_status', () => Object.assign(getProxyStatus(), { fallback: getFallbackInfo() }));
     handle('set_proxy_mode', (e, { mode }) => {
@@ -123,7 +151,11 @@ function registerIpc(getWindow) {
     handle('reset_proxy_auto', () => {
         const status = resetAutoProxy(); state.settings = loadSettings(); return status;
     });
-    handle('reconnect_proxy', () => forceProxyReconnect('renderer-network-stall'));
+    handle('reconnect_proxy', () => {
+        const status = forceProxyReconnect('renderer-network-stall');
+        state.settings = loadSettings();
+        return status;
+    });
     handle('save_proxy_options', (e, options) => {
         const status = updateProxyOptions(options || {}); state.settings = loadSettings(); return status;
     });
@@ -138,10 +170,11 @@ function registerIpc(getWindow) {
 
         const hideSender = settings.notif_hide_sender === true;
         const hideText = settings.notif_hide_text === true;
+        const hideAvatar = hideSender || settings.notif_hide_avatar === true;
         queueNotification({
             title: hideSender ? ntr('anon') : (sender || title || 'Telegram'),
             body: hideText ? ntr('new_msg_hidden') : body,
-            icon: hideSender ? '' : icon,
+            icon: hideAvatar ? '' : icon,
             anon: hideSender,
             peerId,
             btnOpen: ntr('open'),
@@ -176,7 +209,16 @@ function registerIpc(getWindow) {
     });
 
     handle('save_settings', (e, { settings }) => {
-        const current = state.settings || loadSettings();
+        const current = loadSettings();
+        state.settings = current;
+        const previousPrivacy = {
+            noReadReceipts: current.privacy_no_read_receipts === true,
+            noTyping: current.privacy_no_typing === true,
+            noReadForceOn: current.privacy_no_read_force_on || [],
+            noReadForceOff: current.privacy_no_read_force_off || [],
+            noTypingForceOn: current.privacy_no_typing_force_on || [],
+            noTypingForceOff: current.privacy_no_typing_force_off || [],
+        };
         const next = Object.assign({}, settings || {});
         if (Object.prototype.hasOwnProperty.call(next, 'save_path') && next.save_path !== current.save_path) {
             const grant = approvedSavePaths.get(e.sender.id);
@@ -190,7 +232,25 @@ function registerIpc(getWindow) {
         }
         saveSettings(next);
         state.settings = loadSettings();
-        configureProxySettings(state.settings);
+        const proxyConfigKeys = [
+            'proxy_mode','proxy_auto_latched','proxy_domain_source','proxy_custom_domains','proxy_pinned_domain',
+            'proxy_worker_enabled','proxy_worker_domains','proxy_auto_failures','proxy_auto_window_sec',
+            'proxy_web_fallback','proxy_web_fallback_latched','proxy_dc_ips',
+        ];
+        const proxyConfigChanged = proxyConfigKeys.some(k => JSON.stringify(current[k]) !== JSON.stringify(state.settings[k]));
+        const privacy = {
+            noReadReceipts: state.settings.privacy_no_read_receipts === true,
+            noTyping: state.settings.privacy_no_typing === true,
+            noReadForceOn: state.settings.privacy_no_read_force_on || [],
+            noReadForceOff: state.settings.privacy_no_read_force_off || [],
+            noTypingForceOn: state.settings.privacy_no_typing_force_on || [],
+            noTypingForceOff: state.settings.privacy_no_typing_force_off || [],
+        };
+        if (JSON.stringify(privacy) !== JSON.stringify(previousPrivacy)) {
+            const win = getWindow();
+            if (win && !win.isDestroyed()) win.webContents.send('privacy-state-changed', privacy);
+        }
+        if (proxyConfigChanged) configureProxySettings(state.settings);
         scheduleChecks();
         if (state.settings.devtools_enabled !== true) {
             const win = getWindow();
@@ -241,14 +301,26 @@ function registerIpc(getWindow) {
     // 'completed' status can be stale; exists===false tells the renderer to skip the checkmark (see restoreForChat).
     // Renderer only needs presentation/binding metadata. Do not expose absolute
     // local paths or source URLs from the desktop filesystem to the Telegram page.
-    handle('get_downloads', () => state.downloads.map(d => ({
-        id: d.id,
-        filename: d.filename,
-        status: d.status,
-        mid: d.mid,
-        peerId: d.peerId,
-        exists: d.path ? fs.existsSync(d.path) : false,
-    })));
+    handle('get_downloads', () => state.downloads.map(d => {
+        const exists = d.path ? fs.existsSync(d.path) : false;
+        let recv = Number.isSafeInteger(d.recv) && d.recv >= 0 ? d.recv : 0;
+        let total = Number.isSafeInteger(d.total) && d.total >= 0 ? d.total : 0;
+        // Backfill old completed records created before byte counts were persisted.
+        if (exists && d.status === 'completed' && !total) {
+            try { total = Math.max(0, Number(fs.statSync(d.path).size) || 0); } catch (_) {}
+        }
+        if (d.status === 'completed' && total && !recv) recv = total;
+        return {
+            id: d.id,
+            filename: d.filename,
+            status: d.status,
+            recv,
+            total,
+            mid: d.mid,
+            peerId: d.peerId,
+            exists,
+        };
+    }));
 
     // Bind a download to a message (to restore status after restart).
     handle('bind_download', (e, { id, mid, peerId } = {}) => {
@@ -284,10 +356,19 @@ function registerIpc(getWindow) {
         return { ok: true };
     });
 
-    handle('cancel_download', (e, { id } = {}) => {
+    handle('cancel_download', async (e, { id } = {}) => {
         const safeId = normalizeDownloadId(id);
         if (safeId == null) return { error: 'invalid-id' };
-        return { ok: cancelActive(safeId) };
+        if (cancelActive(safeId)) return { ok: true };
+        return { ok: await cancelBlobSaveByDownloadId(safeId) };
+    });
+
+    handle('open_downloads_folder', async () => {
+        const settings = state.settings || loadSettings();
+        const dir = path.resolve(settings.save_path || app.getPath('downloads'));
+        try { fs.mkdirSync(dir, { recursive: true }); } catch (_) {}
+        const error = await shell.openPath(dir);
+        return error ? { error } : { ok: true };
     });
 
     handle('open_download_folder', (e, { id } = {}) => {
@@ -437,42 +518,194 @@ function registerIpc(getWindow) {
         if (menu.items.length) menu.popup({ window: win });
     });
 
-    // webContents.downloadURL(blob:) doesn't work in Electron (blob lives in the renderer,
-    // unreachable from main), so the renderer fetches it to a dataURL and sends the bytes here to be written and registered.
-    handle('save_blob', async (e, { dataUrl, filename } = {}) => {
-        try {
-            const rawData = String(dataUrl || '');
-            if (rawData.length > 384 * 1024 * 1024) return { error: 'too-large' };
-            const m = /^data:([^;,]*)?(;base64)?,([\s\S]*)$/.exec(rawData);
-            if (!m) return { error: 'bad-data' };
-            const buf = m[2] ? Buffer.from(m[3], 'base64') : Buffer.from(decodeURIComponent(m[3]));
-            if (buf.length > 384 * 1024 * 1024) return { error: 'too-large' };
-            const settings = state.settings || loadSettings();
-            const dir = settings.save_path || app.getPath('downloads');
-            const safeName = sanitizeFilename(filename || 'file');
-            const dest = uniquePath(path.join(dir, safeName));
-            // Large viewer media must not block Electron's main loop while being written.
-            await fs.promises.writeFile(dest, buf);
+    // blob: URLs belong to the renderer and cannot be opened by main directly.
+    // Preload reads the blob as a ReadableStream and awaits one IPC write per chunk.
+    // This keeps memory bounded to a small chunk and provides real disk backpressure
+    // without ever creating a whole-file base64/data URL.
+    const blobSaves = new Map();
+    const blobSaveByDownloadId = new Map();
+    let blobSaveSeq = 0;
 
-            state.downloadCounter += 1;
-            const id = state.downloadCounter;
-            const savedName = path.basename(dest);
-            state.downloads.push({ id, url: '', filename: savedName, path: dest, status: 'completed' });
+    function emitBlobDownload(payload) {
+        const win = getWindow();
+        if (win && !win.isDestroyed()) {
+            try { win.webContents.send('download-event', payload); } catch (_) {}
+        }
+    }
+    function getBlobSave(event, streamId) {
+        const item = blobSaves.get(String(streamId || ''));
+        return item && item.senderId === event.sender.id ? item : null;
+    }
+    function bufferFromBlobChunk(raw) {
+        if (raw instanceof ArrayBuffer) return Buffer.from(raw);
+        if (ArrayBuffer.isView(raw)) return Buffer.from(raw.buffer, raw.byteOffset, raw.byteLength);
+        return null;
+    }
+    async function failBlobSave(item, status = 'failed') {
+        if (!item || item.finished) return false;
+        item.finished = true;
+        blobSaves.delete(item.streamId);
+        blobSaveByDownloadId.delete(item.id);
+        try { await item.file.close(); } catch (_) {}
+        try { await fs.promises.unlink(item.temp); } catch (_) {}
+        const rec = state.downloads.find(d => d.id === item.id);
+        if (rec) {
+            rec.status = status;
+            rec.recv = item.received;
+            rec.total = item.expectedTotal;
             saveDownloads(state.downloads);
+        }
+        emitBlobDownload({
+            type: 'done',
+            id: item.id,
+            status,
+            filename: item.savedName,
+            origName: item.safeName,
+            received: item.received,
+            total: item.expectedTotal,
+        });
+        return true;
+    }
+    async function cancelBlobSaveByDownloadId(id) {
+        const streamId = blobSaveByDownloadId.get(id);
+        if (!streamId) return false;
+        return failBlobSave(blobSaves.get(streamId), 'cancelled');
+    }
 
-            const win = getWindow();
-            if (win && !win.isDestroyed()) {
-                // Same contract as will-download (start → done) so the card shows up in the download manager.
-                win.webContents.send('download-event', { type: 'start', id, filename: savedName, origName: safeName });
-                win.webContents.send('download-event', { type: 'done', id, status: 'completed' });
+    handle('begin_blob_save', async (event, { filename, total } = {}) => {
+        const safeName = sanitizeFilename(filename || 'file');
+        const declaredTotal = Number(total);
+        const expectedTotal = Number.isSafeInteger(declaredTotal) && declaredTotal >= 0 ? declaredTotal : 0;
+        const settings = state.settings || loadSettings();
+        const dir = settings.save_path || app.getPath('downloads');
+        fs.mkdirSync(dir, { recursive: true });
+
+        const dest = uniquePath(path.join(dir, safeName));
+        const temp = dest + '.' + process.pid + '.' + Date.now() + '.twd-part';
+        let file;
+        try {
+            file = await fs.promises.open(temp, 'wx');
+        } catch (e) {
+            return { error: e && e.message ? e.message : 'open-failed' };
+        }
+
+        const streamId = event.sender.id + '-' + Date.now().toString(36) + '-' + (++blobSaveSeq).toString(36);
+        state.downloadCounter += 1;
+        const id = state.downloadCounter;
+        const savedName = path.basename(dest);
+        const item = {
+            streamId,
+            senderId: event.sender.id,
+            id,
+            file,
+            temp,
+            dest,
+            safeName,
+            savedName,
+            expectedTotal,
+            received: 0,
+            busy: false,
+            finished: false,
+        };
+        blobSaves.set(streamId, item);
+        blobSaveByDownloadId.set(id, streamId);
+        state.downloads.push({
+            id, url: '', filename: savedName, path: dest, status: 'downloading',
+            recv: 0, total: expectedTotal,
+        });
+        saveDownloads(state.downloads);
+        emitBlobDownload({ type: 'start', id, filename: savedName, origName: safeName, total: expectedTotal });
+
+        event.sender.once('destroyed', () => {
+            const live = blobSaves.get(streamId);
+            if (live) failBlobSave(live, 'failed');
+        });
+        return { ok: true, streamId, id };
+    });
+
+    handle('append_blob_chunk', async (event, { streamId, chunk } = {}) => {
+        const item = getBlobSave(event, streamId);
+        if (!item || item.finished) return { error: 'missing-stream' };
+        if (item.busy) return { error: 'stream-busy' };
+        const buf = bufferFromBlobChunk(chunk);
+        if (!buf) return { error: 'invalid-chunk' };
+        if (buf.length > 1024 * 1024) return { error: 'chunk-too-large' };
+
+        item.busy = true;
+        try {
+            let offset = 0;
+            while (offset < buf.length) {
+                const result = await item.file.write(buf, offset, buf.length - offset, null);
+                if (!result || result.bytesWritten <= 0) throw new Error('short-write');
+                offset += result.bytesWritten;
             }
-            // Do not disclose the absolute filesystem path back into the Telegram renderer.
-            return { ok: true, id };
-        } catch (err) {
-            return { error: err.message };
+            item.received += buf.length;
+            const rec = state.downloads.find(d => d.id === item.id);
+            if (rec) {
+                rec.recv = item.received;
+                rec.total = item.expectedTotal;
+            }
+            emitBlobDownload({
+                type: 'progress',
+                id: item.id,
+                received: item.received,
+                total: item.expectedTotal,
+            });
+            return { ok: true, received: item.received };
+        } catch (e) {
+            await failBlobSave(item, 'failed');
+            return { error: e && e.message ? e.message : 'write-failed' };
+        } finally {
+            item.busy = false;
         }
     });
 
+    handle('finish_blob_save', async (event, { streamId } = {}) => {
+        const item = getBlobSave(event, streamId);
+        if (!item || item.finished) return { error: 'missing-stream' };
+        if (item.busy) return { error: 'stream-busy' };
+        if (item.expectedTotal && item.received !== item.expectedTotal) {
+            await failBlobSave(item, 'failed');
+            return { error: 'size-mismatch' };
+        }
+
+        try {
+            await item.file.close();
+            await fs.promises.rename(item.temp, item.dest);
+        } catch (e) {
+            await failBlobSave(item, 'failed');
+            return { error: e && e.message ? e.message : 'finish-failed' };
+        }
+
+        item.finished = true;
+        blobSaves.delete(item.streamId);
+        blobSaveByDownloadId.delete(item.id);
+        const rec = state.downloads.find(d => d.id === item.id);
+        if (rec) {
+            rec.status = 'completed';
+            rec.path = item.dest;
+            rec.recv = item.received;
+            rec.total = item.expectedTotal;
+            saveDownloads(state.downloads);
+        }
+        emitBlobDownload({
+            type: 'done',
+            id: item.id,
+            status: 'completed',
+            filename: item.savedName,
+            origName: item.safeName,
+            received: item.received,
+            total: item.expectedTotal,
+        });
+        return { ok: true, id: item.id };
+    });
+
+    handle('abort_blob_save', async (event, { streamId } = {}) => {
+        const item = getBlobSave(event, streamId);
+        if (!item) return { ok: true };
+        await failBlobSave(item, 'cancelled');
+        return { ok: true };
+    });
     handle('open_addons_folder', () => openAddonsFolder());
 
     // Renderer reports Telegram's UI language → localize tray menu.

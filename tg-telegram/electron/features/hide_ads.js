@@ -1,8 +1,9 @@
-setInterval(function() {
-    if (document.getElementById('twd-feature-hide-ads') || !document.head) return;
+(function () {
+    if (window.__twdHideAdsRuntimeStarted) return;
+    window.__twdHideAdsRuntimeStarted = true;
 
-    document.head.insertAdjacentHTML('beforeend', `<style id="twd-feature-hide-ads">
-        /* Вырезаем рекламный блок полностью */
+    const STYLE_ID = 'twd-feature-hide-ads';
+    const CSS = `
         .SponsoredMessage,
         .sponsored-media-image-container,
         .sponsored-media-preview,
@@ -15,5 +16,29 @@ setInterval(function() {
             pointer-events: none !important;
             overflow: hidden !important;
         }
-    </style>`);
-}, 2000);
+    `;
+
+    function setEnabled(enabled) {
+        window.__twdHideAdsEnabled = enabled === true;
+        let style = document.getElementById(STYLE_ID);
+        if (window.__twdHideAdsEnabled) {
+            if (!style && document.head) {
+                style = document.createElement('style');
+                style.id = STYLE_ID;
+                style.textContent = CSS;
+                document.head.appendChild(style);
+            }
+        } else if (style) {
+            style.remove();
+        }
+    }
+
+    window.addEventListener('__twd_hide_ads_config', function (event) {
+        setEnabled(!!(event.detail && event.detail.enabled));
+    });
+
+    if (document.head) setEnabled(window.__twdHideAdsEnabled !== false);
+    else document.addEventListener('DOMContentLoaded', function () {
+        setEnabled(window.__twdHideAdsEnabled !== false);
+    }, { once: true });
+})();

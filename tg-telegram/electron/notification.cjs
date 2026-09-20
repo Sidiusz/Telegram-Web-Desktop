@@ -169,6 +169,18 @@ function buildHtml() {
         });
     }
     function firstLetter(s){s=(s||'T').trim();return(s[0]||'T').toUpperCase();}
+    function initials(s){
+        const words=String(s||'').trim().split(/\s+/).filter(Boolean);
+        if(!words.length)return'T';
+        return words.slice(0,2).map(function(word){return(word[0]||'').toUpperCase();}).join('')||'T';
+    }
+    function avatarColor(peerId,title){
+        const key=String(peerId||title||'Telegram');
+        const palette=['#e17076','#faa774','#a695e7','#7bc862','#65aadd','#6ec9cb','#ee7aae'];
+        let hash=0;
+        for(let i=0;i<key.length;i++)hash=((hash*31)+key.charCodeAt(i))|0;
+        return palette[Math.abs(hash)%palette.length];
+    }
 
     function arm(id,duration){
         const c=cards.get(id);if(!c)return;
@@ -200,12 +212,13 @@ function buildHtml() {
 
         const top=document.createElement('div');top.className='top';
         const av=document.createElement('div');av.className='avatar';
-        if(data.anon)av.style.background='#6b6b6b';
+        av.style.background=avatarColor(data.peerId,title);
+        const avatarText=data.anon?firstLetter(title):initials(title);
         if(data.icon){
             const im=document.createElement('img');im.src=data.icon;
-            im.onerror=function(){av.textContent=firstLetter(title);};
+            im.onerror=function(){av.textContent=avatarText;};
             av.appendChild(im);
-        }else av.textContent=firstLetter(title);
+        }else av.textContent=avatarText;
 
         const bd=document.createElement('div');bd.className='body';
         const tt=document.createElement('div');tt.className='title';tt.textContent=title;

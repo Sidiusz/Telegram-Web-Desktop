@@ -23,6 +23,7 @@ const state = {
     installed: false, session: null, mode: 'auto', autoLatched: false,
     autoReason: '', flowsealDomains: DEFAULT_CF_BASE_DOMAINS.slice(),
     domainSource: 'flowseal', customDomains: [], pinnedDomain: '',
+    preferredControlDomain: '', preferredMediaDomain: '',
     workerEnabled: false, workerDomains: [], autoFailures: 1,
     autoWindowSec: 12, webFallback: true, webFallbackLatched: false,
     dcIps: { ...DC_IPS }, cursor: new Map(), directFailures: [],
@@ -67,6 +68,8 @@ function getProxyBootstrap() {
     return {
         active: isProxyActive(), domains: activeDomains(), revision: state.revision,
         reconnectEpoch: state.reconnectEpoch,
+        preferredControlDomain: state.preferredControlDomain,
+        preferredMediaDomain: state.preferredMediaDomain,
         workerEnabled: state.workerEnabled && state.workerDomains.length > 0,
         workerDomains: state.workerDomains.slice(), dcIps: { ...state.dcIps },
         bridgePort: state.bridgePort, bridgeToken: state.bridgeToken,
@@ -80,6 +83,25 @@ function setBridgeEndpoint(port, token) {
 function reportBridgeRoute(dc, domain, kind = 'cf') {
     state.lastRoute = kind; state.lastDomain = String(domain || '');
     state.lastDc = Number(dc) || 0; state.lastError = '';
+}
+function reportBridgePreferredDomain(domain, media = false) {
+    const d = validDomain(domain) ? String(domain).trim().toLowerCase() : '';
+    if (!d) return;
+    const field = media ? 'preferredMediaDomain' : 'preferredControlDomain';
+    const key = media ? 'proxy_last_good_media_domain' : 'proxy_last_good_control_domain';
+    if (state[field] === d) return;
+    state[field] = d;
+    const s = loadSettings();
+    saveSettings(Object.assign({}, s, { [key]: d }));
+}
+function clearBridgePreferredDomain(domain, media = false) {
+    const d = String(domain || '').trim().toLowerCase();
+    const field = media ? 'preferredMediaDomain' : 'preferredControlDomain';
+    const key = media ? 'proxy_last_good_media_domain' : 'proxy_last_good_control_domain';
+    if (!d || state[field] !== d) return;
+    state[field] = '';
+    const s = loadSettings();
+    saveSettings(Object.assign({}, s, { [key]: '' }));
 }
 function reportBridgeError(dc, error) {
     state.lastDc = Number(dc) || state.lastDc;
@@ -149,6 +171,8 @@ async function refreshFlowsealDomains() {
     state.domainSource = s.proxy_domain_source === 'custom' ? 'custom' : 'flowseal';
     state.customDomains = normalizeDomains(s.proxy_custom_domains);
     state.pinnedDomain = validDomain(s.proxy_pinned_domain) ? String(s.proxy_pinned_domain).trim().toLowerCase() : '';
+    state.preferredControlDomain = validDomain(s.proxy_last_good_control_domain) ? String(s.proxy_last_good_control_domain).trim().toLowerCase() : '';
+    state.preferredMediaDomain = validDomain(s.proxy_last_good_media_domain) ? String(s.proxy_last_good_media_domain).trim().toLowerCase() : '';
     state.workerEnabled = s.proxy_worker_enabled === true;
     state.workerDomains = normalizeDomains(s.proxy_worker_domains);
     state.autoFailures = Math.max(1, Math.min(10, Number(s.proxy_auto_failures) || 1));
@@ -196,7 +220,14 @@ function resetAutoProxy() {
     return getProxyStatus();
 }
 function forceProxyReconnect(reason = 'renderer-network-stall') {
-    if (!isProxyActive()) return getProxyStatus();
+    if (!isProxyActive()) {
+        if (state.mode === 'auto' && !state.autoLatched) {
+            state.reconnectEpoch++;
+            persistAutoLatch(reason === 'renderer-network-stall' ? 'direct-network-stall' : reason);
+            console.warn(`[TG-PROXY] direct Telegram transport stalled; switching auto mode to embedded proxy`);
+        }
+        return getProxyStatus();
+    }
     state.reconnectEpoch++;
     state.lastError = '';
     console.warn(`[TG-PROXY] forcing Telegram socket reconnect (${reason})`);
@@ -252,6 +283,7 @@ function getProxyStatus() {
         lastError: state.lastError, lastDc: state.lastDc, domains: activeDomains(),
         flowsealDomains: state.flowsealDomains.slice(), domainSource: state.domainSource,
         customDomains: state.customDomains.slice(), pinnedDomain: state.pinnedDomain,
+        preferredControlDomain: state.preferredControlDomain, preferredMediaDomain: state.preferredMediaDomain,
         workerEnabled: state.workerEnabled, workerDomains: state.workerDomains.slice(),
         autoFailures: state.autoFailures, autoWindowSec: state.autoWindowSec,
         reconnectEpoch: state.reconnectEpoch,
@@ -375,4 +407,5 @@ module.exports = {
     refreshFlowsealDomains, testProxyConnectivity, isWebFallbackEnabled,
     dcFromTelegramWsHost, DEFAULT_CF_BASE_DOMAINS, DC_IPS,
     setBridgeEndpoint, reportBridgeRoute, reportBridgeError,
+    reportBridgePreferredDomain, clearBridgePreferredDomain,
 };

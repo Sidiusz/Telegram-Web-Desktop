@@ -53,7 +53,10 @@ const DL = window.__tgdl = (function(){
             if(forgotten[mid]) continue;          // файл удалён — не восстанавливаем
             const r = byMid[mid];
             if(!registry[mid] || registry[mid].status!=='completed'){
-                registry[mid] = { mid:mid, id:r.id, filename:r.filename, status:'completed' };
+                registry[mid] = {
+                    mid:mid, id:r.id, filename:r.filename, status:'completed',
+                    recv:Number(r.recv)||0, total:Number(r.total)||0
+                };
                 applyToMessage(mid);
             }
         }
@@ -112,7 +115,10 @@ const DL = window.__tgdl = (function(){
             if(registry[mid] && registry[mid].status==='completed') unpaint(mid);
             delete doneFn[mid];
             delete forgotten[mid];   // снова качают — забытый mid опять валиден
-            registry[mid] = { mid, id:data.id, filename:data.filename, origName:orig, status:'downloading', recv:0, total:0 };
+            registry[mid] = {
+                mid, id:data.id, filename:data.filename, origName:orig, status:'downloading',
+                recv:0, total:Number(data.total)||0
+            };
             byId[data.id] = mid;
             // привязка к сообщению/чату — чтобы статус пережил перезапуск (#3)
             if(mid.indexOf('__noid__')!==0){
@@ -128,6 +134,8 @@ const DL = window.__tgdl = (function(){
             const mid = byId[data.id]; if(!mid)return;
             const r = registry[mid]; if(!r)return;
             r.status = data.status==='completed' ? 'completed' : (data.status==='cancelled' ? 'cancelled' : 'failed');
+            if(Number.isFinite(Number(data.received)))r.recv=Math.max(0,Number(data.received));
+            if(Number.isFinite(Number(data.total)))r.total=Math.max(0,Number(data.total));
             applyToMessage(mid);
             if(data.status!=='cancelled') doneFn[mid] = r.origName || r.filename;   // cancelled ≠ downloaded
             refreshSaved();   // обновим кэш сохранённых загрузок (для восстановления)

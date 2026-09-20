@@ -11,14 +11,6 @@ function injectMenu(){
         const bubble = icon.closest('.bubble.menu-container');
         if(!bubble) return;
         
-        // Уже вставлены — только обновляем подписи на текущий язык (TG ставит
-        // <html lang> не сразу, меню могло вставиться ещё на en) и выходим.
-        if(bubble.querySelector('#_tgmi_dl_')){
-            const map={_tgmi_dl_:'downloads',_tgmi_ad_:'addons',_tgmi_cl_:'changelog',_tgmi_upd_:'check_updates'};
-            Object.keys(map).forEach(id=>{const sp=bubble.querySelector('#'+id+' span');if(sp)sp.textContent=T(map[id]);});
-            return;
-        }
-
         function mi(id, ico, label, cb){
             const el = document.createElement('div');
             el.id = id;
@@ -27,10 +19,26 @@ function injectMenu(){
             el.className = 'MenuItem compact';
             el.innerHTML = '<i class="icon ' + ico + '" aria-hidden="true"></i><span>' + label + '</span>';
             el.addEventListener('click', () => {
+                try {
+                    const nativeSettings=Array.from(bubble.querySelectorAll('.MenuItem.compact:not([id])')).find(x=>x.querySelector('.icon-settings'));
+                    if(nativeSettings) window.__twdPendingNativeSettingsItem=nativeSettings;
+                } catch(e) {}
                 bubble.classList.remove('open', 'shown'); // закрываем меню
                 setTimeout(cb, 60);
             });
             return el;
+        }
+
+        // Если наши пункты уже есть, обновляем подписи и при необходимости
+        // довставляем Telegram Web Desktop сразу под нативной «Настройки».
+        if(bubble.querySelector('#_tgmi_dl_')){
+            const map={_tgmi_dl_:'downloads',_tgmi_ad_:'addons',_tgmi_cl_:'changelog',_tgmi_upd_:'check_updates'};
+            Object.keys(map).forEach(id=>{const sp=bubble.querySelector('#'+id+' span');if(sp)sp.textContent=T(map[id]);});
+            const settingsItem=Array.from(bubble.querySelectorAll('.MenuItem.compact:not([id])')).find(el=>el.querySelector('.icon-settings'));
+            let twd=bubble.querySelector('#_tgmi_twd_');
+            if(!twd&&settingsItem){twd=mi('_tgmi_twd_','icon-settings','Telegram Web Desktop',()=>openTwdNative('root'));settingsItem.after(twd);}
+            const sp=twd&&twd.querySelector('span');if(sp)sp.textContent='Telegram Web Desktop';
+            return;
         }
 
         // Динамически берем классы разделителя из DOM, чтобы не сломалось при обновлениях ТГ (заменяет h039vb1K NGKaFgra)
@@ -43,7 +51,6 @@ function injectMenu(){
 
         const dl = mi('_tgmi_dl_', 'icon-download', T('downloads'), () => openDownloadsNative());
         const ad = mi('_tgmi_ad_', 'icon-bots', T('addons'), () => openAddonsNative());
-        // #3: «Настройки приложения» убрали из меню — секции переехали в «Общие настройки».
         const cl = mi('_tgmi_cl_', 'icon-info', T('changelog'), () => openChangelogNative());
         const upd = mi('_tgmi_upd_', 'icon-reload', T('check_updates'), async () => {
             toast(T('upd_checking'), 'icon-reload');
@@ -62,6 +69,7 @@ function injectMenu(){
             tgSettings.addEventListener('click',()=>{ try{ closeNativePanel(); }catch(e){} });
         }
         const anchor = tgSettings || bubble.lastElementChild;
+        const twd = mi('_tgmi_twd_', 'icon-settings', 'Telegram Web Desktop', () => openTwdNative('root'));
         
         if(anchor){
             bubble.insertBefore(sep1, anchor);
@@ -70,6 +78,7 @@ function injectMenu(){
             bubble.insertBefore(cl, anchor);
             bubble.insertBefore(upd, anchor);
             bubble.insertBefore(sep2, anchor);
+            if(tgSettings) tgSettings.after(twd);
         }
     });
 }
@@ -144,13 +153,16 @@ function injectSettingsRows(){
     const bottomGroup=groups[groups.length-1]||mainGroup;
     let info=rootWrap.querySelector('#_tgst_modinfo_');
     if(!info){
-        info=row('_tgst_modinfo_','info','Telegram Web Desktop',T('twd_mod_info'),'blue',function(){openTwdNative('about');});
+        info=row('_tgst_modinfo_','info',T('sec_about'),'Telegram Web Desktop · '+T('twd_mod_info'),'blue',function(){openTwdNative('about');});
         bottomGroup.appendChild(info);
-        INV('get_app_info').then(function(appInfo){
-            if(info.isConnected && info._subtitle && appInfo && appInfo.version){
-                info._subtitle.textContent='v'+appInfo.version+' · '+T('twd_mod_info');
-            }
-        }).catch(function(){});
+    }else{
+        if(info._title)info._title.textContent=T('sec_about');
+        if(info._subtitle)info._subtitle.textContent='Telegram Web Desktop · '+T('twd_mod_info');
     }
+    INV('get_app_info').then(function(appInfo){
+        if(info.isConnected && info._subtitle && appInfo && appInfo.version){
+            info._subtitle.textContent='Telegram Web Desktop · v'+appInfo.version+' · '+T('twd_mod_info');
+        }
+    }).catch(function(){});
 }
 // ─────────────────────────────────────────────────────────────────────────────

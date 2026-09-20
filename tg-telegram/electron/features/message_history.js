@@ -3,10 +3,18 @@
     window.__twdMessageHistoryStarted = true;
 
     var cfg = window.__twdMessageHistoryConfig || {};
-    if (!cfg.showDeleted && !cfg.editHistory) return;
+    if (!cfg.showDeleted && !cfg.showDisappearing && !cfg.saveDeleted && !cfg.saveDisappearing && !cfg.editHistory) return;
+    cfg.scope = cfg.scope === 'chat' || cfg.scope === 'always' ? cfg.scope : 'client';
 
     var records = new Map();
+    var recordsByChat = new Map();
+    var domTextSnapshots = new Map();
+    var deletedDomSnapshots = new Map();
+    var deletedDomSnapshotsByChat = new Map();
     var lastContext = null;
+    var restoreDeletedQueued = false;
+    var persistTimer = null;
+    var PERSIST_KEY = '__twd_message_history_v2';
     var MAX_EDITS = 20;
     var MAX_RECORDS = 5000;
 
@@ -23,11 +31,25 @@
     function keyOf(chatId, messageId) {
         return String(chatId) + ':' + String(messageId);
     }
+    function isPrivateChatId(chatId) {
+        try { return BigInt(String(chatId)) > 0n; } catch (_) { return false; }
+    }
+    function chatRecordMap(chatId, create) {
+        var key=String(chatId), map=recordsByChat.get(key);
+        if(!map&&create){map=new Map();recordsByChat.set(key,map);}
+        return map||null;
+    }
     function trimRecords() {
-        while (records.size > MAX_RECORDS) records.delete(records.keys().next().value);
+        while (records.size > MAX_RECORDS) {
+            var key=records.keys().next().value;
+            var rec=records.get(key);
+            records.delete(key);
+            if(rec){var map=chatRecordMap(rec.chatId,false);if(map){map.delete(String(rec.messageId));if(!map.size)recordsByChat.delete(String(rec.chatId));}}
+        }
     }
     function getRecord(chatId, messageId) {
-        return records.get(keyOf(chatId, messageId)) || null;
+        var map=chatRecordMap(chatId,false);
+        return map&&map.get(String(messageId))||null;
     }
     function ensureRecord(chatId, messageId, text, timestamp) {
         var key = keyOf(chatId, messageId);
@@ -39,63 +61,163 @@
                 text: String(text == null ? '' : text),
                 edits: [],
                 deleted: false,
+                ephemeral: false,
+                outgoing: false,
+                saved: false,
+                savedEdits: [],
+                persistText: '',
+                persistUpdatedAt: 0,
                 updatedAt: Number(timestamp) || Date.now()
             };
             records.set(key, rec);
+            chatRecordMap(rec.chatId,true).set(rec.messageId,rec);
             trimRecords();
         }
         return rec;
     }
+    function recordShouldShow(rec) {
+        if (!rec || !rec.deleted) return false;
+        return rec.ephemeral ? cfg.showDisappearing === true : cfg.showDeleted === true;
+    }
+    function saveEnabledFor(rec) {
+        if (!rec) return false;
+        return rec.ephemeral ? cfg.saveDisappearing === true : cfg.saveDeleted === true;
+    }
+    function shouldPersistEvent(chatId) {
+        if (cfg.scope === 'always') return Promise.resolve(true);
+        if (cfg.scope === 'chat') return Promise.resolve(currentChatId() === String(chatId));
+        try {
+            if (window.tgBridge && typeof window.tgBridge.invoke === 'function') {
+                return window.tgBridge.invoke('get_window_state').then(function (state) {
+                    return !!(state && state.visible === true && state.minimized !== true);
+                }).catch(function () { return false; });
+            }
+        } catch (_) {}
+        return Promise.resolve(false);
+    }
+    function persistNow() {
+        try {
+            var out = [];
+            records.forEach(function (rec) {
+                if (!rec || !isPrivateChatId(rec.chatId)) return;
+                var savedEdits = Array.isArray(rec.savedEdits) ? rec.savedEdits : [];
+                if (!rec.saved && !savedEdits.length) return;
+                var persistedText = rec.persistUpdatedAt > 0 ? rec.persistText : rec.text;
+                out.push({
+                    chatId:String(rec.chatId),messageId:String(rec.messageId),text:String(persistedText||''),
+                    edits:savedEdits.slice(-MAX_EDITS).map(function(x){return{text:String(x.text||''),timestamp:Number(x.timestamp)||0};}),
+                    deleted:rec.saved===true && rec.deleted===true,ephemeral:rec.ephemeral===true,outgoing:rec.outgoing===true,saved:rec.saved===true,
+                    updatedAt:Number(rec.persistUpdatedAt)||0,deletedAt:rec.saved===true?(Number(rec.deletedAt)||0):0
+                });
+            });
+            if (out.length > MAX_RECORDS) out = out.slice(out.length - MAX_RECORDS);
+            if (out.length) localStorage.setItem(PERSIST_KEY, JSON.stringify({version:3,records:out}));
+            else localStorage.removeItem(PERSIST_KEY);
+        } catch (_) {}
+    }
+    function schedulePersist() {
+        if (persistTimer) clearTimeout(persistTimer);
+        persistTimer = setTimeout(function(){persistTimer=null;persistNow();},80);
+    }
+    function loadPersisted() {
+        try {
+            var raw=localStorage.getItem(PERSIST_KEY);if(!raw)return;
+            var parsed=JSON.parse(raw),arr=parsed&&Array.isArray(parsed.records)?parsed.records:[];
+            arr.slice(-MAX_RECORDS).forEach(function(x){
+                if(!x||!isPrivateChatId(x.chatId)||!x.messageId)return;
+                var rec=ensureRecord(x.chatId,x.messageId,x.text,x.updatedAt);
+                var persistedEdits=Array.isArray(x.edits)?x.edits.slice(-MAX_EDITS).map(function(e){return{text:String(e&&e.text||''),timestamp:Number(e&&e.timestamp)||0};}):[];
+                rec.edits=persistedEdits.slice();
+                rec.savedEdits=persistedEdits.slice();
+                rec.deleted=x.deleted===true;rec.ephemeral=x.ephemeral===true;rec.outgoing=x.outgoing===true;rec.saved=x.saved===true;
+                rec.persistText=String(x.text||'');rec.persistUpdatedAt=Number(x.updatedAt)||0;
+                rec.updatedAt=Number(x.updatedAt)||rec.updatedAt;rec.deletedAt=Number(x.deletedAt)||0;
+            });
+        } catch (_) {}
+    }
+    function clearSessionRecords() {
+        records.clear();recordsByChat.clear();domTextSnapshots.clear();deletedDomSnapshots.clear();deletedDomSnapshotsByChat.clear();lastContext=null;
+    }
     function pushEdit(rec, text, timestamp) {
-        if (!rec || !cfg.editHistory) return;
+        if (!rec) return false;
         text = String(text == null ? '' : text);
         var last = rec.edits[rec.edits.length - 1];
-        if (last && last.text === text) return;
+        if (last && last.text === text) return false;
         rec.edits.push({ text: text, timestamp: Number(timestamp) || Date.now() });
         if (rec.edits.length > MAX_EDITS) rec.edits.splice(0, rec.edits.length - MAX_EDITS);
+        return true;
+    }
+    function persistEditIfAllowed(rec, previousText, currentText, timestamp) {
+        if (!rec || cfg.editHistory !== true) return;
+        shouldPersistEvent(rec.chatId).then(function (allowed) {
+            if (!allowed) return;
+            var item={text:String(previousText==null?'':previousText),timestamp:Number(timestamp)||Date.now()};
+            var last=rec.savedEdits[rec.savedEdits.length-1];
+            if (!last || last.text!==item.text) rec.savedEdits.push(item);
+            if (rec.savedEdits.length>MAX_EDITS) rec.savedEdits.splice(0,rec.savedEdits.length-MAX_EDITS);
+            rec.persistText=String(currentText==null?'':currentText);
+            rec.persistUpdatedAt=Number(timestamp)||Date.now();
+            schedulePersist();
+        });
+    }
+    function persistDeletionIfAllowed(rec, timestamp) {
+        if (!rec || !saveEnabledFor(rec)) return;
+        var text=String(rec.text||'');
+        shouldPersistEvent(rec.chatId).then(function (allowed) {
+            if (!allowed) return;
+            rec.saved=true;
+            rec.persistText=text;
+            rec.persistUpdatedAt=Number(timestamp)||Date.now();
+            schedulePersist();
+        });
     }
     function applyHistoryEvent(ev) {
         if (!ev || typeof ev !== 'object') return;
         if (ev.kind === 'new' || ev.kind === 'edit') {
+            if (!isPrivateChatId(ev.chatId)) return;
             var rec = getRecord(ev.chatId, ev.messageId);
             if (!rec && ev.kind === 'edit' && ev.oldText != null) {
                 rec = ensureRecord(ev.chatId, ev.messageId, ev.oldText, ev.timestamp);
             }
             if (!rec) rec = ensureRecord(ev.chatId, ev.messageId, ev.text, ev.timestamp);
+            rec.ephemeral = ev.ephemeral === true;
+            rec.outgoing = ev.outgoing === true;
+            var currentText = String(ev.text == null ? '' : ev.text);
             if (ev.kind === 'edit') {
                 var previous = ev.oldText != null ? String(ev.oldText) : String(rec.text || '');
-                if (previous !== String(ev.text == null ? '' : ev.text)) pushEdit(rec, previous, ev.timestamp);
+                if (previous !== currentText && pushEdit(rec, previous, ev.timestamp)) {
+                    persistEditIfAllowed(rec, previous, currentText, ev.timestamp);
+                }
             }
-            rec.text = String(ev.text == null ? '' : ev.text);
+            rec.text = currentText;
             rec.updatedAt = Number(ev.timestamp) || Date.now();
             return;
         }
         if (ev.kind === 'delete' && Array.isArray(ev.items)) {
             ev.items.forEach(function (item) {
+                if (!isPrivateChatId(item.chatId)) return;
                 var rec = ensureRecord(item.chatId, item.messageId, item.text, item.timestamp || ev.timestamp);
                 if (item.text != null && !rec.text) rec.text = String(item.text);
+                rec.ephemeral = item.ephemeral === true;
+                rec.outgoing = item.outgoing === true;
                 rec.deleted = true;
                 rec.deletedAt = Number(item.timestamp || ev.timestamp) || Date.now();
-                markVisibleDeleted(rec);
+                if (recordShouldShow(rec)) markVisibleDeleted(rec);
+                persistDeletionIfAllowed(rec, item.timestamp || ev.timestamp);
             });
         }
     }
     function messageNode(chatId, messageId) {
-        if (currentChatId() !== String(chatId)) return null;
+        if (!isPrivateChatId(chatId) || currentChatId() !== String(chatId)) return null;
         try {
             return document.querySelector('#MiddleColumn .Message[data-message-id="' + CSS.escape(String(messageId)) + '"]');
         } catch (_) { return null; }
     }
     function markNodeDeleted(node, rec) {
-        if (!node || !rec || !rec.deleted) return;
+        if (!node || !rec || !recordShouldShow(rec)) return;
         node.classList.add('_twd-deleted-message_');
         var host = node.querySelector('.message-content') || node;
-        if (!host.querySelector('._twd-deleted-mark_')) {
-            var mark = document.createElement('span');
-            mark.className = '_twd-deleted-mark_';
-            mark.textContent = langRu() ? 'Удалено' : 'Deleted';
-            host.appendChild(mark);
-        }
+        host.querySelectorAll('.quick-reaction').forEach(function (x) { x.remove(); });
         if (!host.querySelector('._twd-deleted-trash_')) {
             var trash = document.createElement('span');
             trash.className = '_twd-deleted-trash_';
@@ -109,6 +231,22 @@
     function markVisibleDeleted(rec) {
         markNodeDeleted(messageNode(rec.chatId, rec.messageId), rec);
     }
+    function unmarkNodeDeleted(node) {
+        if (!node) return;
+        node.classList.remove('_twd-deleted-message_');
+        node.querySelectorAll('._twd-deleted-trash_').forEach(function (x) { x.remove(); });
+    }
+    function reconcileDeletedVisibility() {
+        var chatId=currentChatId();
+        if(!chatId||!isPrivateChatId(chatId))return;
+        document.querySelectorAll('#MiddleColumn .Message[data-message-id]').forEach(function(node){
+            var rec=getRecord(chatId,String(node.getAttribute('data-message-id')||''));
+            if(!rec||!rec.deleted){if(node.querySelector('._twd-deleted-trash_'))unmarkNodeDeleted(node);return;}
+            if(recordShouldShow(rec))markNodeDeleted(node,rec);
+            else node.remove();
+        });
+        queueRestoreDeleted();
+    }
     function inspectAdded(node) {
         if (!(node instanceof Element)) return;
         var nodes = [];
@@ -119,8 +257,164 @@
         nodes.forEach(function (msg) {
             var mid = msg.getAttribute('data-message-id');
             var rec = getRecord(currentChatId(), mid);
-            if (rec && rec.deleted) markNodeDeleted(msg, rec);
+            if (rec && rec.deleted) {
+                if (recordShouldShow(rec)) markNodeDeleted(msg, rec);
+                else { msg.remove(); return; }
+            }
+            trackDomMessage(msg);
         });
+    }
+    function visibleMessageText(msg) {
+        if (!msg) return '';
+        var selectors = ['.message-text','.text-content','.TranslatableMessage','.message-content .content-inner','.message-content .caption'];
+        for (var i = 0; i < selectors.length; i++) {
+            var el = msg.querySelector(selectors[i]);
+            if (!el) continue;
+            var clone = el.cloneNode(true);
+            clone.querySelectorAll('.MessageMeta,.message-time,.Reactions,.ReactionList,.quick-reaction,.message-action-buttons-container,button').forEach(function (x) { x.remove(); });
+            var text = String(clone.innerText || clone.textContent || '').replace(/\u00a0/g, ' ').replace(/[ \t]+\n/g, '\n').replace(/\n{3,}/g, '\n\n').trim();
+            if (text) return text;
+        }
+        return '';
+    }
+    function trackDomMessage(msg) {
+        if (!msg || !msg.matches || !msg.matches('.Message[data-message-id]')) return;
+        if (msg.classList.contains('_twd-deleted-clone_') || msg.classList.contains('is-deleting') || msg.classList.contains('is-dissolving')) return;
+        var chatId = currentChatId();
+        var messageId = String(msg.getAttribute('data-message-id') || '');
+        if (!chatId || !messageId || !isPrivateChatId(chatId)) return;
+        var text = visibleMessageText(msg);
+        var key = keyOf(chatId, messageId);
+        if (!domTextSnapshots.has(key)) {
+            domTextSnapshots.set(key, text);
+            var initial = getRecord(chatId, messageId);
+            if (!initial) initial=ensureRecord(chatId, messageId, text, Date.now());
+            initial.outgoing = msg.classList.contains('own');
+            return;
+        }
+        var previous = String(domTextSnapshots.get(key) || '');
+        if (previous === text) return;
+        domTextSnapshots.set(key, text);
+        var rec = ensureRecord(chatId, messageId, previous, Date.now());
+        rec.outgoing = msg.classList.contains('own');
+        var ts=Date.now();
+        if (pushEdit(rec, previous, ts)) persistEditIfAllowed(rec, previous, text, ts);
+        rec.text = text;
+        rec.updatedAt = ts;
+    }
+    function trackMutationMessage(node) {
+        var el = node instanceof Element ? node : node && node.parentElement;
+        var msg = el && el.closest && el.closest('#MiddleColumn .Message[data-message-id]');
+        if (msg) trackDomMessage(msg);
+    }
+    function prepareDeletedClone(node, rec) {
+        if (!node || !node.classList) return node;
+        node.classList.remove('is-deleting', 'is-dissolving', 'is-selected', 'is-in-selection-mode');
+        node.classList.add('_twd-deleted-clone_');
+        markNodeDeleted(node, rec);
+        return node;
+    }
+    function deletedSnapshotMap(chatId, create) {
+        var key=String(chatId), map=deletedDomSnapshotsByChat.get(key);
+        if(!map&&create){map=new Map();deletedDomSnapshotsByChat.set(key,map);}
+        return map||null;
+    }
+    function setDeletedSnapshot(snapshot) {
+        var chatId=String(snapshot.chatId), messageId=String(snapshot.messageId), key=keyOf(chatId,messageId);
+        deletedDomSnapshots.set(key,snapshot);
+        deletedSnapshotMap(chatId,true).set(messageId,snapshot);
+        while(deletedDomSnapshots.size>MAX_RECORDS){
+            var oldestKey=deletedDomSnapshots.keys().next().value;
+            var oldest=deletedDomSnapshots.get(oldestKey);
+            deletedDomSnapshots.delete(oldestKey);
+            if(oldest){var map=deletedSnapshotMap(oldest.chatId,false);if(map){map.delete(String(oldest.messageId));if(!map.size)deletedDomSnapshotsByChat.delete(String(oldest.chatId));}}
+        }
+    }
+    function captureDeletingMessage(msg) {
+        if (!msg || !msg.matches || !msg.matches('.Message[data-message-id]')) return;
+        if (msg.classList.contains('_twd-deleted-clone_')) return;
+        if (!msg.classList.contains('is-deleting') && !msg.classList.contains('is-dissolving')) return;
+        var chatId = currentChatId();
+        var messageId = String(msg.getAttribute('data-message-id') || '');
+        if (!chatId || !messageId || !isPrivateChatId(chatId)) return;
+        var rec = getRecord(chatId,messageId) || ensureRecord(chatId, messageId, visibleMessageText(msg), Date.now());
+        var show = rec.ephemeral ? cfg.showDisappearing === true : cfg.showDeleted === true;
+        rec.text = rec.text || visibleMessageText(msg);
+        rec.outgoing = msg.classList.contains('own');
+        rec.deleted = true;
+        rec.deletedAt = Date.now();
+        if (show) {
+            var clone = msg.cloneNode(true);
+            prepareDeletedClone(clone, rec);
+            setDeletedSnapshot({ chatId: String(chatId), messageId: messageId, node: clone });
+        }
+        persistDeletionIfAllowed(rec, rec.deletedAt);
+    }
+    function createDeletedNode(rec) {
+        var node=document.createElement('div');
+        node.id='message-'+String(rec.messageId);
+        node.className='shown open Message message-list-item allow-selection first-in-group last-in-group'+(rec.outgoing?' own':'');
+        node.setAttribute('data-message-id',String(rec.messageId));
+        var wrap=document.createElement('div');wrap.className='message-content-wrapper can-select-text';
+        var content=document.createElement('div');content.className='message-content text has-shadow has-solid-background has-footer';
+        var inner=document.createElement('div');inner.className='content-inner';
+        var text=document.createElement('div');text.className='text-content clearfix';text.textContent=rec.text||(langRu()?'[без текста]':'[no text]');
+        inner.appendChild(text);content.appendChild(inner);wrap.appendChild(content);node.appendChild(wrap);
+        return node;
+    }
+    function insertDeletedSnapshot(snapshot) {
+        if (!snapshot || !isPrivateChatId(snapshot.chatId) || currentChatId() !== String(snapshot.chatId)) return;
+        var messageId = String(snapshot.messageId || '');
+        if (!messageId) return;
+        var selector = '#MiddleColumn .Message[data-message-id="' + CSS.escape(messageId) + '"]';
+        var existing = document.querySelector(selector);
+        var rec = getRecord(snapshot.chatId, messageId);
+        if (!rec || !recordShouldShow(rec)) return;
+        if (existing) { markNodeDeleted(existing, rec); return; }
+        var list = document.querySelector('#MiddleColumn .MessageList .messages-container') || document.querySelector('#MiddleColumn .MessageList');
+        if (!list) return;
+        var source=snapshot.node||createDeletedNode(rec);
+        var node = source.cloneNode(true);
+        prepareDeletedClone(node, rec);
+        var numericId = Number(messageId);
+        var rows = Array.from(list.querySelectorAll('.Message[data-message-id]'));
+        var before = null;
+        if (Number.isFinite(numericId)) {
+            for (var i = 0; i < rows.length; i++) {
+                var rowId = Number(rows[i].getAttribute('data-message-id'));
+                if (Number.isFinite(rowId) && rowId > numericId) { before = rows[i]; break; }
+            }
+        }
+        if (before && before.parentNode) before.parentNode.insertBefore(node, before);
+        else list.appendChild(node);
+    }
+    function restoreDeletedForCurrentChat() {
+        if (!cfg.showDeleted && !cfg.showDisappearing) return;
+        var chatId = currentChatId();
+        if (!chatId || !isPrivateChatId(chatId)) return;
+        var snapshots=deletedSnapshotMap(chatId,false);
+        if(snapshots)snapshots.forEach(insertDeletedSnapshot);
+        var chatRecords=chatRecordMap(chatId,false);
+        if(!chatRecords)return;
+        chatRecords.forEach(function(rec){
+            if(!recordShouldShow(rec))return;
+            if(!snapshots||!snapshots.has(String(rec.messageId)))insertDeletedSnapshot({chatId:rec.chatId,messageId:rec.messageId,node:null});
+        });
+    }
+    function queueRestoreDeleted() {
+        if (restoreDeletedQueued) return;
+        restoreDeletedQueued = true;
+        requestAnimationFrame(function () {
+            restoreDeletedQueued = false;
+            restoreDeletedForCurrentChat();
+        });
+    }
+    function inspectRemoved(node) {
+        if (!(node instanceof Element)) return;
+        if (node.matches && node.matches('.Message[data-message-id]')) captureDeletingMessage(node);
+        if (node.querySelectorAll) {
+            node.querySelectorAll('.Message[data-message-id]').forEach(captureDeletingMessage);
+        }
     }
     function closeContextMenu() {
         try {
@@ -166,7 +460,6 @@
             meta.textContent = version.current
                 ? (langRu() ? 'Текущая версия' : 'Current version')
                 : ((langRu() ? 'Версия ' : 'Version ') + (i + 1));
-            if (version.timestamp) meta.textContent += ' · ' + new Date(version.timestamp).toLocaleString();
             var text = document.createElement('div');
             text.className = '_twd-history-version-text_';
             text.textContent = version.text || (langRu() ? '[без текста]' : '[no text]');
@@ -204,10 +497,17 @@
             }
         });
     }
+    function stripDeletedReactionMenu() {
+        if (!lastContext || !lastContext.deleted || Date.now() - lastContext.ts > 2500) return;
+        var menu = document.querySelector('.MessageContextMenu');
+        if (!menu) return;
+        menu.querySelectorAll('.ReactionSelector').forEach(function (x) { x.remove(); });
+        menu.classList.remove('with-reactions');
+    }
     function injectHistoryMenuItem() {
         if (!lastContext || Date.now() - lastContext.ts > 2500) return;
         var rec = getRecord(lastContext.chatId, lastContext.messageId);
-        if (!rec || !cfg.editHistory || !rec.edits || !rec.edits.length) return;
+        if (!rec || !rec.edits || !rec.edits.length) return;
         var items = document.querySelector('.MessageContextMenu_items');
         if (!items || items.querySelector('._twd-edit-history-menu_')) return;
 
@@ -219,7 +519,7 @@
         icon.className = 'icon icon-info';
         icon.setAttribute('aria-hidden', 'true');
         item.appendChild(icon);
-        item.appendChild(document.createTextNode(langRu() ? 'История редактирования' : 'Edit history'));
+        item.appendChild(document.createTextNode(langRu() ? 'Посмотреть изменения' : 'View changes'));
         item.addEventListener('click', function (e) {
             e.preventDefault();
             e.stopPropagation();
@@ -236,27 +536,67 @@
             lastContext = null;
             return;
         }
+        var chatId = currentChatId();
+        if (!isPrivateChatId(chatId)) {
+            lastContext = null;
+            return;
+        }
         lastContext = {
-            chatId: currentChatId(),
+            chatId: chatId,
             messageId: String(msg.getAttribute('data-message-id') || ''),
+            deleted: !!msg.querySelector('._twd-deleted-trash_'),
             ts: Date.now()
         };
+        setTimeout(stripDeletedReactionMenu, 0);
+        setTimeout(stripDeletedReactionMenu, 60);
+        setTimeout(stripDeletedReactionMenu, 140);
         setTimeout(injectHistoryMenuItem, 0);
         setTimeout(injectHistoryMenuItem, 60);
         setTimeout(injectHistoryMenuItem, 140);
     }, true);
 
-    var addedObserver = new MutationObserver(function (mutations) {
+    var observedMessageList = null;
+    var messageListObserver = new MutationObserver(function (mutations) {
+        var treeChanged = false;
         mutations.forEach(function (mutation) {
+            if (mutation.type === 'attributes') {
+                captureDeletingMessage(mutation.target);
+                return;
+            }
             mutation.addedNodes.forEach(inspectAdded);
+            mutation.removedNodes.forEach(inspectRemoved);
+            if (mutation.addedNodes.length || mutation.removedNodes.length) treeChanged = true;
         });
+        if (treeChanged) queueRestoreDeleted();
     });
+    function bindMessageList() {
+        var list=document.querySelector('#MiddleColumn .MessageList');
+        if(list===observedMessageList)return;
+        messageListObserver.disconnect();
+        observedMessageList=list||null;
+        if(!list)return;
+        messageListObserver.observe(list,{childList:true,subtree:true,attributes:true,attributeFilter:['class']});
+        list.querySelectorAll('.Message[data-message-id]').forEach(trackDomMessage);
+        queueRestoreDeleted();
+    }
+    function queueBindMessageList() {
+        bindMessageList();
+        setTimeout(bindMessageList,60);
+        setTimeout(bindMessageList,180);
+        setTimeout(bindMessageList,500);
+    }
     function startAddedObserver() {
-        if (!document.body) {
-            setTimeout(startAddedObserver, 20);
-            return;
-        }
-        addedObserver.observe(document.body, { childList: true, subtree: true });
+        bindMessageList();
+        setInterval(bindMessageList,1000);
+        window.addEventListener('popstate',queueBindMessageList);
+        window.addEventListener('hashchange',queueBindMessageList);
+        ['pushState','replaceState'].forEach(function(k){
+            var orig=history[k];
+            if(typeof orig!=='function'||orig.__twdHistoryWrapped)return;
+            function wrapped(){var result=orig.apply(this,arguments);queueBindMessageList();return result;}
+            wrapped.__twdHistoryWrapped=true;
+            history[k]=wrapped;
+        });
     }
 
     function ensureStyle() {
@@ -264,8 +604,9 @@
         var style = document.createElement('style');
         style.id = '_twd-message-history-style_';
         style.textContent = [
-            '._twd-deleted-message_ .message-content{outline:1px dashed color-mix(in srgb,var(--color-error,#e65b5b) 62%,transparent);position:relative;overflow:visible;}',
-            '._twd-deleted-mark_{display:inline-block;margin:.2rem .35rem 0;font-size:.72rem;font-weight:600;color:var(--color-error,#e65b5b);}',
+            '._twd-deleted-message_ .message-content,.message-content:has(>._twd-deleted-trash_){outline:2px dashed var(--color-error,#e65b5b);outline-offset:1px;position:relative;overflow:visible;}',
+            '._twd-deleted-message_ .quick-reaction,.message-content:has(>._twd-deleted-trash_) .quick-reaction{display:none!important;pointer-events:none!important;}',
+            '._twd-deleted-message_ .Reactions,._twd-deleted-message_ .ReactionList,.Message:has(._twd-deleted-trash_) .Reactions,.Message:has(._twd-deleted-trash_) .ReactionList{pointer-events:none!important;}',
             '._twd-deleted-trash_{position:absolute;left:calc(100% + .45rem);top:50%;transform:translateY(-50%);width:1.35rem;height:1.35rem;display:flex;align-items:center;justify-content:center;color:var(--color-error,#e65b5b);pointer-events:none;z-index:2;}',
             '._twd-deleted-trash_ .icon{font-size:1rem;line-height:1;}',
             '._twd-history-list_{max-height:min(60vh,34rem);overflow:auto;margin:-.25rem 0 .5rem;}',
@@ -289,12 +630,19 @@
     });
 
     window.__twdMessageHistoryApi = {
+        configure: function (next) {
+            Object.assign(cfg,next||{});
+            window.__twdMessageHistoryConfig=Object.assign({},window.__twdMessageHistoryConfig||{},cfg);
+            reconcileDeletedVisibility();
+            return Object.assign({},cfg);
+        },
         clear: function () {
-            records.clear();
-            lastContext = null;
+            if(persistTimer){clearTimeout(persistTimer);persistTimer=null;}
+            clearSessionRecords();
+            try{localStorage.removeItem(PERSIST_KEY);}catch(_){}
             var queue = window.__twdHistoryUpdateQueue;
             if (Array.isArray(queue)) queue.splice(0, queue.length);
-            document.querySelectorAll('._twd-deleted-mark_,._twd-deleted-trash_').forEach(function (x) { x.remove(); });
+            document.querySelectorAll('._twd-deleted-trash_').forEach(function (x) { x.remove(); });
             document.querySelectorAll('._twd-deleted-message_').forEach(function (x) { x.classList.remove('_twd-deleted-message_'); });
             setTimeout(function () { location.reload(); }, 60);
             return true;
@@ -306,12 +654,16 @@
                 messageId: rec.messageId,
                 text: rec.text,
                 edits: rec.edits.slice(),
-                deleted: rec.deleted === true
+                deleted: rec.deleted === true,
+                ephemeral: rec.ephemeral === true,
+                outgoing: rec.outgoing === true,
+                saved: rec.saved === true
             } : null;
         }
     };
 
     ensureStyle();
+    loadPersisted();
     drainQueue();
     startAddedObserver();
 })();

@@ -4,6 +4,7 @@ node_modules/
 .proxy-*/
 .qr-*/
 tg-telegram_WS/
+AGENTS.md
 
 tg-telegram/electron.zip
 tg-telegram/electron/.relay_wrapper.tmp

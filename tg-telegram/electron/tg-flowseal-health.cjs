@@ -16,6 +16,11 @@ class UpstreamHealth {
         }
     }
 
+    seedPreferred(domain) {
+        const d = String(domain || '');
+        if (d && !this.preferredDomain) this.preferredDomain = d;
+    }
+
     markSuccess(domain) {
         const d = String(domain || '');
         if (!d) return;
@@ -51,7 +56,9 @@ class UpstreamHealth {
             (b.domain === this.preferredDomain ? 1 : 0) -
             (a.domain === this.preferredDomain ? 1 : 0));
         cooling.sort((a, b) => a.until - b.until);
-        return healthy.concat(cooling.map(x => x.candidate));
+        // A cooldown must actually suppress retries while there are healthy routes.
+        // Only fall back to cooling candidates when every known route is cooling.
+        return healthy.length ? healthy : cooling.map(x => x.candidate);
     }
 
     snapshot() {

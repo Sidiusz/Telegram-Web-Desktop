@@ -2,48 +2,72 @@
 const { contextBridge, ipcRenderer } = require('electron');
 
 let _proxyBootstrap = { active: false, domains: [], revision: 0 };
-let _historyBootstrap = { showDeleted: false, editHistory: false };
+let _historyBootstrap = { showDeleted: false, showDisappearing: false, saveDeleted: false, saveDisappearing: false, editHistory: false, scope: 'client' };
+let _privacyBootstrap = {
+    noReadReceipts: false, noTyping: false,
+    noReadForceOn: [], noReadForceOff: [], noTypingForceOn: [], noTypingForceOff: [],
+};
 try { const boot = ipcRenderer.sendSync('get_proxy_bootstrap'); if (boot && typeof boot === 'object') _proxyBootstrap = boot; } catch (_) {}
 try { const boot = ipcRenderer.sendSync('get_history_bootstrap'); if (boot && typeof boot === 'object') _historyBootstrap = boot; } catch (_) {}
+try { const boot = ipcRenderer.sendSync('get_privacy_bootstrap'); if (boot && typeof boot === 'object') _privacyBootstrap = boot; } catch (_) {}
+
+const _proxyChannelBytes = new Uint8Array(16);
+crypto.getRandomValues(_proxyChannelBytes);
+const _proxyChannelName = '__twd_proxy_' + Array.from(_proxyChannelBytes, b => b.toString(16).padStart(2, '0')).join('');
+let _proxyChannel = null;
+try {
+    _proxyChannel = new BroadcastChannel(_proxyChannelName);
+    _proxyChannel.onmessage = (event) => {
+        const data = event && event.data;
+        if (data && data.__twdProxyHello === true) {
+            try { _proxyChannel.postMessage({ __twdProxyConfig: _proxyBootstrap, __twdPrivacyConfig: _privacyBootstrap }); } catch (_) {}
+        }
+    };
+} catch (_) {}
+
 function publishProxyState(payload) {
     _proxyBootstrap = payload && typeof payload === 'object' ? payload : _proxyBootstrap;
     try {
-        contextBridge.executeInMainWorld({
-            func: (state) => {
-                window.__twdProxyState = state;
-                try {
-                    if (!window.__twdProxyChannel) window.__twdProxyChannel = new BroadcastChannel('__twd_proxy_v1');
-                    window.__twdProxyChannel.postMessage(state);
-                } catch (_) {}
-                try { window.dispatchEvent(new CustomEvent('__twd_proxy_state', { detail: state })); } catch (_) {}
-            },
-            args: [_proxyBootstrap],
-        });
+        if (_proxyChannel) _proxyChannel.postMessage({ __twdProxyConfig: _proxyBootstrap });
     } catch (_) {}
 }
 ipcRenderer.on('proxy-state-changed', (_e, payload) => publishProxyState(payload));
-contextBridge.exposeInMainWorld('__twdProxyRouter', { get: () => ({ ..._proxyBootstrap, domains: (_proxyBootstrap.domains || []).slice(), workerDomains: (_proxyBootstrap.workerDomains || []).slice() }) });
+function publishPrivacyState(payload) {
+    _privacyBootstrap = payload && typeof payload === 'object' ? payload : _privacyBootstrap;
+    try {
+        if (_proxyChannel) _proxyChannel.postMessage({ __twdPrivacyConfig: _privacyBootstrap });
+    } catch (_) {}
+    try {
+        contextBridge.executeInMainWorld({
+            func: state => {
+                try { window.dispatchEvent(new CustomEvent('__twd_privacy_config', { detail: state })); } catch (_) {}
+            },
+            args: [{
+                noReadReceipts: _privacyBootstrap.noReadReceipts === true,
+                noTyping: _privacyBootstrap.noTyping === true,
+                noReadForceOn: _privacyBootstrap.noReadForceOn || [],
+                noReadForceOff: _privacyBootstrap.noReadForceOff || [],
+                noTypingForceOn: _privacyBootstrap.noTypingForceOn || [],
+                noTypingForceOff: _privacyBootstrap.noTypingForceOff || [],
+            }],
+        });
+    } catch (_) {}
+}
+ipcRenderer.on('privacy-state-changed', (_e, payload) => publishPrivacyState(payload));
 
 try {
     contextBridge.executeInMainWorld({
-        func: (initial, historyConfig) => {
-            window.__twdProxyState = initial;
-            const proxyWorkers = new Set();
-            const historyEnabled = !!(historyConfig && (historyConfig.showDeleted || historyConfig.editHistory));
+        func: (proxyChannelName, historyConfig) => {
+            const historyEnabled = true;
+            window.addEventListener('__twd_history_config', e => {
+                historyConfig = Object.assign({}, historyConfig || {}, e.detail || {});
+            });
             const historyTracked = new Map();
             const historyByMessageId = new Map();
             const historyDeletedByChat = new Map();
             // A unique query per renderer boot prevents Chromium/Telegram's service worker
             // from reusing an older already-patched transport worker after an app update.
             const proxyWorkerNonce = Date.now().toString(36) + Math.random().toString(36).slice(2);
-            window.addEventListener('__twd_proxy_state', e => {
-                const next = e.detail || window.__twdProxyState || initial;
-                window.__twdProxyState = next;
-                for (const worker of Array.from(proxyWorkers)) {
-                    try { worker.postMessage({ __twdProxyConfig: next }); }
-                    catch (_) { proxyWorkers.delete(worker); }
-                }
-            });
             function historyActiveChatId() {
                 try {
                     const avatar = document.querySelector('#MiddleColumn .MiddleHeader .Avatar[data-peer-id]');
@@ -61,6 +85,11 @@ try {
                     const text = message && message.content && message.content.text;
                     return String(text && text.text != null ? text.text : '');
                 } catch (_) { return ''; }
+            }
+            function historyIsEphemeral(message) {
+                try {
+                    return Number(message && message.ttl) > 0 || Number(message && message.ttlExpiresIn) > 0 || !!(message && message.selfDestructType);
+                } catch (_) { return false; }
             }
             function historyKey(chatId, messageId) {
                 return String(chatId) + ':' + String(messageId);
@@ -103,25 +132,26 @@ try {
                 }
             }
             function historyTrackMessage(update) {
-                if (!historyEnabled || !update || update['@type'] !== 'updateMessage') return;
+                if (!historyEnabled || !update || (update['@type'] !== 'newMessage' && update['@type'] !== 'updateMessage')) return;
                 const message = update.message;
                 if (!message || !message.content) return;
                 const chatId = String(update.chatId != null ? update.chatId : message.chatId != null ? message.chatId : '');
                 const messageId = String(update.id != null ? update.id : message.id != null ? message.id : '');
-                if (!chatId || !messageId) return;
+                if (!chatId || !messageId || !historyIsPrivate(chatId)) return;
                 const active = historyActiveChatId();
-                if (!historyIsPrivate(chatId) && active !== chatId) return;
                 const key = historyKey(chatId, messageId);
                 let previous = historyTracked.get(key);
-                if (!previous && update.isFromNew !== true && active === chatId) previous = historyDomSnapshot(chatId, messageId);
-                const current = { chatId, messageId, text: historyMessageText(message), timestamp: Date.now() };
+                if (!previous && update['@type'] === 'updateMessage' && update.isFromNew !== true && active === chatId) previous = historyDomSnapshot(chatId, messageId);
+                const current = { chatId, messageId, text: historyMessageText(message), ephemeral: historyIsEphemeral(message), outgoing: message.isOutgoing === true || message.is_outgoing === true, timestamp: Date.now() };
                 historyRemember(current);
                 historyEmit({
-                    kind: update.isFromNew === true ? 'new' : 'edit',
+                    kind: (update['@type'] === 'newMessage' || update.isFromNew === true) ? 'new' : 'edit',
                     chatId,
                     messageId,
                     text: current.text,
                     oldText: previous ? String(previous.text || '') : null,
+                    ephemeral: current.ephemeral === true,
+                    outgoing: current.outgoing === true,
                     timestamp: current.timestamp
                 });
             }
@@ -163,7 +193,7 @@ try {
                 return changed ? copy : value;
             }
             function historyScrubPersisted() {
-                if (!historyConfig || historyConfig.showDeleted !== true || !historyDeletedByChat.size) return;
+                if (!historyConfig || (!historyConfig.showDeleted && !historyConfig.showDisappearing) || !historyDeletedByChat.size) return;
                 try {
                     const req = indexedDB.open('tt-data');
                     req.onsuccess = function() {
@@ -193,11 +223,13 @@ try {
                 set.add(String(item.messageId));
             }
             function historyProtectDelete(update) {
-                if (!historyConfig || historyConfig.showDeleted !== true || !update || !Array.isArray(update.ids)) return true;
+                if (!historyConfig || !update || !Array.isArray(update.ids)) return true;
                 const active = historyActiveChatId();
                 const explicitChat = update.chatId != null ? String(update.chatId) : '';
-                const protectedItems = [];
+                if (explicitChat && !historyIsPrivate(explicitChat)) return true;
+                const captured = [];
                 const remaining = [];
+                let blockedAny = false;
                 update.ids.forEach((rawId) => {
                     const messageId = String(rawId);
                     let item = null;
@@ -205,24 +237,30 @@ try {
                         const key = historyKey(explicitChat, messageId);
                         item = historyTracked.get(key) || null;
                         if (!item && active === explicitChat) item = historyDomSnapshot(explicitChat, messageId);
-                        if (item && !historyIsPrivate(explicitChat) && active !== explicitChat) item = null;
                     } else {
                         const key = historyByMessageId.get(messageId);
                         item = key ? historyTracked.get(key) || null : null;
-                        if (item && !historyIsPrivate(item.chatId) && active !== item.chatId) item = null;
-                        if (!item && active && !historyIsPrivate(active)) item = historyDomSnapshot(active, messageId);
+                        if (!item && active) item = historyDomSnapshot(active, messageId);
                     }
-                    if (!item) {
+                    if (!item || !historyIsPrivate(item.chatId)) {
                         remaining.push(rawId);
                         return;
                     }
+                    const ephemeral = item.ephemeral === true;
+                    const show = ephemeral ? historyConfig.showDisappearing === true : historyConfig.showDeleted === true;
+                    const block = show && active === String(item.chatId);
                     historyRemember(item);
-                    historyMarkDeleted(item);
-                    protectedItems.push({ chatId: String(item.chatId), messageId, text: String(item.text || ''), timestamp: Date.now() });
+                    if (block) {
+                        blockedAny = true;
+                        historyMarkDeleted(item);
+                    } else {
+                        remaining.push(rawId);
+                    }
+                    captured.push({ chatId: String(item.chatId), messageId, text: String(item.text || ''), ephemeral, outgoing: item.outgoing === true, timestamp: Date.now() });
                 });
-                if (protectedItems.length) {
-                    historyEmit({ kind: 'delete', items: protectedItems, timestamp: Date.now() });
-                    queueMicrotask(historyScrubPersisted);
+                if (captured.length) {
+                    historyEmit({ kind: 'delete', items: captured, timestamp: Date.now() });
+                    if (blockedAny) queueMicrotask(historyScrubPersisted);
                 }
                 update.ids = remaining;
                 return remaining.length > 0;
@@ -239,14 +277,14 @@ try {
                             kept.push(update);
                             return;
                         }
-                        if (update['@type'] === 'updateMessage') historyTrackMessage(update);
+                        if (update['@type'] === 'newMessage' || update['@type'] === 'updateMessage') historyTrackMessage(update);
                         if (update['@type'] === 'deleteMessages' && !historyProtectDelete(update)) return;
                         kept.push(update);
                     });
                     payload.updates = kept;
                 });
             }
-            if (historyConfig && historyConfig.showDeleted === true && window.IDBObjectStore && !window.__twdHistoryIdbPut) {
+            if (window.IDBObjectStore && !window.__twdHistoryIdbPut) {
                 try {
                     const nativePut = IDBObjectStore.prototype.put;
                     const wrappedPut = function(value, key) {
@@ -267,23 +305,17 @@ try {
                             if (u.hostname === 'web.telegram.org' && u.pathname.startsWith('/a/') && /\/(?:worker-[^/]+|index\.worker-[^/]+)\.js$/i.test(u.pathname)) {
                                 u.searchParams.set('__twd_proxy', '1');
                                 u.searchParams.set('__twd_proxy_rev', proxyWorkerNonce);
+                                u.searchParams.set('__twd_proxy_channel', proxyChannelName);
                                 target = u.toString(); tagged = true;
                             }
                         } catch (_) {}
                         super(target, options);
-                        if (historyEnabled) {
-                            try { this.addEventListener('message', historyHandleWorkerMessage); } catch (_) {}
-                        }
-                        if (tagged) { proxyWorkers.add(this); try { this.postMessage({ __twdProxyConfig: window.__twdProxyState }); } catch (_) {} }
+                        try { this.addEventListener('message', historyHandleWorkerMessage); } catch (_) {}
                     }
                 };
                 Object.defineProperty(window, '__twdNativeWorker', { value: NativeWorker });
             }
-            try {
-                if (!window.__twdProxyChannel) window.__twdProxyChannel = new BroadcastChannel('__twd_proxy_v1');
-                window.__twdProxyChannel.postMessage(initial);
-            } catch (_) {}
-        }, args: [_proxyBootstrap, _historyBootstrap],
+        }, args: [_proxyChannelName, _historyBootstrap],
     });
 } catch (_) {}
 
@@ -339,21 +371,78 @@ if (document.readyState === 'loading') document.addEventListener('DOMContentLoad
 else _tgInstallForegroundObserver();
 
 const TWD_ALLOWED_INVOKE = new Set([
-    'get_settings','get_app_info','get_proxy_status','set_proxy_mode','reset_proxy_auto','reconnect_proxy','save_proxy_options',
+    'get_settings','get_app_info','get_window_state','get_proxy_status','set_proxy_mode','reset_proxy_auto','reconnect_proxy','save_proxy_options',
     'refresh_proxy_domains','test_proxy_connectivity','show_notification','preview_notification','save_settings','toggle_devtools','open_url','open_default_apps',
     'open_folder_dialog','get_downloads','bind_download','forget_download','delete_download','cancel_download',
-    'open_download_folder','open_download_file','clear_cache','fetch_changelog','fetch_changelog_structured',
+    'open_downloads_folder','open_download_folder','open_download_file','clear_cache','fetch_changelog','fetch_changelog_structured',
     'check_update_manual','skip_version','download_update','get_addons','delete_addon','toggle_addon','apply_addons','apply_features',
-    'show_image_context_menu','save_blob','open_addons_folder','report_lang','set_tray_image','get_tray_base',
-    'set_notifications_count'
+    'show_image_context_menu','open_addons_folder','report_lang','set_tray_image','get_tray_base',
+    'set_notifications_count','privacy_allow_read_once'
 ]);
 function twdInvoke(cmd, args) {
     if (!TWD_ALLOWED_INVOKE.has(cmd)) return Promise.reject(new Error('IPC command is not allowed'));
+    if (cmd === 'privacy_allow_read_once') {
+        let peerId = '';
+        try {
+            const raw = String(args && args.peerId || '');
+            if (/^-?\d{1,24}$/.test(raw)) peerId = raw;
+        } catch (_) {}
+        try {
+            if (_proxyChannel) _proxyChannel.postMessage({ __twdPrivacyAllowReadOnce: peerId });
+        } catch (_) {}
+        return Promise.resolve({ ok: true });
+    }
     return ipcRenderer.invoke(cmd, args || {});
+}
+
+async function twdSaveBlob(blobUrl, filename) {
+    const url = String(blobUrl || '');
+    if (!url.startsWith('blob:')) return { error: 'invalid-url' };
+
+    let response;
+    try {
+        response = await fetch(url);
+    } catch (e) {
+        return { error: e && e.message ? e.message : 'blob-fetch-failed' };
+    }
+    if (!response || !response.ok || !response.body) return { error: 'blob-fetch-failed' };
+
+    const totalHeader = Number(response.headers.get('content-length'));
+    const total = Number.isSafeInteger(totalHeader) && totalHeader >= 0 ? totalHeader : 0;
+    const begin = await ipcRenderer.invoke('begin_blob_save', {
+        filename: String(filename || 'file'),
+        total,
+    });
+    if (!begin || begin.error || !begin.streamId) return begin || { error: 'stream-start-failed' };
+
+    const streamId = String(begin.streamId);
+    const reader = response.body.getReader();
+    const MAX_IPC_CHUNK = 1024 * 1024;
+
+    try {
+        while (true) {
+            const next = await reader.read();
+            if (next.done) break;
+            const view = next.value;
+            for (let offset = 0; offset < view.byteLength; offset += MAX_IPC_CHUNK) {
+                const end = Math.min(view.byteLength, offset + MAX_IPC_CHUNK);
+                const chunk = view.buffer.slice(view.byteOffset + offset, view.byteOffset + end);
+                const result = await ipcRenderer.invoke('append_blob_chunk', { streamId, chunk });
+                if (!result || result.error) throw new Error(result && result.error || 'stream-write-failed');
+            }
+        }
+        return await ipcRenderer.invoke('finish_blob_save', { streamId });
+    } catch (e) {
+        try { await ipcRenderer.invoke('abort_blob_save', { streamId }); } catch (_) {}
+        return { error: e && e.message ? e.message : 'blob-stream-failed' };
+    } finally {
+        try { reader.releaseLock(); } catch (_) {}
+    }
 }
 
 contextBridge.exposeInMainWorld('tgBridge', {
     invoke: twdInvoke,
+    saveBlob: twdSaveBlob,
     onDownloadEvent: (cb) => ipcRenderer.on('download-event', (_e, data) => cb(data)),
 
     onNotification: (cb) => ipcRenderer.on('show-notification', (_e, data) => cb(data)),

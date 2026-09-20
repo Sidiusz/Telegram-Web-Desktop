@@ -28,6 +28,10 @@ function normalizeDownloadRecord(raw, fromDisk) {
         path: filePath,
         status,
     };
+    const recv = Number(raw.recv);
+    const total = Number(raw.total);
+    if (Number.isSafeInteger(recv) && recv >= 0) out.recv = recv;
+    if (Number.isSafeInteger(total) && total >= 0) out.total = total;
     const mid = String(raw.mid == null ? '' : raw.mid);
     const peerId = String(raw.peerId == null ? '' : raw.peerId);
     if (/^-?\d{1,32}$/.test(mid)) out.mid = mid;

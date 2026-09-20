@@ -89,9 +89,11 @@ async function telegramTarget(port) {
 
 (async () => {
   const profile = fs.mkdtempSync(path.join(os.tmpdir(), 'twd-smoke-'));
+  const smokeDownloads = path.join(profile, 'downloads');
+  fs.mkdirSync(smokeDownloads, { recursive: true });
   fs.writeFileSync(path.join(profile, 'settings.json'), JSON.stringify({
     proxy_mode: 'always', popup_notifications: true, notif_sound: false,
-    minimize_to_tray: true, proxy_web_fallback: true,
+    minimize_to_tray: true, proxy_web_fallback: true, save_path: smokeDownloads,
   }));
   const port = await freePort();
   const electron = require('electron');
@@ -123,20 +125,53 @@ async function telegramTarget(port) {
     assert.equal(ready, true);
     assert.match(await cdp.eval('location.href'), /^https:\/\/web\.telegram\.org\/a/);
 
-    const proxy = await waitFor(() => cdp.eval('window.__twdProxyRouter && window.__twdProxyRouter.get()'), 15000, 'proxy bridge');
+    const proxy = await waitFor(
+      () => cdp.eval('window.tgBridge && window.tgBridge.invoke("get_proxy_status")'),
+      15000,
+      'proxy status'
+    );
     assert.equal(proxy.active, true);
-    assert.ok(proxy.bridgePort > 0, 'embedded proxy bridge must expose a local port');
+    const proxyGlobals = await cdp.eval('({state:typeof window.__twdProxyState,router:typeof window.__twdProxyRouter,channel:typeof window.__twdProxyChannel})');
+    assert.deepEqual(proxyGlobals, { state: 'undefined', router: 'undefined', channel: 'undefined' });
 
     const blocked = await cdp.eval('window.tgBridge.invoke("__smoke_unknown__").then(()=>"allowed",e=>"blocked:"+e.message)');
     assert.match(blocked, /^blocked:/);
 
     const addons = await cdp.eval('window.tgBridge.invoke("get_addons").then(x=>x.map(a=>a.key))');
     assert.ok(Array.isArray(addons));
-    assert.ok(addons.includes('embedded:desktop_like_standart.js'));
-    assert.ok(addons.includes('embedded:desktop_like_wide.js'));
+    assert.equal(addons.some(k => /^embedded:desktop_like_/i.test(String(k))), false, 'built-in layouts must not appear as user add-ons');
+    const standardLayout = await waitFor(
+      () => cdp.eval('!!document.getElementById("twd-feature-desktop-standard")'),
+      10000,
+      'default built-in desktop layout'
+    );
+    assert.equal(standardLayout, true);
 
     const downloads = await cdp.eval('window.tgBridge.invoke("get_downloads")');
     assert.ok(Array.isArray(downloads));
+
+    // Exercise the real blob streaming path: blob URL lives in the page, preload
+    // reads it as a stream, main writes chunks to a .part file and atomically renames.
+    const blobSaved = await cdp.eval(`(async()=>{
+      const bytes=new Uint8Array(2*1024*1024); bytes.fill(0x5a);
+      const url=URL.createObjectURL(new Blob([bytes],{type:'application/octet-stream'}));
+      try{return await window.tgBridge.saveBlob(url,'smoke-stream.bin');}
+      finally{URL.revokeObjectURL(url);}
+    })()`);
+    assert.equal(blobSaved && blobSaved.ok, true, 'streamed blob must save successfully');
+    assert.ok(Number.isInteger(blobSaved.id) && blobSaved.id > 0);
+    const streamed = await waitFor(async () => {
+      const list = await cdp.eval('window.tgBridge.invoke("get_downloads")');
+      return list.find(x => x.id === blobSaved.id && x.status === 'completed' && x.exists) || null;
+    }, 10000, 'streamed blob registry entry');
+    const streamedPath = path.join(smokeDownloads, streamed.filename);
+    assert.equal(fs.statSync(streamedPath).size, 2 * 1024 * 1024);
+    const fd = fs.openSync(streamedPath, 'r');
+    const first = Buffer.alloc(1);
+    try { fs.readSync(fd, first, 0, 1, 0); } finally { fs.closeSync(fd); }
+    assert.equal(first[0], 0x5a);
+    await cdp.eval(`window.tgBridge.invoke("delete_download",{id:${blobSaved.id}})`);
+    assert.equal(fs.existsSync(streamedPath), false, 'smoke blob file must be deleted after verification');
 
     await waitFor(() => cdp.eval('window.__tgNotifIntercept === true'), 15000, 'notification interception');
     await cdp.eval('window.tgBridge.invoke("show_notification",{title:"TWD smoke",body:"notification pipeline",peerId:"1"}).then(()=>true)');

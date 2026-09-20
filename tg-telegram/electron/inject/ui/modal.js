@@ -1,7 +1,7 @@
 function _escHtml(value){
     return String(value==null?'':value).replace(/[&<>"']/g,function(ch){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[ch];});
 }
-function showModal({title,msg,msgHtml,url,checkLabel,okText,okDanger,cancelText,onOk,onCancel,extraBtn,onExtra}){
+function showModal({title,msg,msgHtml,url,checkLabel,okText,okDanger,cancelText,onOk,onCancel,extraBtn,onExtra,footerNote}){
     const mo=document.createElement('div');mo.className='_mo_';
     const safeMsg=msgHtml!=null?String(msgHtml):_escHtml(msg);
     let cbHtml=checkLabel?'<label class="Checkbox dialog-checkbox" id="_mo_cb_l_"><input type="checkbox" id="_mo_cb_"><div class="Checkbox-main"><span class="label">'+_escHtml(checkLabel)+'</span></div></label>':'';
@@ -11,7 +11,8 @@ function showModal({title,msg,msgHtml,url,checkLabel,okText,okDanger,cancelText,
     const okHtml='<button class="'+cls(!!okDanger)+'" id="_mo_ok_">'+_escHtml(okText||T('ok'))+'</button>';
     const extraHtml=extraBtn?'<button class="'+cls(!!extraBtn.danger)+'" id="_mo_ex_">'+_escHtml(extraBtn.label)+'</button>':'';
     const cancelHtml=hasCancelBtn?'<button class="'+cls(false)+'" id="_mo_cn_">'+_escHtml(cancelText||T('cancel'))+'</button>':'';
-    mo.innerHTML='<div class="modal-dialog"><div class="modal-header"><div class="modal-title">'+_escHtml(title)+'</div></div><div class="modal-content"><div class="_msg_">'+safeMsg+'</div>'+urlHtml+cbHtml+'<div class="dialog-buttons">'+okHtml+extraHtml+cancelHtml+'</div></div></div>';
+    const noteHtml=footerNote?'<div class="dialog-footer-note">'+_escHtml(footerNote)+'</div>':'';
+    mo.innerHTML='<div class="modal-dialog"><div class="modal-header"><div class="modal-title">'+_escHtml(title)+'</div></div><div class="modal-content"><div class="_msg_">'+safeMsg+'</div>'+urlHtml+cbHtml+'<div class="dialog-footer">'+noteHtml+'<div class="dialog-buttons">'+okHtml+extraHtml+cancelHtml+'</div></div></div></div>';
     document.body.appendChild(mo);
     requestAnimationFrame(()=>mo.classList.add('open'));
     let closed=false;
@@ -31,14 +32,15 @@ function showModal({title,msg,msgHtml,url,checkLabel,okText,okDanger,cancelText,
 // список вариантов + ОТМЕНА/СОХРАНИТЬ. Использует те же классы, что и TG
 // (.modal-dialog/.Radio), поэтому выглядит 1-в-1 родным.
 function pickModal(opts){
-    var title=opts.title||'',options=opts.options||[],current=opts.current,onSave=opts.onSave;
+    var title=opts.title||'',options=opts.options||[],current=opts.current,onSave=opts.onSave,footerNote=opts.footerNote||'';
     var sel=current;
     var mo=document.createElement('div');mo.className='_mo_';
     var radios=options.map(function(o){var v=String(o.value==null?'':o.value);return '<label class="Radio'+(v===String(current)?' checked':'')+'"><input type="radio" name="_tgpick_" value="'+_escHtml(v)+'"'+(v===String(current)?' checked':'')+'><div class="Radio-main"><span class="label">'+_escHtml(o.label)+'</span></div></label>';}).join('');
+    var noteHtml=footerNote?'<div class="dialog-footer-note">'+_escHtml(footerNote)+'</div>':'';
     mo.innerHTML='<div class="modal-dialog"><div class="modal-header"><div class="modal-title">'+_escHtml(title)+'</div></div>'
         +'<div class="modal-content"><div class="radio-group _tgpick_grp_ custom-scroll">'+radios+'</div>'
-        +'<div class="dialog-buttons"><button class="Button text primary confirm-dialog-button" id="_pk_ok_">'+_escHtml(T('save_upper'))+'</button>'
-        +'<button class="Button text primary confirm-dialog-button" id="_pk_cn_">'+_escHtml(T('cancel'))+'</button></div></div></div>';
+        +'<div class="dialog-footer">'+noteHtml+'<div class="dialog-buttons"><button class="Button text primary confirm-dialog-button" id="_pk_ok_">'+_escHtml(T('save_upper'))+'</button>'
+        +'<button class="Button text primary confirm-dialog-button" id="_pk_cn_">'+_escHtml(T('cancel'))+'</button></div></div></div></div>';
     document.body.appendChild(mo);requestAnimationFrame(function(){mo.classList.add('open');});
     var labels=mo.querySelectorAll('label.Radio');
     mo.querySelectorAll('input[name=_tgpick_]').forEach(function(inp){inp.addEventListener('change',function(){if(inp.checked){sel=inp.value;labels.forEach(function(l){l.classList.toggle('checked',l.contains(inp));});}});});
