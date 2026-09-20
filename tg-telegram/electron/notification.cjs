@@ -172,7 +172,10 @@ function buildHtml() {
     function initials(s){
         const words=String(s||'').trim().split(/\s+/).filter(Boolean);
         if(!words.length)return'T';
-        return words.slice(0,2).map(function(word){return(word[0]||'').toUpperCase();}).join('')||'T';
+        const first=(words[0][0]||'').toUpperCase();
+        if(words.length===1)return first||'T';
+        const last=(words[words.length-1][0]||'').toUpperCase();
+        return(first+last)||'T';
     }
     function avatarColor(peerId,title){
         const key=String(peerId||title||'Telegram');

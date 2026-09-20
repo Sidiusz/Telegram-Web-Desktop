@@ -878,7 +878,8 @@ test('desktop notification popup follows Telegram toast geometry and has no dead
     assert.match(notif, /function pauseCard\(id\)/);
     assert.match(notif, /function resumeCard\(id\)/);
     assert.match(notif, /function initials\(s\)/);
-    assert.match(notif, /words\.slice\(0,2\)/);
+    assert.match(notif, /words\[0\]\[0\]/);
+    assert.match(notif, /words\[words\.length-1\]\[0\]/);
     assert.match(notif, /function avatarColor\(peerId,title\)/);
     assert.match(notif, /avatarColor\(data\.peerId,title\)/);
     assert.match(notif, /data\.anon\?firstLetter\(title\):initials\(title\)/);
