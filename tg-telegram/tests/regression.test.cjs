@@ -353,7 +353,13 @@ test('message filter stays channel-first, keeps private chats opt-in, and separa
     assert.match(ui, /message_filter_custom/);
     assert.match(lang, /Скрывать рекламу внизу чатов/);
     assert.match(lang, /Скрывать рекламные сообщения в каналах/);
+    assert.match(lang, /Работает только в каналах/);
+    assert.match(lang, /Рекламные хэштеги/);
+    assert.match(lang, /Например: #реклама, #ad, #advertisement/);
+    assert.match(lang, /Фильтровать входящие сообщения в личных чатах/);
     assert.match(lang, /Фильтр сообщений/);
+    assert.match(ui, /filter\.appendChild\(_twdCardDivider\(\)\)/);
+    assert.match(core, /_twd-card-divider_/);
     assert.match(core, /_twd-filter-domain-row_\{margin-inline-start:3rem!important;\}/);
     assert.doesNotMatch(core, /_twd-filter-domain-list_\{[^}]*border-(?:top|bottom)/);
 });
@@ -528,7 +534,11 @@ test('global unread and typing privacy defaults are off and RPC guard is injecte
     assert.match(lang, /Управление исключениями для отдельных чатов/);
     assert.match(ui, /privacy\.appendChild\(_genNativeSettingRow\(ctx\.liEl,T\('twd_privacy_personal'\)/);
     assert.doesNotMatch(ui, /_twdStaticRow\(ctx,T\('twd_privacy_personal'\)/);
-    assert.match(lang, /Отображаются до обновления страницы или перезапуска приложения/);
+    assert.match(lang, /twd_show_messages_desc:\{ru:'Отображаются до обновления страницы или перезапуска приложения'/);
+    assert.match(lang, /twd_save_messages_desc:\{ru:'Сохраняются в локальном хранилище для последующего просмотра через меню действий с чатом'/);
+    assert.doesNotMatch(lang, /twd_show_deleted_desc|twd_show_disappearing_desc|twd_save_deleted_desc|twd_save_disappearing_desc/);
+    assert.match(ui, /card\.appendChild\(_twdPassiveText\(T\('twd_show_messages_desc'\)\)\)/);
+    assert.match(ui, /saved\.appendChild\(_twdPassiveText\(T\('twd_save_messages_desc'\)\)\)/);
     assert.match(lang, /Нечиталка включена/);
     assert.match(lang, /Неписалка выключена/);
     assert.match(read('electron/inject/ui/core.js'), /_twd-privacy-toggle_\._twd-off_\{opacity:\.35;\}/);

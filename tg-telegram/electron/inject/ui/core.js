@@ -152,6 +152,7 @@ html._tgreading_ .bubble.menu-container.shown{opacity:0 !important;pointer-event
 .ListItem-main-icon ._twd-filled-glyph_{width:1.5rem;height:1.5rem;display:block;fill:#fff;color:#fff;}
 ._twd-filetype_{width:1.875rem!important;height:1.875rem!important;border-radius:.625rem!important;display:flex!important;align-items:center!important;justify-content:center!important;flex-shrink:0;font-size:.625rem!important;font-weight:700;color:#fff!important;text-transform:uppercase;}
 ._twd-clarification_{margin:.5rem 1rem 0!important;padding:.75rem 0 .25rem!important;border-top:1px solid var(--color-borders,rgba(255,255,255,.1));}
+._twd-card-divider_{height:1px;margin:.5rem 1rem;border:0;background:var(--color-borders,rgba(255,255,255,.1));}
 ._twd-panel-card_{margin-top:.5rem;}
 ._twd-range-row_ .multiline-item{min-width:9rem;}
 ._twd-range-control_{margin-inline-start:auto;display:flex;align-items:center;gap:.75rem;width:22rem;min-width:22rem;flex:0 0 22rem;}

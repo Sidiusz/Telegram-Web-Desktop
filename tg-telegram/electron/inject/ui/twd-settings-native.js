@@ -23,6 +23,9 @@ function _twdPassiveText(text){
     el.textContent=String(text||'');
     return el;
 }
+function _twdCardDivider(){
+    var el=document.createElement('div');el.className='_twd-card-divider_';return el;
+}
 function _twdSwitchRow(ctx,title,sub,checked,onChange){
     var row=_genToggle(title,!!checked,onChange,sub||'');
     row.classList.add('_twd-checkbox-setting_');
@@ -525,10 +528,11 @@ function _twdRenderMessages(content,ctx,s){
     filter.appendChild(_twdSwitchRow(ctx,T('twd_message_filter_enabled'),T('twd_message_filter_enabled_desc'),s.message_filter_enabled===true,function(v){
         _twdConfigureMessageFilter({message_filter_enabled:v});
     }));
+    filter.appendChild(_twdCardDivider());
     filter.appendChild(_twdSwitchRow(ctx,T('twd_message_filter_standard'),T('twd_message_filter_standard_desc'),s.message_filter_standard!==false,function(v){
         _twdConfigureMessageFilter({message_filter_standard:v});
     }));
-    filter.appendChild(_twdSwitchRow(ctx,T('twd_message_filter_hashtags'),' ',s.message_filter_hashtags!==false,function(v){
+    filter.appendChild(_twdSwitchRow(ctx,T('twd_message_filter_hashtags'),T('twd_message_filter_hashtags_desc'),s.message_filter_hashtags!==false,function(v){
         _twdConfigureMessageFilter({message_filter_hashtags:v});
     }));
 
@@ -547,6 +551,7 @@ function _twdRenderMessages(content,ctx,s){
         _twdConfigureMessageFilter({message_filter_ref_links:v});
     },refBody));
     filter.appendChild(refBody);
+    filter.appendChild(_twdCardDivider());
 
     filter.appendChild(_twdSwitchRow(ctx,T('twd_message_filter_private'),T('twd_message_filter_private_desc'),s.message_filter_private===true,function(v){
         _twdConfigureMessageFilter({message_filter_private:v});
@@ -561,21 +566,23 @@ function _twdRenderMessages(content,ctx,s){
     ctx.section(T('twd_message_filter'),filter);
 
     var card=ctx.card();
-    card.appendChild(_twdSwitchRow(ctx,T('twd_show_deleted'),T('twd_show_deleted_desc'),!!s.messages_show_deleted,function(v){
+    card.appendChild(_twdSwitchRow(ctx,T('twd_show_deleted'),'',!!s.messages_show_deleted,function(v){
         _twdConfigureHistory({messages_show_deleted:v});
     }));
-    card.appendChild(_twdSwitchRow(ctx,T('twd_show_disappearing'),T('twd_show_disappearing_desc'),!!s.messages_show_disappearing,function(v){
+    card.appendChild(_twdSwitchRow(ctx,T('twd_show_disappearing'),'',!!s.messages_show_disappearing,function(v){
         _twdConfigureHistory({messages_show_disappearing:v});
     }));
+    card.appendChild(_twdPassiveText(T('twd_show_messages_desc')));
     ctx.section(T('twd_message_visibility'),card);
 
     var saved=ctx.card();
-    saved.appendChild(_twdSwitchRow(ctx,T('twd_save_deleted'),T('twd_save_deleted_desc'),!!s.messages_save_deleted,function(v){
+    saved.appendChild(_twdSwitchRow(ctx,T('twd_save_deleted'),'',!!s.messages_save_deleted,function(v){
         _twdConfigureHistory({messages_save_deleted:v});
     }));
-    saved.appendChild(_twdSwitchRow(ctx,T('twd_save_disappearing'),T('twd_save_disappearing_desc'),!!s.messages_save_disappearing,function(v){
+    saved.appendChild(_twdSwitchRow(ctx,T('twd_save_disappearing'),'',!!s.messages_save_disappearing,function(v){
         _twdConfigureHistory({messages_save_disappearing:v});
     }));
+    saved.appendChild(_twdPassiveText(T('twd_save_messages_desc')));
     saved.appendChild(_twdSwitchRow(ctx,T('twd_edit_history'),T('twd_edit_history_desc'),!!s.messages_edit_history,function(v){
         _twdConfigureHistory({messages_edit_history:v});
     }));
