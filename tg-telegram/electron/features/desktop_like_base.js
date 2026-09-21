@@ -57,6 +57,7 @@
         }
         #MiddleColumn.tgdl-private .MessageList.no-avatars .Message.own:not(.is-in-document-group):has(.message-content.media) .message-content-wrapper {
             display: flex !important;
+            flex-direction: column !important;
             justify-content: flex-start !important;
             align-items: flex-start !important;
         }
@@ -106,6 +107,7 @@
         }
         #MiddleColumn .MessageList:not(.no-avatars) .Message.own:not(.is-in-document-group):has(.message-content.media) .message-content-wrapper {
             display: flex !important;
+            flex-direction: column !important;
             justify-content: flex-start !important;
             align-items: flex-start !important;
         }
@@ -146,6 +148,21 @@
             bottom: -1px !important;
             top: auto !important;
             transform: none !important;
+        }
+
+        /* Telegram renders outside reactions as a sibling of the bubble inside
+           message-content-wrapper. Desktop-left alignment must keep that sibling
+           below the bubble instead of letting it occupy the free space at the side. */
+        #MiddleColumn .Message .message-content-wrapper:has(> .Reactions.is-outside) {
+            display: flex !important;
+            flex-direction: column !important;
+            align-items: flex-start !important;
+        }
+        #MiddleColumn .Message .message-content-wrapper > .Reactions.is-outside {
+            width: fit-content !important;
+            max-width: 100% !important;
+            align-self: flex-start !important;
+            flex-direction: row !important;
         }
         #MiddleColumn.tgdl-private .MessageList.no-avatars .Message.own .message-action-buttons-container {
             left: auto !important;

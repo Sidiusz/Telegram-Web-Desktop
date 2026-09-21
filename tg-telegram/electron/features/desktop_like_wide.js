@@ -18,10 +18,10 @@
                 align-self: center !important;
             }
 
-            /* Remove the top fade that becomes visible under the widened header. */
+            /* Fade messages symmetrically at both viewport edges. */
             #MiddleColumn .MessageList {
-                -webkit-mask-image: linear-gradient(to bottom, rgb(0,0,0) 0px, rgb(0,0,0) calc(100% - 64px), rgba(0,0,0,0.24) 100%) !important;
-                mask-image: linear-gradient(to bottom, rgb(0,0,0) 0px, rgb(0,0,0) calc(100% - 64px), rgba(0,0,0,0.24) 100%) !important;
+                -webkit-mask-image: linear-gradient(to bottom, rgba(0,0,0,0.24) 0px, rgb(0,0,0) 64px, rgb(0,0,0) calc(100% - 64px), rgba(0,0,0,0.24) 100%) !important;
+                mask-image: linear-gradient(to bottom, rgba(0,0,0,0.24) 0px, rgb(0,0,0) 64px, rgb(0,0,0) calc(100% - 64px), rgba(0,0,0,0.24) 100%) !important;
             }
 
             #MiddleColumn .middle-column-footer { margin-left: 0 !important; }

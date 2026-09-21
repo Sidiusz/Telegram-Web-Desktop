@@ -12,6 +12,12 @@
                 padding-left: 0 !important;
             }
 
+            /* Match Wide: messages fade at both the top and bottom edges. */
+            #MiddleColumn .MessageList {
+                -webkit-mask-image: linear-gradient(to bottom, rgba(0,0,0,0.24) 0px, rgb(0,0,0) 64px, rgb(0,0,0) calc(100% - 64px), rgba(0,0,0,0.24) 100%) !important;
+                mask-image: linear-gradient(to bottom, rgba(0,0,0,0.24) 0px, rgb(0,0,0) 64px, rgb(0,0,0) calc(100% - 64px), rgba(0,0,0,0.24) 100%) !important;
+            }
+
             /* Standard header follows the same left edge as messages. */
             #MiddleColumn .MiddleHeader {
                 margin-left: 0 !important;
