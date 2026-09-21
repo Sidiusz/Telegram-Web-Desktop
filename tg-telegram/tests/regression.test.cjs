@@ -479,7 +479,9 @@ test('global unread and typing privacy defaults are off and RPC guard is injecte
     assert.match(ui, /e\.key!==\'Enter\'&&e\.key!==\' \'/);
     assert.match(lang, /Нечиталка везде/);
     assert.match(lang, /Неписалка везде/);
-    assert.match(lang, /Персональные настройки/);
+    assert.match(lang, /Менеджер нечиталки\/неписалки/);
+    assert.match(lang, /Управление исключениями для отдельных чатов/);
+    assert.match(lang, /Отображаются до обновления страницы или перезапуска приложения/);
     assert.match(lang, /Нечиталка включена/);
     assert.match(lang, /Неписалка выключена/);
     assert.match(read('electron/inject/ui/core.js'), /_twd-privacy-toggle_\._twd-off_\{opacity:\.35;\}/);
