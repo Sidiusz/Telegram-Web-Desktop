@@ -326,6 +326,7 @@ test('message filter stays channel-first, keeps private chats opt-in, and separa
     const ui = read('electron/inject/ui/twd-settings-native.js');
     const lang = read('electron/inject/ui/lang.js');
     const settings = read('electron/settings.cjs');
+    const core = read('electron/inject/ui/core.js');
 
     assert.match(settings, /message_filter_enabled: false/);
     assert.match(settings, /message_filter_private: false/);
@@ -350,6 +351,8 @@ test('message filter stays channel-first, keeps private chats opt-in, and separa
     assert.match(lang, /Скрывать рекламу внизу чатов/);
     assert.match(lang, /Скрывать рекламные сообщения в каналах/);
     assert.match(lang, /Фильтр сообщений/);
+    assert.match(core, /_twd-filter-domain-row_\{margin-inline-start:3rem!important;\}/);
+    assert.doesNotMatch(core, /_twd-filter-domain-list_\{[^}]*border-(?:top|bottom)/);
 });
 
 const { UpstreamHealth, DEFAULT_COOLDOWN_MS } = require('../electron/tg-flowseal-health.cjs');
