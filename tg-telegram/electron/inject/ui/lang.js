@@ -86,7 +86,7 @@ var L={
     twd_message_display:{ru:'Интерфейс чатов', en:'Chat interface'},
     twd_message_visibility:{ru:'Удалённые и исчезающие', en:'Deleted and disappearing'},
     twd_message_storage:{ru:'История сообщений', en:'Message history'},
-    twd_clear_history:{ru:'Очистить историю сообщений', en:'Clear message history'},
+    twd_clear_history:{ru:'Очистить сохранённую историю сообщений', en:'Clear saved message history'},
     twd_clear_history_desc:{ru:'Удалить сохранённые удаления, исчезающие сообщения и версии редактирования', en:'Delete saved deletions, disappearing messages, and edit versions'},
     twd_clear_history_confirm:{ru:'Очистить всю сохранённую историю сообщений?', en:'Clear all saved message history?'},
     twd_history_cleared:{ru:'История сообщений очищена', en:'Message history cleared'},
