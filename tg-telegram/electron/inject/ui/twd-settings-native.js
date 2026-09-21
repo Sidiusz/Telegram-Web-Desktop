@@ -240,14 +240,8 @@ function _twdConfigureMessageFilter(patch){
 function _twdDropExtendedPinScriptCache(){
     if(!window.caches||typeof caches.keys!=='function')return Promise.resolve();
     return caches.keys().then(function(names){
-        return Promise.all(names.map(function(name){
-            return caches.open(name).then(function(cache){
-                return cache.keys().then(function(reqs){
-                    return Promise.all(reqs.filter(function(req){
-                        try{return /\/a\/assets\/(?:calls-|main-)[^/]*\.js(?:\?|$)/i.test(new URL(req.url).pathname+new URL(req.url).search);}catch(_){return false;}
-                    }).map(function(req){return cache.delete(req);}));
-                });
-            });
+        return Promise.all(names.filter(function(name){return /^tt-assets(?:$|-)/.test(String(name||''));}).map(function(name){
+            return caches.delete(name);
         }));
     }).catch(function(){});
 }

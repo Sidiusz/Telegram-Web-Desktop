@@ -783,8 +783,9 @@ test('custom UI stays inside Telegram Settings and keeps native navigation seman
     assert.match(twd, /footerNote:T\('twd_reload_notice'\)/);
     assert.match(twd, /INV\('apply_features'\)/);
     assert.match(twd, /function _twdDropExtendedPinScriptCache\(/);
-    assert.match(twd, /calls-\|main-/);
-    assert.match(twd, /cache\.delete\(req\)/);
+    assert.match(twd, /\^tt-assets\(\?:\$\|-\)/);
+    assert.match(twd, /caches\.delete\(name\)/);
+    assert.doesNotMatch(twd.slice(twd.indexOf('function _twdDropExtendedPinScriptCache'),twd.indexOf('function _twdSetExtendedPins')), /tt-media|tt-media-avatars/);
     assert.match(twd, /_twdDropExtendedPinScriptCache\(\)\.then\(function\(\)\{return INV\('prepare_extended_pins'\);\}\)/);
     assert.match(preload, /'prepare_extended_pins'/);
     assert.match(ipc, /handle\('prepare_extended_pins', async/);
