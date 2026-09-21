@@ -54,9 +54,8 @@ jobs:
           Copy-Item $source $installer -Force
           if (gh release view $version *> $null) {
             if (Test-Path $notes) {
-              gh release edit $version --title $version --notes-file $notes --latest
+              gh release edit $version --title $version --notes-file $notes
             }
-            gh release upload $version $installer --clobber
           } elseif (Test-Path $notes) {
             gh release create $version $installer --title $version --notes-file $notes --verify-tag --latest
           } else {
