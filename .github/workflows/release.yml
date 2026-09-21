@@ -55,7 +55,8 @@ jobs:
           if ($LASTEXITCODE -eq 0 -and $releaseId) {
             if (Test-Path $notes) {
               $payloadPath = Join-Path $env:RUNNER_TEMP 'release-notes.json'
-              $payload = @{ name = $version; body = (Get-Content $notes -Raw); draft = $false; prerelease = $false } | ConvertTo-Json -Compress
+              $notesText = [IO.File]::ReadAllText((Resolve-Path $notes), [Text.Encoding]::UTF8)
+              $payload = @{ name = $version; body = $notesText; draft = $false; prerelease = $false } | ConvertTo-Json -Compress
               [IO.File]::WriteAllText($payloadPath, $payload, [Text.UTF8Encoding]::new($false))
               gh api --method PATCH "repos/$env:GITHUB_REPOSITORY/releases/$releaseId" --input $payloadPath | Out-Null
               if ($LASTEXITCODE -ne 0) { throw "Failed to update release $version notes" }
