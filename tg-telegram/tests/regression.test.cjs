@@ -481,6 +481,8 @@ test('global unread and typing privacy defaults are off and RPC guard is injecte
     assert.match(lang, /Неписалка везде/);
     assert.match(lang, /Менеджер нечиталки\/неписалки/);
     assert.match(lang, /Управление исключениями для отдельных чатов/);
+    assert.match(ui, /privacy\.appendChild\(_genNativeSettingRow\(ctx\.liEl,T\('twd_privacy_personal'\)/);
+    assert.doesNotMatch(ui, /_twdStaticRow\(ctx,T\('twd_privacy_personal'\)/);
     assert.match(lang, /Отображаются до обновления страницы или перезапуска приложения/);
     assert.match(lang, /Нечиталка включена/);
     assert.match(lang, /Неписалка выключена/);
@@ -717,8 +719,8 @@ test('custom UI stays inside Telegram Settings and keeps native navigation seman
     assert.match(lang, /twd_history_scope_client:\{ru:'Активный процесс'/);
     assert.doesNotMatch(lang, /twd_history_scope_client:\{ru:'Пока открыт клиент'/);
     assert.doesNotMatch(lang, /twd_history_scope:\{ru:'Как сохранять'/);
-    assert.match(lang, /twd_edit_history_desc:\{ru:'[^']*«\(ред\.\)»/);
-    assert.doesNotMatch(lang, /twd_edit_history_desc:\{ru:'[^']*"\(ред\.\)"/);
+    assert.match(lang, /twd_edit_history_desc:\{ru:'Для просмотра выберите соответствующий пункт в меню действий с сообщением\.'/);
+    assert.doesNotMatch(lang, /twd_edit_history_desc:\{ru:'[^']*«\(ред\.\)»/);
     assert.doesNotMatch(lang, /в зависимости от режима «Как сохранять»/);
     assert.match(twd, /value:'chat'/);
     assert.match(twd, /value:'client'/);

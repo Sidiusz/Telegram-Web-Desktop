@@ -54,7 +54,7 @@ var L={
     twd_save_disappearing:{ru:'Сохранять все исчезающие сообщения', en:'Save all disappearing messages'},
     twd_save_disappearing_desc:{ru:'Сохраняет сообщения в локальное хранилище для последующего просмотра в любое время через меню действий с чатом', en:'Saves messages to local storage for later viewing at any time from the chat actions menu'},
     twd_edit_history:{ru:'Сохранять историю редактирования всех сообщений', en:'Save edit history for all messages'},
-    twd_edit_history_desc:{ru:'Для просмотра необходимо нажать на «(ред.)» на любом измененном сообщении или выбрать соответствующий пункт из меню действий с сообщением.', en:'To view it, click “(edited)” on any edited message or choose the corresponding item from the message actions menu.'},
+    twd_edit_history_desc:{ru:'Для просмотра выберите соответствующий пункт в меню действий с сообщением.', en:'To view it, choose the corresponding item from the message actions menu.'},
     twd_save_public:{ru:'Сохранять публичные чаты', en:'Save public chats'},
     twd_save_public_desc:{ru:'Включает историю сообщений для групп и каналов', en:'Enables message history for groups and channels'},
     twd_history_scope:{ru:'Метод сохранения сообщений', en:'Message storage method'},

@@ -466,9 +466,9 @@ function _twdRenderMessages(content,ctx,s){
         _twdSave({privacy_no_typing:v});
     }));
     var personalCount=_twdPrivacyPeerIds(s).length;
-    privacy.appendChild(_twdStaticRow(ctx,T('twd_privacy_personal'),T('twd_privacy_personal_desc'),personalCount?String(personalCount):'',function(){
+    privacy.appendChild(_genNativeSettingRow(ctx.liEl,T('twd_privacy_personal'),T('twd_privacy_personal_desc'),personalCount?String(personalCount):'',function(){
         _twdNavigateNative('privacy_peers');
-    },'user','blue'));
+    }));
     ctx.section(T('twd_privacy'),privacy);
 
     var card=ctx.card();
