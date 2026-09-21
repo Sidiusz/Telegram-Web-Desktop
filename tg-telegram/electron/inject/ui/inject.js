@@ -3,6 +3,18 @@
 function ensurePanels(){}
 
 // ── ИНЖЕКТ МЕНЮ: Строго по структуре DOM без догадок ────────────────────
+function _twdNativeMenuSeparator(preferredRoot){
+    var roots=[];
+    if(preferredRoot)roots.push(preferredRoot);
+    document.querySelectorAll('.bubble.menu-container').forEach(function(x){if(roots.indexOf(x)<0)roots.push(x);});
+    for(var r=0;r<roots.length;r++){
+        var hit=Array.from(roots[r].children||[]).find(function(el){
+            return el.tagName==='DIV'&&!el.hasAttribute('role')&&!String(el.className||'').includes('MenuItem')&&el.innerHTML.trim()==='';
+        });
+        if(hit)return hit.cloneNode(false);
+    }
+    var fallback=document.createElement('div');fallback.className='h039vb1K NGKaFgra';return fallback;
+}
 function injectMenu(){
     // Ищем иконку "Избранное" — она всегда есть в главном меню
     const savedIcons = document.querySelectorAll('.icon-saved-messages');
@@ -41,13 +53,8 @@ function injectMenu(){
             return;
         }
 
-        // Динамически берем классы разделителя из DOM, чтобы не сломалось при обновлениях ТГ (заменяет h039vb1K NGKaFgra)
-        let sepClass = 'h039vb1K NGKaFgra'; // дефолт на крайний случай
-        const existingSep = Array.from(bubble.children).find(el => el.tagName === 'DIV' && !el.hasAttribute('role') && !el.className.includes('MenuItem') && el.innerHTML.trim() === '');
-        if(existingSep) sepClass = existingSep.className;
-
-        const sep1 = document.createElement('div'); sep1.className = sepClass;
-        const sep2 = document.createElement('div'); sep2.className = sepClass;
+        const sep1 = _twdNativeMenuSeparator(bubble);
+        const sep2 = _twdNativeMenuSeparator(bubble);
 
         const dl = mi('_tgmi_dl_', 'icon-download', T('downloads'), () => openDownloadsNative());
         const ad = mi('_tgmi_ad_', 'icon-bots', T('addons'), () => openAddonsNative());

@@ -492,9 +492,9 @@ test('global unread and typing privacy defaults are off and RPC guard is injecte
     assert.match(lang, /Выключить неписалку/);
     const bootstrap = read('electron/inject/ui/bootstrap.js');
     assert.match(bootstrap, /_twd-chat-privacy-read_/);
-    assert.match(bootstrap, /_twd-chat-privacy-separator_/);
-    assert.match(read('electron/inject/ui/core.js'), /_twd-chat-privacy-separator_\{height:1px!important;margin:5px 10px!important/);
-    assert.match(read('electron/inject/ui/core.js'), /background:rgba\(255,255,255,\.35\)!important/);
+    assert.match(bootstrap, /_twdNativeMenuSeparator\(host\)/);
+    assert.match(read('electron/inject/ui/inject.js'), /function _twdNativeMenuSeparator\(preferredRoot\)/);
+    assert.doesNotMatch(read('electron/inject/ui/core.js'), /_twd-chat-privacy-separator_/);
     assert.match(read('electron/inject/ui/core.js'), /_twd-crossed-pencil_::after/);
     assert.match(bootstrap, /typingOn\?'icon-edit'\:'icon-edit _twd-crossed-pencil_'/);
     assert.match(bootstrap, /readOn\?'icon-eye'\:'icon-eye-crossed'/);

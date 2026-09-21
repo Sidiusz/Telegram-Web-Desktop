@@ -25,7 +25,6 @@ const CSS=`
 ._mo_ .dialog-buttons{flex-flow:row-reverse wrap;justify-content:flex-start;gap:.5rem 1rem;display:flex;margin-left:auto;flex:0 0 auto;}
 ._mo_ .confirm-dialog-button{width:auto;height:auto;font-weight:var(--font-weight-semibold,500);text-align:right;white-space:pre-wrap;flex:none;}
 ._mo_ .dialog-checkbox{margin:.25rem -1.125rem 0;}
-._twd-chat-privacy-separator_{height:1px!important;margin:5px 10px!important;background:rgba(255,255,255,.35)!important;border:0!important;border-radius:0!important;pointer-events:none!important;flex:none!important;}
 ._twd-crossed-pencil_{position:relative!important;}
 ._twd-crossed-pencil_::after{content:'';position:absolute;width:1.15rem;height:1.5px;left:.15rem;top:.68rem;background:currentColor;border-radius:0!important;transform:rotate(-45deg);transform-origin:center;pointer-events:none;}
 /* «Прочитать всё» из трея: помечаем чаты прочитанными через скрытое контекстное

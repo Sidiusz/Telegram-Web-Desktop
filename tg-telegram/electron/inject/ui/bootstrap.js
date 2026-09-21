@@ -641,8 +641,8 @@ window.__tgNotif=(function(){
                 if(readOn)clearUnreadKeep(peerId);
                 INV('save_settings',{settings:patch}).then(refreshPrivacyCfg).catch(function(){});closeMenu();
             });
-            var sepTop=document.createElement('div');sepTop.className='_twd-chat-privacy-separator_';
-            var sepBottom=document.createElement('div');sepBottom.className='_twd-chat-privacy-separator_';
+            var sepTop=_twdNativeMenuSeparator(host);
+            var sepBottom=_twdNativeMenuSeparator(host);
             if(nativeRead){host.insertBefore(sepTop,nativeRead);host.insertBefore(typing,nativeRead);host.insertBefore(read,nativeRead);host.insertBefore(sepBottom,nativeRead);}
             else{host.appendChild(sepTop);host.appendChild(typing);host.appendChild(read);host.appendChild(sepBottom);}
             try{_twdFitMenuViewport(host);}catch(_){}
