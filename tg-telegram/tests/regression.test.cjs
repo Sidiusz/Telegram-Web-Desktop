@@ -537,7 +537,7 @@ test('global unread and typing privacy defaults are off and RPC guard is injecte
     assert.match(lang, /twd_show_messages_desc:\{ru:'Отображаются до обновления страницы или перезапуска приложения'/);
     assert.match(lang, /twd_save_messages_desc:\{ru:'Сохраняются в локальном хранилище для последующего просмотра через меню действий с чатом'/);
     assert.doesNotMatch(lang, /twd_show_deleted_desc|twd_show_disappearing_desc|twd_save_deleted_desc|twd_save_disappearing_desc/);
-    assert.match(ui, /card\.appendChild\(_twdPassiveText\(T\('twd_show_messages_desc'\)\)\)/);
+    assert.match(ui, /visibility\.appendChild\(_twdPassiveText\(T\('twd_show_messages_desc'\)\)\)/);
     assert.match(ui, /saved\.appendChild\(_twdPassiveText\(T\('twd_save_messages_desc'\)\)\)/);
     assert.match(lang, /Нечиталка включена/);
     assert.match(lang, /Неписалка выключена/);
@@ -816,10 +816,12 @@ test('custom UI stays inside Telegram Settings and keeps native navigation seman
     assert.doesNotMatch(twd, /function _twdRenderAppearance\(/);
     assert.doesNotMatch(twd, /\['appearance','visual_interface'/);
     assert.match(twd, /ctx\.section\(T\('twd_message_display'\),display\)/);
-    assert.match(twd, /ctx\.section\(T\('twd_message_visibility'\),card\)/);
-    assert.match(lang, /twd_message_display:\{ru:'Интерфейс чатов'/);
-    assert.match(lang, /twd_message_visibility:\{ru:'Удалённые и исчезающие'/);
+    assert.match(twd, /ctx\.section\(T\('twd_message_visibility'\),visibility\)/);
+    assert.match(lang, /twd_message_display:\{ru:'Чаты'/);
+    assert.match(lang, /twd_message_visibility:\{ru:'Отображение сообщений'/);
     assert.match(lang, /twd_message_storage:\{ru:'История сообщений'/);
+    assert.match(lang, /twd_extended_pins:\{ru:'Расширенные закрепления чатов'/);
+    assert.ok(twd.indexOf("ctx.section(T('twd_message_visibility'),visibility)") < twd.indexOf("ctx.section(T('twd_privacy'),privacy)"), 'message visibility must sit directly after the first chat section');
     assert.doesNotMatch(twd, /_twdStaticRow\(ctx,T\('twd_layout'/);
     assert.match(twd, /messages_show_deleted/);
     assert.match(twd, /messages_show_disappearing/);
@@ -1088,7 +1090,10 @@ test('service UI Lab stays hidden and reuses native builders', () => {
     assert.match(settings, /10-count/);
     assert.match(settings, /openUiLabNative\(\)/);
     const twd = read('electron/inject/ui/twd-settings-native.js');
-    assert.match(twd, /_wireUiLabUnlock\(lab\)/);
+    assert.match(twd, /_wireUiLabUnlock\(ver\)/);
+    assert.doesNotMatch(twd, /_wireUiLabUnlock\(lab\)/);
+    assert.doesNotMatch(twd, /_twdStaticRow\(ctx,'UI Lab'/);
+    assert.match(twd, /ctx\.section\(T\('twd_app_section'\),card\)/);
 });
 
 test('desktop notification popup follows Telegram toast geometry and has no dead settings flags', () => {
@@ -1217,4 +1222,47 @@ test('proxy stall recovery activates auto proxy and reconnects without heartbeat
     assert.match(route, /state\.mode === 'auto' && !state\.autoLatched/);
     assert.match(route, /persistAutoLatch\(reason === 'renderer-network-stall' \? 'direct-network-stall'/);
     assert.match(route, /state\.reconnectEpoch\+\+/);
+});
+
+test('desktop-like modes keep reactions below messages and fade both list edges', () => {
+    const base = read('electron/features/desktop_like_base.js');
+    const standard = read('electron/features/desktop_like_standard.js');
+    const wide = read('electron/features/desktop_like_wide.js');
+    assert.match(base, /message-content-wrapper:has\(> \.Reactions\.is-outside\)/);
+    assert.match(base, /flex-direction: column !important/);
+    assert.match(base, /> \.Reactions\.is-outside \{[\s\S]*width: fit-content !important[\s\S]*flex-direction: row !important/);
+    assert.match(standard, /rgba\(0,0,0,0\.24\) 0px, rgb\(0,0,0\) 64px, rgb\(0,0,0\) calc\(100% - 64px\), rgba\(0,0,0,0\.24\) 100%/);
+    assert.match(wide, /rgba\(0,0,0,0\.24\) 0px, rgb\(0,0,0\) 64px, rgb\(0,0,0\) calc\(100% - 64px\), rgba\(0,0,0,0\.24\) 100%/);
+});
+
+test('update modal sanitizes release Markdown and changelog opens once per app version', () => {
+    const notif = read('electron/inject/ui/notif-ui.js');
+    assert.match(notif, /function _updPlainNotes\(notes\)/);
+    assert.match(notif, /_clSelectLanguage\(src\)/);
+    assert.match(notif, /openChangelogNative\(\)/);
+    assert.match(notif, /whatsnew_shown_version===ver/);
+    assert.match(notif, /whatsnew_shown_version:ver/);
+    assert.doesNotMatch(notif, /WHATSNEW_VERSION/);
+
+    const source = notif.match(/function _updPlainNotes\(notes\)\{[\s\S]*?\n\}/)?.[0];
+    assert.ok(source, 'update-note sanitizer source must be present');
+    const context = {
+        _clSelectLanguage: s => s,
+        _clPlainMarkdown: s => String(s).replace(/\*\*([^*]+)\*\*/g, '$1').replace(/`([^`]+)`/g, '$1'),
+    };
+    vm.createContext(context);
+    vm.runInContext(source, context);
+    assert.equal(
+        context._updPlainNotes('## Исправлено\n\n- **Уведомления** теперь работают\n- `Поиск` исправлен'),
+        'Исправлено\n\n• Уведомления теперь работают\n• Поиск исправлен'
+    );
+    assert.equal(
+        context._updPlainNotes('**Full Changelog**: https://github.com/Sidiusz/Telegram-Web-Desktop/compare/1.3.0...1.3.1'),
+        ''
+    );
+});
+
+test('package version is bumped to 1.3.2', () => {
+    assert.equal(JSON.parse(read('package.json')).version, '1.3.2');
+    assert.equal(JSON.parse(read('package-lock.json')).version, '1.3.2');
 });

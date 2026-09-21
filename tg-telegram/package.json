@@ -1,7 +1,7 @@
 {
   "name": "com.sidiusz.telegram-web",
   "productName": "Telegram Web Desktop",
-  "version": "1.3.1",
+  "version": "1.3.2",
   "description": "Desktop client wrapper for Telegram Web A",
   "author": "Sidiusz",
   "type": "commonjs",

@@ -42,6 +42,26 @@ function showCornerNotif(data){
 if(window.tgBridge){window.tgBridge.onNotification(function(data){showCornerNotif(data);});}
 
 // ── Обновления ────────────────────────────────────────────────────────────
+function _updPlainNotes(notes){
+    var src=String(notes||'').replace(/\r/g,'');
+    try{if(typeof _clSelectLanguage==='function')src=_clSelectLanguage(src);}catch(e){}
+    var out=[],lastBlank=true;
+    src.split('\n').forEach(function(line){
+        var raw=String(line||'').trim();
+        if(!raw){if(!lastBlank&&out.length){out.push('');lastBlank=true;}return;}
+        if(/^<!--/.test(raw))return;
+        if(/^\*\*?Full Changelog\*\*?\s*:/i.test(raw)||/^Full Changelog\s*:/i.test(raw))return;
+        if(/^https:\/\/github\.com\/[^\s]+\/compare\//i.test(raw))return;
+        var bullet=/^(?:[-+•]|\*(?!\*))\s+/.test(raw);
+        raw=raw.replace(/^#{1,6}\s+/,'').replace(/^(?:[-+•]|\*(?!\*))\s+/,'');
+        try{if(typeof _clPlainMarkdown==='function')raw=_clPlainMarkdown(raw);}catch(e){}
+        raw=raw.replace(/\*\*([^*]+)\*\*/g,'$1').replace(/`([^`]+)`/g,'$1').trim();
+        if(!raw)return;
+        out.push((bullet?'• ':'')+raw);lastBlank=false;
+    });
+    while(out.length&&!out[out.length-1])out.pop();
+    return out.join('\n').replace(/\n{3,}/g,'\n\n').trim();
+}
 async function showUpdateModal(data){
     const verLine=_escHtml(T('upd_avail'))+' <b>v'+_escHtml(data.version)+'</b>'+(data.current?' ('+_escHtml(T('upd_now'))+': v'+_escHtml(data.current)+')':'');
     const clBox='<div id="_upd_cl_" class="_upd_cl_ custom-scroll">'+_escHtml(T('loading'))+'</div>';
@@ -55,14 +75,16 @@ async function showUpdateModal(data){
         onOk:async()=>{showUpdateProgress(fname,data.version);},
         onExtra:async()=>{await INV('skip_version',{version:data.version});},
     });
-    // notes из релиза приходят в событии — показываем сразу; иначе дёргаем fetch_changelog.
-    if(data.notes&&data.notes.trim()){
-        const el=document.getElementById('_upd_cl_');if(el)el.textContent=data.notes.trim();
+    // Release body is Markdown and can contain bilingual blocks / GitHub's
+    // generated "Full Changelog" link. Show only readable notes for the UI language.
+    var inlineNotes=_updPlainNotes(data.notes);
+    if(inlineNotes){
+        const el=document.getElementById('_upd_cl_');if(el)el.textContent=inlineNotes;
     }else{
         try{
             const r=await INV('fetch_changelog');
             const el=document.getElementById('_upd_cl_');
-            if(el)el.textContent=r.error?(T('error')+': '+r.error):(r.text||T('cl_empty'));
+            if(el)el.textContent=r.error?(T('error')+': '+r.error):(_updPlainNotes(r.text)||T('cl_empty'));
         }catch(e){const el=document.getElementById('_upd_cl_');if(el)el.textContent=T('load_error');}
     }
 }
@@ -195,30 +217,17 @@ function showDownloadIndicator(data){
     }
 }
 
-// Версия, которую описывает текст ниже (wn_1..wn_3). Показываем «Что нового»
-// ТОЛЬКО для неё — иначе при апдейте на новую версию всплывал бы старый текст.
-// При новом релизе: обновить wn_* в lang.js + поднять эту строку.
-const WHATSNEW_VERSION='1.2.0';
-// ── «Что нового» — один раз при первом запуске новой версии ─────────────────
+// ── «Что нового» — один раз при первом запуске каждой версии ────────────────
 async function showWhatsNewIfNeeded(){
     try{
         const info=await INV('get_app_info');
-        const ver=info&&info.version;
+        const ver=String(info&&info.version||'').trim();
         if(!ver)return;
-        if(ver!==WHATSNEW_VERSION)return;                     // текст не про эту версию
         const s=await INV('get_settings');
-        if(s&&s.whatsnew_shown_version===ver)return;          // уже показывали для этой версии
-        const item=t=>'<div class="_wn_item_"><span class="_wn_bullet_">•</span><span>'+_escHtml(t)+'</span></div>';
-        const body='<div class="_wn_intro_">'+_escHtml(T('wn_intro'))+'</div>'+item(T('wn_1'))+item(T('wn_2'))+item(T('wn_3'));
-        showModal({
-            title:T('wn_title'),
-            msgHtml:body,
-            okText:T('wn_ok'),
-            cancelText:null,
-            onOk:async()=>{
-                try{const ss=await INV('get_settings');await INV('save_settings',{settings:Object.assign({},ss,{whatsnew_shown_version:ver})});}catch(e){}
-            },
-        });
+        if(s&&s.whatsnew_shown_version===ver)return;
+        if(typeof openChangelogNative!=='function')return;
+        openChangelogNative();
+        try{await INV('save_settings',{settings:Object.assign({},s||{},{whatsnew_shown_version:ver})});}catch(e){}
     }catch(e){}
 }
 
