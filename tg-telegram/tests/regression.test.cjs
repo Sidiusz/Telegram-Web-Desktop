@@ -462,11 +462,28 @@ test('global unread and typing privacy defaults are off and RPC guard is injecte
     assert.match(preload, /peerId/);
     assert.match(ui, /twd_no_read/);
     assert.match(ui, /twd_no_typing/);
+    assert.match(ui, /function _twdPrivacyPeerIds\(s\)/);
+    assert.match(ui, /function _twdPrivacyEffective\(s,peerId,baseKey,onKey,offKey\)/);
+    assert.match(ui, /function _twdPrivacyPatchRule\(s,peerId,baseKey,onKey,offKey,next\)/);
+    assert.match(ui, /function _twdResolvePrivacyPeers\(ids\)/);
+    assert.match(ui, /page==='privacy_peers'/);
+    assert.match(ui, /_twdNavigateNative\('privacy_peers'\)/);
+    assert.match(ui, /_genIconButton\('eye'/);
+    assert.match(ui, /_genIconButton\('edit'/);
+    assert.match(ui, /_twd-privacy-toggle_/);
+    assert.match(ui, /aria-pressed/);
+    assert.match(ui, /return page==='privacy_peers'\?'messages':'root'/);
+    assert.match(ui, /privacy_no_read_force_on','privacy_no_read_force_off','privacy_no_typing_force_on','privacy_no_typing_force_off/);
     assert.match(ui, /e\.target\.closest\('\.Switcher,\.Switch,\.Toggle,input,button,a'\)/);
     assert.match(ui, /inp\.click\(\)/);
     assert.match(ui, /e\.key!==\'Enter\'&&e\.key!==\' \'/);
     assert.match(lang, /Нечиталка везде/);
     assert.match(lang, /Неписалка везде/);
+    assert.match(lang, /Персональные настройки/);
+    assert.match(lang, /Нечиталка включена/);
+    assert.match(lang, /Неписалка выключена/);
+    assert.match(read('electron/inject/ui/core.js'), /_twd-privacy-toggle_\._twd-off_\{opacity:\.35;\}/);
+    assert.match(read('electron/inject/ui/core.js'), /_twd-privacy-peer-avatar_/);
     assert.match(lang, /Включить нечиталку/);
     assert.match(lang, /Выключить неписалку/);
     const bootstrap = read('electron/inject/ui/bootstrap.js');
@@ -499,6 +516,36 @@ test('global unread and typing privacy defaults are off and RPC guard is injecte
     assert.equal(patched.patched, true);
     assert.match(patched.body, /__twdPrivacyShouldBlock\(e\)\)return;let t=await Lg\.invoke\(e,i,d,c\)/);
 
+});
+
+test('personal privacy manager rules collapse back to the global default', () => {
+    const ui = read('electron/inject/ui/twd-settings-native.js');
+    const start = ui.indexOf('function _twdPrivacyEffective');
+    const end = ui.indexOf('function _twdPrivacyInitials');
+    assert.ok(start >= 0 && end > start);
+    const context = {};
+    vm.createContext(context);
+    vm.runInContext(ui.slice(start, end), context);
+
+    const baseOff = {
+        privacy_no_read_receipts: false,
+        privacy_no_read_force_on: ['101'],
+        privacy_no_read_force_off: [],
+    };
+    assert.equal(context._twdPrivacyEffective(baseOff, '101', 'privacy_no_read_receipts', 'privacy_no_read_force_on', 'privacy_no_read_force_off'), true);
+    const offPatch = context._twdPrivacyPatchRule(baseOff, '101', 'privacy_no_read_receipts', 'privacy_no_read_force_on', 'privacy_no_read_force_off', false);
+    assert.deepEqual(Array.from(offPatch.privacy_no_read_force_on), []);
+    assert.deepEqual(Array.from(offPatch.privacy_no_read_force_off), []);
+
+    const baseOn = {
+        privacy_no_read_receipts: true,
+        privacy_no_read_force_on: [],
+        privacy_no_read_force_off: ['202'],
+    };
+    assert.equal(context._twdPrivacyEffective(baseOn, '202', 'privacy_no_read_receipts', 'privacy_no_read_force_on', 'privacy_no_read_force_off'), false);
+    const onPatch = context._twdPrivacyPatchRule(baseOn, '202', 'privacy_no_read_receipts', 'privacy_no_read_force_on', 'privacy_no_read_force_off', true);
+    assert.deepEqual(Array.from(onPatch.privacy_no_read_force_on), []);
+    assert.deepEqual(Array.from(onPatch.privacy_no_read_force_off), []);
 });
 
 test('privacy explicit read bypass and per-peer overrides stay scoped to one peer', () => {
@@ -628,7 +675,8 @@ test('custom UI stays inside Telegram Settings and keeps native navigation seman
     assert.match(twd, /function openTwdNative\(/);
     assert.match(twd, /openNativePanel\(/);
     assert.match(twd, /handleBack/);
-    assert.match(twd, /_twdNavigateNative\('root',true\)/);
+    assert.match(twd, /function _twdNativeParent\(page\)/);
+    assert.match(twd, /_twdNavigateNative\(_twdNativeParent\(_twdNativePage\),true\)/);
     assert.match(twd, /appearance_message_layout/);
     assert.match(twd, /_genNativeSettingRow\(ctx\.liEl,T\('twd_layout'\)/);
     assert.doesNotMatch(twd, /_twdStaticRow\(ctx,T\('twd_layout'/);

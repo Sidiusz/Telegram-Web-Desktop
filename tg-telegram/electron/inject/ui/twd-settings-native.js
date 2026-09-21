@@ -75,6 +75,150 @@ function _twdSave(patch){
     });
     return _twdSaveQueue;
 }
+
+function _twdPrivacyPeerIds(s){
+    var out=[];
+    ['privacy_no_read_force_on','privacy_no_read_force_off','privacy_no_typing_force_on','privacy_no_typing_force_off'].forEach(function(k){
+        (s&&s[k]||[]).forEach(function(id){id=String(id);if(out.indexOf(id)<0)out.push(id);});
+    });
+    return out;
+}
+function _twdPrivacyEffective(s,peerId,baseKey,onKey,offKey){
+    peerId=String(peerId||'');
+    var on=(s&&s[onKey]||[]).map(String),off=(s&&s[offKey]||[]).map(String);
+    if(off.indexOf(peerId)>=0)return false;
+    if(on.indexOf(peerId)>=0)return true;
+    return !!(s&&s[baseKey]===true);
+}
+function _twdPrivacyPatchRule(s,peerId,baseKey,onKey,offKey,next){
+    peerId=String(peerId||'');
+    var on=(s&&s[onKey]||[]).map(String).filter(function(x){return x!==peerId;});
+    var off=(s&&s[offKey]||[]).map(String).filter(function(x){return x!==peerId;});
+    var base=!!(s&&s[baseKey]===true);
+    if(next!==base)(next?on:off).push(peerId);
+    var p={};p[onKey]=on;p[offKey]=off;return p;
+}
+function _twdPrivacyInitials(name){
+    var w=String(name||'').trim().split(/\s+/).filter(Boolean);
+    if(!w.length)return'?';
+    var a=Array.from(w[0])[0]||'?';
+    if(w.length===1)return a.toUpperCase();
+    var b=Array.from(w[w.length-1])[0]||'';
+    return(a+b).toUpperCase();
+}
+function _twdPrivacyPeerColor(id){
+    var p=['#e17076','#faa774','#a695e7','#7bc862','#65aadd','#6ec9cb','#ee7aae'],h=0,s=String(id||'');
+    for(var i=0;i<s.length;i++)h=((h*31)+s.charCodeAt(i))|0;
+    return p[Math.abs(h)%p.length];
+}
+function _twdPrivacyDomPeer(id){
+    id=String(id||'');var row=null;
+    document.querySelectorAll('#LeftColumn .ListItem.Chat').forEach(function(x){
+        if(row)return;var a=x.querySelector('.Avatar[data-peer-id]');
+        if(a&&String(a.getAttribute('data-peer-id')||'')===id)row=x;
+    });
+    var h=document.querySelector('#MiddleColumn .MiddleHeader .Avatar[data-peer-id]');
+    var host=row||(h&&String(h.getAttribute('data-peer-id')||'')===id?h.closest('.MiddleHeader'):null);
+    if(!host)return null;
+    var av=host.querySelector('.Avatar[data-peer-id]'),img=av&&av.querySelector('img.Avatar__media,img');
+    var title=host.querySelector('.title,.fullName');
+    return{name:(title&&title.textContent||'').trim(),avatar:img&&img.src||''};
+}
+function _twdResolvePrivacyPeers(ids){
+    ids=(ids||[]).map(String);
+    var map=Object.create(null);
+    ids.forEach(function(id){
+        var d=_twdPrivacyDomPeer(id)||{};
+        map[id]={id:id,name:d.name||'',avatar:d.avatar||''};
+    });
+    return new Promise(function(resolve){
+        if(!ids.length||!window.indexedDB){resolve(ids.map(function(id){return map[id];}));return;}
+        var req;
+        try{req=indexedDB.open('tt-data');}catch(_){resolve(ids.map(function(id){return map[id];}));return;}
+        req.onerror=function(){resolve(ids.map(function(id){return map[id];}));};
+        req.onsuccess=function(){
+            var db=req.result,tx;
+            try{tx=db.transaction('store','readonly');}catch(_){try{db.close();}catch(__){}resolve(ids.map(function(id){return map[id];}));return;}
+            var cur=tx.objectStore('store').openCursor();
+            cur.onsuccess=function(){
+                var c=cur.result;if(!c)return;
+                var key=String(c.key||'');
+                if(/^tt-global-state(?:_\d+)?$/.test(key)){
+                    var chats=c.value&&c.value.chats&&c.value.chats.byId||{};
+                    var users=c.value&&c.value.users&&c.value.users.byId||{};
+                    ids.forEach(function(id){
+                        if(map[id].name)return;
+                        var chat=chats[id],user=users[id];
+                        var name=chat&&chat.title;
+                        if(!name&&user)name=((user.firstName||'')+' '+(user.lastName||'')).trim();
+                        if(name)map[id].name=String(name);
+                    });
+                }
+                c.continue();
+            };
+            function done(){
+                try{db.close();}catch(_){}
+                resolve(ids.map(function(id){var x=map[id];if(!x.name)x.name=x.id;return x;}));
+            }
+            tx.oncomplete=done;tx.onerror=done;tx.onabort=done;
+        };
+    });
+}
+function _twdPrivacyAvatar(info){
+    var a=document.createElement('div');a.className='_twd-privacy-peer-avatar_';a.style.background=_twdPrivacyPeerColor(info.id);
+    if(info.avatar){
+        var img=document.createElement('img');img.src=info.avatar;img.alt='';
+        img.onerror=function(){img.remove();a.textContent=_twdPrivacyInitials(info.name);};
+        a.appendChild(img);
+    }else a.textContent=_twdPrivacyInitials(info.name);
+    return a;
+}
+function _twdPaintPrivacyButton(btn,on,label){
+    btn.classList.add('_twd-privacy-toggle_');
+    btn.classList.toggle('_twd-on_',!!on);btn.classList.toggle('_twd-off_',!on);
+    btn.setAttribute('aria-pressed',on?'true':'false');btn.title=label;btn.setAttribute('aria-label',label);
+}
+async function _twdRenderPrivacyPeers(content,ctx,s){
+    var ids=_twdPrivacyPeerIds(s),peers=await _twdResolvePrivacyPeers(ids);
+    if(!content.isConnected)return;
+    if(!peers.length){
+        var empty=ctx.card();empty.appendChild(_twdPassiveText(T('twd_privacy_personal_empty')));
+        ctx.section(T('twd_privacy_personal'),empty);return;
+    }
+    peers.sort(function(a,b){return String(a.name).localeCompare(String(b.name));});
+    var card=ctx.card();
+    peers.forEach(function(info){
+        var r=_genNativeActionRow(ctx.liEl),b=r._content;
+        r.classList.add('_twd-privacy-peer-row_');
+        b.removeAttribute('role');b.removeAttribute('tabindex');
+        var multi=document.createElement('div');multi.className='multiline-item';
+        var title=document.createElement('span');title.className='title';title.textContent=info.name;multi.appendChild(title);
+        var actions=document.createElement('div');actions.className='_twd-privacy-peer-actions_';
+        var readOn=_twdPrivacyEffective(s,info.id,'privacy_no_read_receipts','privacy_no_read_force_on','privacy_no_read_force_off');
+        var typingOn=_twdPrivacyEffective(s,info.id,'privacy_no_typing','privacy_no_typing_force_on','privacy_no_typing_force_off');
+        var eye=_genIconButton('eye',T(readOn?'twd_privacy_read_on':'twd_privacy_read_off'));
+        var pencil=_genIconButton('edit',T(typingOn?'twd_privacy_typing_on':'twd_privacy_typing_off'));
+        _twdPaintPrivacyButton(eye,readOn,T(readOn?'twd_privacy_read_on':'twd_privacy_read_off'));
+        _twdPaintPrivacyButton(pencil,typingOn,T(typingOn?'twd_privacy_typing_on':'twd_privacy_typing_off'));
+        eye.addEventListener('click',function(e){
+            e.preventDefault();e.stopPropagation();
+            INV('get_settings').then(function(cur){
+                var now=_twdPrivacyEffective(cur,info.id,'privacy_no_read_receipts','privacy_no_read_force_on','privacy_no_read_force_off');
+                return _twdSave(_twdPrivacyPatchRule(cur,info.id,'privacy_no_read_receipts','privacy_no_read_force_on','privacy_no_read_force_off',!now));
+            }).then(function(){if(content.isConnected)_twdRenderNativePage(content,'privacy_peers');}).catch(function(){});
+        });
+        pencil.addEventListener('click',function(e){
+            e.preventDefault();e.stopPropagation();
+            INV('get_settings').then(function(cur){
+                var now=_twdPrivacyEffective(cur,info.id,'privacy_no_typing','privacy_no_typing_force_on','privacy_no_typing_force_off');
+                return _twdSave(_twdPrivacyPatchRule(cur,info.id,'privacy_no_typing','privacy_no_typing_force_on','privacy_no_typing_force_off',!now));
+            }).then(function(){if(content.isConnected)_twdRenderNativePage(content,'privacy_peers');}).catch(function(){});
+        });
+        actions.append(eye,pencil);b.append(_twdPrivacyAvatar(info),multi,actions);card.appendChild(r);
+    });
+    ctx.section(T('twd_privacy_personal'),card);
+}
+
 function _twdClearMessageHistory(){
     var api=window.__twdMessageHistoryApi;
     if(api&&typeof api.clear==='function'){
@@ -119,6 +263,7 @@ function _twdWrapNativePage(panel){
     panel._twdPage=page;
     return page;
 }
+function _twdNativeParent(page){return page==='privacy_peers'?'messages':'root';}
 function _twdWireInnerBack(header,page){
     var back=header&&header.querySelector('button');
     if(!back)return;
@@ -126,7 +271,7 @@ function _twdWireInnerBack(header,page){
         e.preventDefault();e.stopPropagation();
         if(_twdNativeTransitioning)return;
         if(page==='root')closeNativePanel();
-        else _twdNavigateNative('root',true);
+        else _twdNavigateNative(_twdNativeParent(page),true);
     });
 }
 function _twdCloneInnerPage(panel,page){
@@ -159,7 +304,7 @@ function openTwdNative(initialPage){
         title:'Telegram Web Desktop',
         handleBack:function(){
             if(_twdNativePage!=='root'){
-                _twdNavigateNative('root',true);
+                _twdNavigateNative(_twdNativeParent(_twdNativePage),true);
                 return true;
             }
             return false;
@@ -182,6 +327,7 @@ function _twdNativeTitle(page){
         general:T('twd_general'),
         appearance:T('twd_appearance'),
         messages:T('twd_messages'),
+        privacy_peers:T('twd_privacy_personal'),
         notifications:T('twd_notifications'),
         proxy:T('proxy'),
         data:T('sec_data'),
@@ -248,6 +394,7 @@ async function _twdRenderNativePage(content,page){
     if(page==='general')return _twdRenderGeneral(content,ctx,s);
     if(page==='appearance')return _twdRenderAppearance(content,ctx,s);
     if(page==='messages')return _twdRenderMessages(content,ctx,s);
+    if(page==='privacy_peers')return _twdRenderPrivacyPeers(content,ctx,s);
     if(page==='notifications')return _twdRenderNotifications(content,ctx,s);
     if(page==='data')return _twdRenderData(content,ctx,s);
     if(page==='about')return _twdRenderAbout(content,ctx,s);
@@ -318,6 +465,10 @@ function _twdRenderMessages(content,ctx,s){
     privacy.appendChild(_twdSwitchRow(ctx,T('twd_no_typing'),T('twd_no_typing_desc'),s.privacy_no_typing===true,function(v){
         _twdSave({privacy_no_typing:v});
     }));
+    var personalCount=_twdPrivacyPeerIds(s).length;
+    privacy.appendChild(_twdStaticRow(ctx,T('twd_privacy_personal'),T('twd_privacy_personal_desc'),personalCount?String(personalCount):'',function(){
+        _twdNavigateNative('privacy_peers');
+    },'user','blue'));
     ctx.section(T('twd_privacy'),privacy);
 
     var card=ctx.card();

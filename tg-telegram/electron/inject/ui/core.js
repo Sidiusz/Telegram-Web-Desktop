@@ -125,6 +125,15 @@ html._tgreading_ .bubble.menu-container.shown{opacity:0 !important;pointer-event
 /* Small layout helpers around native Telegram controls. */
 ._tgpanel_ ._tpempty_{color:var(--color-text-secondary,#aaa);text-align:center;padding:40px 16px;font-size:14px;}
 ._twd-row-actions_{margin-inline-start:auto;display:flex;align-items:center;gap:.125rem;flex-shrink:0;}
+._twd-privacy-peer-row_ .ListItem-button{display:flex;align-items:center;min-height:4rem;}
+._twd-privacy-peer-avatar_{width:2.75rem;height:2.75rem;min-width:2.75rem;border-radius:50%;overflow:hidden;display:flex;align-items:center;justify-content:center;margin-inline-end:.75rem;color:#fff;font-size:.9rem;font-weight:600;line-height:1;}
+._twd-privacy-peer-avatar_ img{width:100%;height:100%;object-fit:cover;display:block;}
+._twd-privacy-peer-row_ .multiline-item{min-width:0;flex:1 1 auto;}
+._twd-privacy-peer-row_ .title{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+._twd-privacy-peer-actions_{margin-inline-start:auto;display:flex;align-items:center;gap:.25rem;flex:0 0 auto;}
+._twd-privacy-toggle_{transition:opacity .15s ease;}
+._twd-privacy-toggle_._twd-off_{opacity:.35;}
+._twd-privacy-toggle_._twd-on_{opacity:1;}
 .ListItem-main-icon ._twd-filled-glyph_{width:1.5rem;height:1.5rem;display:block;fill:#fff;color:#fff;}
 ._twd-filetype_{width:1.875rem!important;height:1.875rem!important;border-radius:.625rem!important;display:flex!important;align-items:center!important;justify-content:center!important;flex-shrink:0;font-size:.625rem!important;font-weight:700;color:#fff!important;text-transform:uppercase;}
 ._twd-clarification_{margin:.5rem 1rem 0!important;padding:.75rem 0 .25rem!important;border-top:1px solid var(--color-borders,rgba(255,255,255,.1));}
