@@ -241,6 +241,8 @@ test('release hardening fuses stay enabled', () => {
     assert.match(release, /run\(process\.execPath, \[npmCli, 'test'\]/);
     assert.match(release, /run\(process\.execPath, \[npmCli, 'run', 'test:smoke'\]/);
     assert.match(release, /electron-builder.*out.*cli.*cli\.js/s);
+    assert.match(workflow, /npx electron-builder --publish never/);
+    assert.doesNotMatch(workflow, /Build release installer[\s\S]{0,180}npm run build/);
     assert.match(workflow, /if \(Test-Path \$notes\)/);
     assert.match(workflow, /--generate-notes --verify-tag --latest/);
     assert.doesNotMatch(release, /WIN_CSC_LINK|CSC_LINK|forceCodeSigning|Authenticode|signingConfigured|Signed release|Unsigned release/i);

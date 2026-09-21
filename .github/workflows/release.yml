@@ -40,7 +40,7 @@ jobs:
 
       - name: Build release installer
         working-directory: tg-telegram
-        run: npm run build
+        run: npx electron-builder --publish never
 
       - name: Publish GitHub release
         shell: powershell
