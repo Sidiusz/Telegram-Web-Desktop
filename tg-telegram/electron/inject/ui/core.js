@@ -147,7 +147,7 @@ html._tgreading_ .bubble.menu-container.shown{opacity:0 !important;pointer-event
 ._twd-filter-custom-desc_{margin-top:.25rem;color:var(--color-text-secondary,#aaa);font-size:.875rem;line-height:1.35;}
 ._twd-filter-custom-input_{width:100%;margin-top:.75rem;box-sizing:border-box;}
 ._twd-filter-custom-list_{margin-top:.5rem;}
-._twd-filter-custom-row_ .ListItem-button{padding-inline:0!important;}
+._twd-filter-custom-row_ .ListItem-button{padding-inline:1rem!important;}
 ._twd-filter-custom-row_ .Button{margin-inline-start:auto;}
 .ListItem-main-icon ._twd-filled-glyph_{width:1.5rem;height:1.5rem;display:block;fill:#fff;color:#fff;}
 ._twd-filetype_{width:1.875rem!important;height:1.875rem!important;border-radius:.625rem!important;display:flex!important;align-items:center!important;justify-content:center!important;flex-shrink:0;font-size:.625rem!important;font-weight:700;color:#fff!important;text-transform:uppercase;}
