@@ -294,6 +294,7 @@ test('built-in client features are separate from user add-ons', () => {
     assert.match(base, /custom-message-avatar/);
     assert.match(base, /is-in-document-group \.message-content\.audio/);
     assert.match(base, /Message\.own:not\(\.is-in-document-group\):has\(\.message-content\.media\)/);
+    assert.match(base, /#MiddleColumn #MiddleSearch:not\(\.visually-hidden\) > :first-child[\s\S]{0,100}top: 72px !important/);
     assert.match(common, /window\.__twdDesktopLikeCommon/);
     assert.match(common, /window\.__twdDesktopLikeRuntimeStarted/);
     assert.match(common, /function injectAvatars\(/);
