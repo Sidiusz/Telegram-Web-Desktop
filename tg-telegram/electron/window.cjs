@@ -12,6 +12,7 @@ const { uniquePath } = require('./utils.cjs');
 const { installFlowsealWsRoute, noteTelegramLoadFailure, isWebFallbackEnabled } = require('./tg-flowseal-route.cjs');
 const { fetchTelegramWebAFallback } = require('./telegram-web-fallback.cjs');
 const { injectTelegramWorkerProxy } = require('./tg-flowseal-worker.cjs');
+const { injectTelegramExtendedPins, injectExtendedPinsPrelude } = require('./tg-extended-pins.cjs');
 
 const TG_URL = 'https://web.telegram.org/a/';
 const WEBSYNC_HOSTS = new Set(['t.me', 'telegram.me', 'telegram.dog']);
@@ -145,13 +146,13 @@ function createWindow(state, onTelegramLink, options = {}) {
                 }
                 let resp = await fetchTelegramAsset(request, url);
                 resp = await injectTelegramWorkerProxy(resp, url);
+                resp = await injectTelegramExtendedPins(resp, url);
                 const ct = (resp.headers.get('content-type') || '').toLowerCase();
                 if (!ct.includes('text/html')) return resp;
                 let body = await resp.text();
-                const before = body.length;
+                body = injectExtendedPinsPrelude(body, loadSettings().messages_extended_pins === true);
                 body = body.replace(/<meta[^>]*http-equiv=["']content-security-policy["'][^>]*>/gi, '');
                 body = body.replace(/<meta[^>]*http-equiv=["']content-security-policy-report-only["'][^>]*>/gi, '');
-                if (body.length === before) return resp;
                 const headers = new Headers(resp.headers);
                 headers.delete('content-security-policy');
                 headers.delete('content-security-policy-report-only');
@@ -171,13 +172,13 @@ function createWindow(state, onTelegramLink, options = {}) {
                         if (!isTgCandidate) return net.fetch(request, { bypassCustomProtocolHandlers: true });
                         let resp = await fetchTelegramAsset(request, url);
                         resp = await injectTelegramWorkerProxy(resp, url);
+                        resp = await injectTelegramExtendedPins(resp, url);
                         const ct = (resp.headers.get('content-type') || '').toLowerCase();
                         if (!ct.includes('text/html')) return resp;
                         let body = await resp.text();
-                        const before = body.length;
+                        body = injectExtendedPinsPrelude(body, loadSettings().messages_extended_pins === true);
                         body = body.replace(/<meta[^>]*http-equiv=["']content-security-policy["'][^>]*>/gi, '');
                         body = body.replace(/<meta[^>]*http-equiv=["']content-security-policy-report-only["'][^>]*>/gi, '');
-                        if (body.length === before) return resp;
                         const headers = new Headers(resp.headers);
                         headers.delete('content-security-policy');
                         headers.delete('content-security-policy-report-only');

@@ -245,6 +245,11 @@ function _twdSetHideAds(enabled){
         try{window.dispatchEvent(new CustomEvent('__twd_hide_ads_config',{detail:{enabled:enabled===true}}));}catch(_){}
     });
 }
+function _twdSetExtendedPins(enabled){
+    var runtime=window.__twdExtendedPins;
+    var prep=(!enabled&&runtime&&typeof runtime.setEnabled==='function')?Promise.resolve(runtime.setEnabled(false)):Promise.resolve();
+    return prep.catch(function(){}).then(function(){return _twdSave({messages_extended_pins:enabled===true});}).then(function(){return INV('apply_features');});
+}
 
 var _twdNativePanel=null;
 var _twdNativePage='root';
@@ -477,6 +482,9 @@ function _twdRenderMessages(content,ctx,s){
     }));
     card.appendChild(_twdSwitchRow(ctx,T('twd_show_disappearing'),T('twd_show_disappearing_desc'),!!s.messages_show_disappearing,function(v){
         _twdConfigureHistory({messages_show_disappearing:v});
+    }));
+    card.appendChild(_twdSwitchRow(ctx,T('twd_extended_pins'),T('twd_extended_pins_desc'),s.messages_extended_pins===true,function(v){
+        _twdSetExtendedPins(v).catch(function(){toast(T('error'),'icon-close');});
     }));
     ctx.section(T('twd_messages'),card);
 

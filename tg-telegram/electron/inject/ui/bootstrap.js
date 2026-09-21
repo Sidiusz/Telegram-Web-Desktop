@@ -607,6 +607,7 @@ window.__tgNotif=(function(){
     }
     refreshPrivacyCfg();
     bindBadgeObserver();
+    window.__twdExtendedPinsLimit=function(){try{toast(T('twd_extended_pins_limit'),'icon-close');}catch(_){}};
 
     function closeMenu(){
         try{document.dispatchEvent(new KeyboardEvent('keydown',{key:'Escape',keyCode:27,which:27,bubbles:true}));}catch(_){}

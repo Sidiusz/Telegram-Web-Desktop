@@ -552,6 +552,27 @@ test('personal privacy manager rules collapse back to the global default', () =>
     assert.deepEqual(Array.from(onPatch.privacy_no_read_force_off), []);
 });
 
+
+test('extended chat pins keep a local ten-item order and hook Telegram pin updates', () => {
+    const pins = require('../electron/tg-extended-pins.cjs');
+    assert.doesNotThrow(() => new Function(pins.extendedPinsPrelude(true)));
+
+    const actionSource = 'z(`toggleChatPinned`,(e,n,r)=>{let{ id:i }=r,s=w(e,i);R(`toggleChatPinned`,{chat:s,shouldBePinned:true})}),z(`toggleChatArchived`,()=>{})';
+    const action = pins.patchTelegramExtendedPins(actionSource);
+    assert.equal(action.actionPatched, true);
+    assert.match(action.body, /__twdExtendedPins\.toggle\(e,n,r,R\)/);
+
+    const settings = read('electron/settings.cjs');
+    const windowSource = read('electron/window.cjs');
+    const ui = read('electron/inject/ui/twd-settings-native.js');
+    assert.match(settings, /messages_extended_pins: false/);
+    assert.match(settings, /'messages_extended_pins'/);
+    assert.match(windowSource, /injectTelegramExtendedPins/);
+    assert.match(windowSource, /injectExtendedPinsPrelude/);
+    assert.match(ui, /twd_extended_pins/);
+    assert.match(ui, /_twdSetExtendedPins/);
+});
+
 test('privacy explicit read bypass and per-peer overrides stay scoped to one peer', () => {
     const source = read('electron/tg-flowseal-relay-runtime.js')
         .replace('__TWD_PROXY_CHANNEL__', JSON.stringify('__twd_proxy_test'))
