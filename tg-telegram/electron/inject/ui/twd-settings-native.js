@@ -237,11 +237,26 @@ function _twdConfigureMessageFilter(patch){
         try{window.dispatchEvent(new CustomEvent('__twd_message_filter_config',{detail:next}));}catch(_){}
     });
 }
+function _twdDropExtendedPinScriptCache(){
+    if(!window.caches||typeof caches.keys!=='function')return Promise.resolve();
+    return caches.keys().then(function(names){
+        return Promise.all(names.map(function(name){
+            return caches.open(name).then(function(cache){
+                return cache.keys().then(function(reqs){
+                    return Promise.all(reqs.filter(function(req){
+                        try{return /\/a\/assets\/(?:calls-|main-)[^/]*\.js(?:\?|$)/i.test(new URL(req.url).pathname+new URL(req.url).search);}catch(_){return false;}
+                    }).map(function(req){return cache.delete(req);}));
+                });
+            });
+        }));
+    }).catch(function(){});
+}
 function _twdSetExtendedPins(enabled){
     var runtime=window.__twdExtendedPins;
     var prep=(!enabled&&runtime&&typeof runtime.setEnabled==='function')?Promise.resolve(runtime.setEnabled(false)):Promise.resolve();
     return prep.catch(function(){}).then(function(){return _twdSave({messages_extended_pins:enabled===true});}).then(function(){
-        return enabled?INV('prepare_extended_pins'):INV('apply_features');
+        if(!enabled)return INV('apply_features');
+        return _twdDropExtendedPinScriptCache().then(function(){return INV('prepare_extended_pins');});
     });
 }
 
