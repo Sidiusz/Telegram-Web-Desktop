@@ -595,9 +595,14 @@ test('personal privacy manager rules collapse back to the global default', () =>
 });
 
 
-test('extended chat pins keep a local ten-item order and hook Telegram pin updates', () => {
+test('extended chat pins add five local slots on top of the account pin limit', () => {
     const pins = require('../electron/tg-extended-pins.cjs');
-    assert.doesNotThrow(() => new Function(pins.extendedPinsPrelude(true)));
+    const prelude = pins.extendedPinsPrelude(true);
+    assert.doesNotThrow(() => new Function(prelude));
+    assert.match(prelude, /slice\(0,15\)/);
+    assert.match(prelude, /limit\(s\)\{return this\.cap\(s\)\+5\}/);
+    assert.match(prelude, /cur\.length>=this\.limit\(s\)/);
+    assert.match(prelude, /isPremium===true\?10:5/);
 
     const actionSource = 'z(`toggleChatPinned`,(e,n,r)=>{let{ id:i }=r,s=w(e,i);R(`toggleChatPinned`,{chat:s,shouldBePinned:true})}),z(`toggleChatArchived`,()=>{})';
     const action = pins.patchTelegramExtendedPins(actionSource);
