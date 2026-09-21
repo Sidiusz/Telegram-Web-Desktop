@@ -168,14 +168,15 @@ function toast(msg,icon){try{if(typeof showNativeToast==='function')return showN
 function _twdFitMenuViewport(node){
     var menu=node&&node.matches&&node.matches('.bubble.menu-container')?node:(node&&node.closest?node.closest('.bubble.menu-container'):null);
     if(!menu||!menu.isConnected)return;
-    menu.style.translate='';
-    menu.style.maxHeight=Math.max(7.5*16,window.innerHeight-16)+'px';
-    menu.style.overflowY='auto';
-    menu.style.overscrollBehavior='contain';
-    var r=menu.getBoundingClientRect(),pad=8,dy=0;
+    var pad=8,maxH=Math.max(120,window.innerHeight-pad*2);
+    menu.style.setProperty('max-height',maxH+'px','important');
+    menu.style.setProperty('overflow-y','auto','important');
+    menu.style.setProperty('overscroll-behavior','contain','important');
+    menu.style.removeProperty('translate');
+    var r=menu.getBoundingClientRect(),dy=0;
     if(r.bottom>window.innerHeight-pad)dy-=r.bottom-(window.innerHeight-pad);
     if(r.top+dy<pad)dy+=pad-(r.top+dy);
-    if(Math.abs(dy)>.5)menu.style.translate='0 '+Math.round(dy)+'px';
+    if(Math.abs(dy)>.5)menu.style.setProperty('translate','0 '+Math.round(dy)+'px','important');
 }
 window.__twdFitMenuViewport=_twdFitMenuViewport;
 

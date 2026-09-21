@@ -240,7 +240,9 @@ function _twdConfigureMessageFilter(patch){
 function _twdSetExtendedPins(enabled){
     var runtime=window.__twdExtendedPins;
     var prep=(!enabled&&runtime&&typeof runtime.setEnabled==='function')?Promise.resolve(runtime.setEnabled(false)):Promise.resolve();
-    return prep.catch(function(){}).then(function(){return _twdSave({messages_extended_pins:enabled===true});}).then(function(){return INV('apply_features');});
+    return prep.catch(function(){}).then(function(){return _twdSave({messages_extended_pins:enabled===true});}).then(function(){
+        return enabled?INV('prepare_extended_pins'):INV('apply_features');
+    });
 }
 
 var _twdNativePanel=null;

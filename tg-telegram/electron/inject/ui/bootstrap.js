@@ -645,7 +645,10 @@ window.__tgNotif=(function(){
             var sepBottom=_twdNativeMenuSeparator(host);
             if(nativeRead){host.insertBefore(sepTop,nativeRead);host.insertBefore(typing,nativeRead);host.insertBefore(read,nativeRead);host.insertBefore(sepBottom,nativeRead);}
             else{host.appendChild(sepTop);host.appendChild(typing);host.appendChild(read);host.appendChild(sepBottom);}
-            try{_twdFitMenuViewport(host);}catch(_){}
+            try{
+                _twdFitMenuViewport(host);
+                [0,60,140,260].forEach(function(ms){setTimeout(function(){try{_twdFitMenuViewport(host);}catch(_){}},ms);});
+            }catch(_){}
         }).catch(function(){});
     }
 

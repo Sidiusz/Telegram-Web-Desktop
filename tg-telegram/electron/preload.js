@@ -384,7 +384,7 @@ const TWD_ALLOWED_INVOKE = new Set([
     'refresh_proxy_domains','test_proxy_connectivity','show_notification','preview_notification','save_settings','toggle_devtools','open_url','open_default_apps',
     'open_folder_dialog','get_downloads','bind_download','forget_download','delete_download','cancel_download',
     'open_downloads_folder','open_download_folder','open_download_file','clear_cache','fetch_changelog','fetch_changelog_structured',
-    'check_update_manual','skip_version','download_update','get_addons','delete_addon','toggle_addon','apply_addons','apply_features',
+    'check_update_manual','skip_version','download_update','get_addons','delete_addon','toggle_addon','apply_addons','apply_features','prepare_extended_pins',
     'show_image_context_menu','open_addons_folder','report_lang','set_tray_image','get_tray_base',
     'set_notifications_count','privacy_allow_read_once'
 ]);

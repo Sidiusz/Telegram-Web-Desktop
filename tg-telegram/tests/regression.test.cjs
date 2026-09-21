@@ -139,6 +139,8 @@ test('download and addon safety regressions stay covered', () => {
     const nativePanels = read('electron/inject/ui/native-panels.js');
     const core = read('electron/inject/ui/core.js');
     const addons = read('electron/addons.cjs');
+    const preload = read('electron/preload.js');
+    const bootstrap = read('electron/inject/ui/bootstrap.js');
     assert.match(ipc, /SAFE_OPEN_EXTS/);
     assert.match(ipc, /invalid-url/);
     assert.match(downloads, /\.tmp/);
@@ -171,6 +173,9 @@ test('download and addon safety regressions stay covered', () => {
     assert.match(downloadRegistry, /file\.classList\.remove\('_tgdl_downloading_'\);\s*clearDownloadingBadge\(file\);\s*ensureBadges\(file\);/);
     assert.match(downloadRegistry, /_twdFitMenuViewport\(items\)/);
     assert.match(core, /function _twdFitMenuViewport\(/);
+    assert.match(core, /setProperty\('max-height',maxH\+'px','important'\)/);
+    assert.match(core, /setProperty\('translate','0 '\+Math\.round\(dy\)\+'px','important'\)/);
+    assert.match(bootstrap, /\[0,60,140,260\]\.forEach/);
     assert.match(core, /\.Notification-container\.dl_card\{margin-left:auto;margin-right:auto;/);
     assert.doesNotMatch(addons, /embedded_addons|embedded:/);
     assert.match(addons, /\^user:/);
@@ -181,8 +186,6 @@ test('download and addon safety regressions stay covered', () => {
     assert.match(addons, /scripts\.length >= MAX_CRX_SCRIPTS/);
     assert.match(addons, /manifestEntry\.header\.size > MAX_CRX_MANIFEST_BYTES/);
     assert.match(addons, /\^\[a-zA-Z0-9\._-\]\+\\\.\(js\|crx\)\$/);
-    const preload = read('electron/preload.js');
-    const bootstrap = read('electron/inject/ui/bootstrap.js');
     assert.match(ipc, /handle\('begin_blob_save'/);
     assert.match(ipc, /handle\('append_blob_chunk'/);
     assert.match(ipc, /handle\('finish_blob_save'/);
@@ -712,6 +715,8 @@ test('custom UI stays inside Telegram Settings and keeps native navigation seman
     const bootstrap = read('electron/inject/ui/bootstrap.js');
     const modal = read('electron/inject/ui/modal.js');
     const lang = read('electron/inject/ui/lang.js');
+    const preload = read('electron/preload.js');
+    const ipc = read('electron/ipc.cjs');
     const baseLayout = read('electron/features/desktop_like_base.js');
     const wide = read('electron/features/desktop_like_wide.js');
     const standard = read('electron/features/desktop_like_standard.js');
@@ -777,6 +782,12 @@ test('custom UI stays inside Telegram Settings and keeps native navigation seman
     assert.match(twd, /function _twdSetHideAds\(/);
     assert.match(twd, /footerNote:T\('twd_reload_notice'\)/);
     assert.match(twd, /INV\('apply_features'\)/);
+    assert.match(twd, /enabled\?INV\('prepare_extended_pins'\):INV\('apply_features'\)/);
+    assert.match(preload, /'prepare_extended_pins'/);
+    assert.match(ipc, /handle\('prepare_extended_pins', async/);
+    assert.match(ipc, /origin: 'https:\/\/web\.telegram\.org'/);
+    assert.match(ipc, /storages: \['cachestorage'\]/);
+    assert.match(ipc, /reloadIgnoringCache\(\)/);
     assert.doesNotMatch(twd, /_twdFeatureApplyBar|_twd-apply-bar_|twd_apply/);
     assert.doesNotMatch(panels, /_twd-apply-bar_|ad_apply/);
     assert.match(panels, /footerNote:T\('twd_reload_notice'\)/);

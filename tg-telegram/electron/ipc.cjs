@@ -495,6 +495,24 @@ function registerIpc(getWindow) {
         if (win) win.webContents.reload();
     });
 
+    handle('prepare_extended_pins', async () => {
+        const win = getWindow();
+        if (!win || win.isDestroyed()) return { error: 'no-window' };
+        // Web A serves its JS from CacheStorage through a Service Worker. If the
+        // pin feature is enabled after that cache was populated, the Telegram
+        // chunks would never pass through our response patcher. Drop only the
+        // web asset caches and reload; account/Telegram IndexedDB data is untouched.
+        await win.webContents.session.clearStorageData({
+            origin: 'https://web.telegram.org',
+            storages: ['cachestorage'],
+        });
+        await win.webContents.session.clearCache();
+        setTimeout(() => {
+            if (win && !win.isDestroyed()) win.webContents.reloadIgnoringCache();
+        }, 0);
+        return { ok: true };
+    });
+
     handle('apply_features', () => {
         const win = getWindow();
         if (win) win.webContents.reload();
