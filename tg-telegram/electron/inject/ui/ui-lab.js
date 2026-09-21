@@ -77,7 +77,7 @@ async function renderUiLabNative(content){
 
     const rows=card();
     rows.append(
-        _uiLabRow(liEl,T('ui_lab_plain'),T('ui_lab_plain_sub'),'1.3.1',null),
+        _uiLabRow(liEl,T('ui_lab_plain'),T('ui_lab_plain_sub'),'',null),
         _uiLabRow(liEl,T('ui_lab_action'),T('ui_lab_action_sub'),T('ok'),()=>toast(T('ui_lab_demo'),'icon-check')),
         _genDecoratedRow('info',T('ui_lab_decorated'),T('ok'),()=>toast(T('ui_lab_demo'),'icon-info-filled'),'blue',T('ui_lab_plain_sub'))
     );

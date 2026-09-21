@@ -508,6 +508,16 @@ function _twdRenderMessages(content,ctx,s){
     }));
     ctx.section(T('twd_message_display'),display);
 
+    var visibility=ctx.card();
+    visibility.appendChild(_twdSwitchRow(ctx,T('twd_show_deleted'),'',!!s.messages_show_deleted,function(v){
+        _twdConfigureHistory({messages_show_deleted:v});
+    }));
+    visibility.appendChild(_twdSwitchRow(ctx,T('twd_show_disappearing'),'',!!s.messages_show_disappearing,function(v){
+        _twdConfigureHistory({messages_show_disappearing:v});
+    }));
+    visibility.appendChild(_twdPassiveText(T('twd_show_messages_desc')));
+    ctx.section(T('twd_message_visibility'),visibility);
+
     var privacy=ctx.card();
     privacy.appendChild(_twdSwitchRow(ctx,T('twd_no_read'),T('twd_no_read_desc'),s.privacy_no_read_receipts===true,function(v){
         _twdSave({privacy_no_read_receipts:v});
@@ -564,16 +574,6 @@ function _twdRenderMessages(content,ctx,s){
     }));
     filter.appendChild(_twdCustomFilterBlock(ctx,s,content));
     ctx.section(T('twd_message_filter'),filter);
-
-    var card=ctx.card();
-    card.appendChild(_twdSwitchRow(ctx,T('twd_show_deleted'),'',!!s.messages_show_deleted,function(v){
-        _twdConfigureHistory({messages_show_deleted:v});
-    }));
-    card.appendChild(_twdSwitchRow(ctx,T('twd_show_disappearing'),'',!!s.messages_show_disappearing,function(v){
-        _twdConfigureHistory({messages_show_disappearing:v});
-    }));
-    card.appendChild(_twdPassiveText(T('twd_show_messages_desc')));
-    ctx.section(T('twd_message_visibility'),card);
 
     var saved=ctx.card();
     saved.appendChild(_twdSwitchRow(ctx,T('twd_save_deleted'),'',!!s.messages_save_deleted,function(v){
@@ -695,12 +695,10 @@ function _twdRenderData(content,ctx,s){
 }
 function _twdRenderAbout(content,ctx,s){
     var card=ctx.card();
-    var ver=_twdStaticRow(ctx,T('st_version'),' ','—',null,'info','blue');
+    var ver=_twdStaticRow(ctx,T('st_version'),' ','—',function(){},'info','blue');
+    _wireUiLabUnlock(ver);
     card.appendChild(ver);
-    var lab=_twdStaticRow(ctx,'UI Lab',T('twd_ui_lab_desc'),' ',null,'info','purple');
-    _wireUiLabUnlock(lab);
-    card.appendChild(lab);
-    ctx.section('Telegram Web Desktop',card);
+    ctx.section(T('twd_app_section'),card);
     INV('get_app_info').then(function(info){if(info&&info.version&&ver._value)ver._value.textContent=info.version;}).catch(function(){});
     _twdAppendUpdates(content,ctx,s);
 }
