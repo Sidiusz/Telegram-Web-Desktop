@@ -14,11 +14,7 @@ function _uiLabRow(liEl,title,sub,value,onClick){
     return r;
 }
 function _uiLabSwitchRow(liEl,title,sub,checked){
-    const r=_uiLabRow(liEl,title,sub,'',null),b=r.querySelector('.ListItem-button');
-    if(r._value)r._value.remove();
-    const sw=_genSwitcher(checked,v=>toast((v?T('on_word'):T('off_word')),'icon-check'),title);
-    if(b)b.appendChild(sw);
-    return r;
+    return _genToggle(title,checked,v=>toast((v?T('on_word'):T('off_word')),'icon-check'),sub||'');
 }
 function _uiLabButtonStrip(){
     const wrap=document.createElement('div');

@@ -157,12 +157,6 @@ function _genNativeActionRow(liEl){
     if(!btn){btn=document.createElement('div');btn.className='ListItem-button';r.appendChild(btn);}
     btn.innerHTML=''; r._content=btn; return r;
 }
-function _genSwitcher(checked,onChange,label){
-    var sw=document.createElement('label'); sw.className='Switcher'; sw.title=label||'';
-    var inp=document.createElement('input'); inp.type='checkbox'; inp.checked=!!checked;
-    var widget=document.createElement('span'); widget.className='widget'; sw.append(inp,widget);
-    inp.addEventListener('change',function(){if(onChange)onChange(inp.checked);}); return sw;
-}
 function _genButton(text,icon,variant,size){
     variant=variant||'primary';
     var sel='.Button.'+variant, live=document.querySelector('#Settings '+sel)||document.querySelector(sel);

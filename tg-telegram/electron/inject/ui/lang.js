@@ -263,7 +263,7 @@ var L={
     ui_lab_action_sub:{ru:'Проверка hover и ripple',  en:'Hover and ripple check'},
     ui_lab_decorated:{ru:'Строка с нативной иконкой', en:'Native icon row'},
     ui_lab_checkbox:{ru:'Checkbox',                   en:'Checkbox'},
-    ui_lab_switch:  {ru:'Switcher',                   en:'Switcher'},
+    ui_lab_switch:  {ru:'Галочка',                    en:'Checkbox'},
     ui_lab_input:   {ru:'Поле ввода',                 en:'Input'},
     ui_lab_textarea:{ru:'Многострочное поле',         en:'Textarea'},
     ui_lab_picker:  {ru:'Picker',                     en:'Picker'},

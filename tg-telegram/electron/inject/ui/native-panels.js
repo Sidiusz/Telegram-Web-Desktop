@@ -325,21 +325,10 @@ async function renderAddonsNative(content){
     content.innerHTML='';
     const addSection=(title,cd)=>_appendNativeSection(content,headerTpl,title,cd);
     const card=()=>_genCard(cardCls);
-    const baseRow=(title,sub)=>{const r=_genNativeSettingRow(liEl,title,sub||'','',null);if(r._value)r._value.remove();const b=r.querySelector('.ListItem-button');if(b)b.querySelectorAll('.Switcher,.Switch,.Toggle,.icon-next,.icon-arrow-right').forEach(x=>x.remove());return r;};
     const groupMembers={};addons.forEach(a=>{if(a.group)(groupMembers[a.group]=groupMembers[a.group]||[]).push(a);});
     function toggleRow(cd,a){
-        const r=baseRow(a.display_name||a.name,a.version?('v'+a.version):''),b=r.querySelector('.ListItem-button');
-        if(!a.embedded){
-            const del=_genIconButton('delete',T('dl_delete'),'tiny',true);
-            del.addEventListener('click',e=>{e.stopPropagation();showModal({
-                title:T('ad_del_t'),msg:'«'+(a.display_name||a.name)+'»?',okText:T('del_upper'),okDanger:true,
-                footerNote:T('twd_reload_notice'),
-                onOk:async()=>{await INV('delete_addon',{name:a.name});await INV('apply_addons');}
-            });});
-            b.appendChild(del);
-        }
         let switchInput=null;
-        const sw=_genSwitcher(!!a.enabled,v=>{
+        const row=_genToggle(a.display_name||a.name,!!a.enabled,v=>{
             if(switchInput)switchInput.checked=!!a.enabled;
             showModal({
                 title:T('ad_reload_toggle'),msg:(a.display_name||a.name),okText:T('save_upper'),
@@ -356,10 +345,19 @@ async function renderAddonsNative(content){
                     await INV('apply_addons');
                 }
             });
-        },a.display_name||a.name);
-        switchInput=sw.querySelector('input[type=checkbox]');
+        },a.version?('v'+a.version):'');
+        switchInput=row.querySelector('input[type=checkbox]');
         a._uiSwitch=switchInput;
-        b.appendChild(sw);cd.appendChild(r);
+        if(!a.embedded){
+            const del=_genIconButton('delete',T('dl_delete'),'tiny',true);
+            del.addEventListener('click',e=>{e.preventDefault();e.stopPropagation();showModal({
+                title:T('ad_del_t'),msg:'«'+(a.display_name||a.name)+'»?',okText:T('del_upper'),okDanger:true,
+                footerNote:T('twd_reload_notice'),
+                onOk:async()=>{await INV('delete_addon',{name:a.name});await INV('apply_addons');}
+            });});
+            const main=row.querySelector('.Checkbox-main')||row;main.appendChild(del);
+        }
+        cd.appendChild(row);
     }
     const embedded=addons.filter(a=>a.embedded),user=addons.filter(a=>!a.embedded);
     if(embedded.length){const cd=card();embedded.forEach(a=>toggleRow(cd,a));addSection(T('ad_builtin'),cd);}

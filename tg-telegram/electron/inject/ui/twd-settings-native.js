@@ -24,26 +24,9 @@ function _twdPassiveText(text){
     return el;
 }
 function _twdSwitchRow(ctx,title,sub,checked,onChange){
-    var r=_genNativeSettingRow(ctx.liEl,title,sub||'','',null);
-    if(r._value)r._value.remove();
-    var b=r.querySelector('.ListItem-button');
-    if(b){
-        b.querySelectorAll('.Switcher,.Switch,.Toggle,.icon-next,.icon-arrow-right').forEach(function(x){x.remove();});
-        var sw=_genSwitcher(!!checked,onChange,title),inp=sw.querySelector('input[type="checkbox"]');
-        b.appendChild(sw);
-        b.setAttribute('role','button');
-        b.setAttribute('tabindex','0');
-        b.addEventListener('click',function(e){
-            if(!inp||e.target.closest('.Switcher,.Switch,.Toggle,input,button,a'))return;
-            inp.click();
-        });
-        b.addEventListener('keydown',function(e){
-            if(!inp||e.target!==b||(e.key!=='Enter'&&e.key!==' '))return;
-            e.preventDefault();
-            inp.click();
-        });
-    }
-    return r;
+    var row=_genToggle(title,!!checked,onChange,sub||'');
+    row.classList.add('_twd-checkbox-setting_');
+    return row;
 }
 function _twdRangeRow(ctx,title,sub,value,min,max,step,format,onChange){
     value=Number(value);min=Number(min);max=Number(max);step=Number(step)||1;
@@ -472,17 +455,14 @@ function _twdRenderAppearance(content,ctx,s){
 var _TWD_FILTER_SHORT_DOMAINS=['bit.ly','gg.gg','clck.ru','cutt.ly','kutt.it','rebrand.ly','tinyurl.com','t.co','is.gd','rb.gy','goo.su','vk.cc','tiny.cc','shorturl.at','lnkd.in'];
 var _TWD_FILTER_REF_DOMAINS=['ali.pub','alii.pub','lite.al','lite.bz','aliclick.link','aliclick.shop','dea.ls','alitems.co','s.click.aliexpress.com','ad.admitad.com','fas.st','epn.bz','redirect.appmetrica.yandex.com','go.redirectingat.com'];
 function _twdExpandableFilterGroup(ctx,title,sub,checked,onChange,body){
-    var r=_genNativeSettingRow(ctx.liEl,title,sub||'','',null),b=r.querySelector('.ListItem-button');
-    if(r._value)r._value.remove();
-    r.classList.add('_twd-filter-expand-row_');
-    var chevron=document.createElement('i');chevron.className='icon icon-down _twd-filter-chevron_';chevron.setAttribute('aria-hidden','true');
-    var sw=_genSwitcher(!!checked,onChange,title);
-    b.append(chevron,sw);
+    var r=document.createElement('div');r.className='_twd-filter-expand-row_';
+    var cb=_genToggle(title,!!checked,onChange,sub||'');
+    var main=cb.querySelector('.Checkbox-main')||cb;
+    var expand=document.createElement('button');expand.type='button';expand.className='Button tiny translucent round _twd-filter-expand-button_';expand.setAttribute('aria-label',title||'');
+    var chevron=document.createElement('i');chevron.className='icon icon-down _twd-filter-chevron_';chevron.setAttribute('aria-hidden','true');expand.appendChild(chevron);main.appendChild(expand);r.appendChild(cb);
     var open=false;
-    function paint(){body.hidden=!open;chevron.classList.toggle('_open_',open);r.classList.toggle('_open_',open);}
-    b.setAttribute('role','button');b.setAttribute('tabindex','0');
-    b.addEventListener('click',function(e){if(e.target.closest('.Switcher,.Switch,.Toggle,input,button,a'))return;open=!open;paint();});
-    b.addEventListener('keydown',function(e){if(e.target!==b||(e.key!=='Enter'&&e.key!==' '))return;e.preventDefault();open=!open;paint();});
+    function paint(){body.hidden=!open;chevron.classList.toggle('_open_',open);r.classList.toggle('_open_',open);expand.setAttribute('aria-expanded',open?'true':'false');}
+    expand.addEventListener('click',function(e){e.preventDefault();e.stopPropagation();open=!open;paint();});
     paint();return r;
 }
 function _twdFilterDomainBody(ctx,domains,disabled,onUpdate){

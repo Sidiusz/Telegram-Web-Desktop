@@ -511,9 +511,11 @@ test('global unread and typing privacy defaults are off and RPC guard is injecte
     assert.match(ui, /aria-pressed/);
     assert.match(ui, /return page==='privacy_peers'\?'messages':'root'/);
     assert.match(ui, /privacy_no_read_force_on','privacy_no_read_force_off','privacy_no_typing_force_on','privacy_no_typing_force_off/);
-    assert.match(ui, /e\.target\.closest\('\.Switcher,\.Switch,\.Toggle,input,button,a'\)/);
-    assert.match(ui, /inp\.click\(\)/);
-    assert.match(ui, /e\.key!==\'Enter\'&&e\.key!==\' \'/);
+    assert.match(ui, /function _twdSwitchRow\(ctx,title,sub,checked,onChange\)[\s\S]*?_genToggle\(title,!!checked,onChange,sub\|\|''\)/);
+    assert.doesNotMatch(ui, /_genSwitcher\(/);
+    assert.doesNotMatch(read('electron/inject/ui/native-panels.js'), /_genSwitcher\(/);
+    assert.doesNotMatch(read('electron/inject/ui/ui-lab.js'), /_genSwitcher\(/);
+    assert.doesNotMatch(read('electron/inject/ui/settings-render.js'), /function _genSwitcher\(/);
     assert.match(lang, /Нечиталка везде/);
     assert.match(lang, /Неписалка везде/);
     assert.match(lang, /Менеджер нечиталки\/неписалки/);
