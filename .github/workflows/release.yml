@@ -51,12 +51,20 @@ jobs:
           $source = "tg-telegram/dist/Telegram Web Desktop Setup $version.exe"
           $installer = "tg-telegram/dist/Telegram.Web.Desktop.Setup.$version.exe"
           $notes = ".github/release-notes/$version.md"
-          if (gh release view $version *> $null) {
-            gh release delete $version --yes
-          }
-          Copy-Item $source $installer -Force
-          if (Test-Path $notes) {
-            gh release create $version $installer --title $version --notes-file $notes --verify-tag --latest
+          $releaseId = gh api "repos/$env:GITHUB_REPOSITORY/releases/tags/$version" --jq '.id' 2>$null
+          if ($LASTEXITCODE -eq 0 -and $releaseId) {
+            if (Test-Path $notes) {
+              $payloadPath = Join-Path $env:RUNNER_TEMP 'release-notes.json'
+              $payload = @{ name = $version; body = (Get-Content $notes -Raw); draft = $false; prerelease = $false } | ConvertTo-Json -Compress
+              [IO.File]::WriteAllText($payloadPath, $payload, [Text.UTF8Encoding]::new($false))
+              gh api --method PATCH "repos/$env:GITHUB_REPOSITORY/releases/$releaseId" --input $payloadPath | Out-Null
+              if ($LASTEXITCODE -ne 0) { throw "Failed to update release $version notes" }
+            }
           } else {
-            gh release create $version $installer --title $version --generate-notes --verify-tag --latest
+            Copy-Item $source $installer -Force
+            if (Test-Path $notes) {
+              gh release create $version $installer --title $version --notes-file $notes --verify-tag --latest
+            } else {
+              gh release create $version $installer --title $version --generate-notes --verify-tag --latest
+            }
           }
