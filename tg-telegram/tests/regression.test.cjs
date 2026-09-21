@@ -294,7 +294,9 @@ test('built-in client features are separate from user add-ons', () => {
     assert.match(base, /custom-message-avatar/);
     assert.match(base, /is-in-document-group \.message-content\.audio/);
     assert.match(base, /Message\.own:not\(\.is-in-document-group\):has\(\.message-content\.media\)/);
-    assert.match(base, /#MiddleColumn #MiddleSearch:not\(\.visually-hidden\) > :first-child[\s\S]{0,100}top: 72px !important/);
+    assert.doesNotMatch(base, /#MiddleColumn #MiddleSearch:not\(\.visually-hidden\)/);
+    assert.match(standard, /#MiddleColumn #MiddleSearch:not\(\.visually-hidden\) > :first-child[\s\S]{0,220}top: 16px !important[\s\S]{0,220}left: 0 !important/);
+    assert.match(wide, /#MiddleColumn #MiddleSearch:not\(\.visually-hidden\) > :first-child[\s\S]{0,260}top: 16px !important[\s\S]{0,260}left: 1rem !important[\s\S]{0,320}width: calc\(100% - 2rem - var\(--tgdl-rc, 0px\)\) !important/);
     assert.match(common, /window\.__twdDesktopLikeCommon/);
     assert.match(common, /window\.__twdDesktopLikeRuntimeStarted/);
     assert.match(common, /function injectAvatars\(/);

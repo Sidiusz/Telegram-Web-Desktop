@@ -59,6 +59,18 @@
                 box-sizing: border-box !important;
             }
             ._tg_right_open #MiddleColumn .MiddleHeader { transform: none !important; }
+
+            /* Search replaces the chat header. Match the widened header exactly
+               instead of keeping Telegram's native centered 728px search island. */
+            #MiddleColumn #MiddleSearch:not(.visually-hidden) > :first-child {
+                top: 16px !important;
+                left: 1rem !important;
+                right: auto !important;
+                width: calc(100% - 2rem - var(--tgdl-rc, 0px)) !important;
+                max-width: calc(100% - 2rem - var(--tgdl-rc, 0px)) !important;
+                margin: 0 !important;
+                box-sizing: border-box !important;
+            }
         `;
         document.head.appendChild(s);
     }

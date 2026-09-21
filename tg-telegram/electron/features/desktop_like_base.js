@@ -161,12 +161,6 @@
             white-space: pre-wrap !important;
         }
 
-        /* Telegram hides the pinned-message island while chat search is open. Keep
-           the normal chat header intact and put the search row into that freed slot. */
-        #MiddleColumn #MiddleSearch:not(.visually-hidden) > :first-child {
-            top: 72px !important;
-        }
-
         #MiddleColumn .Message.own .message-content[data-tgdl-appendix] .svg-appendix {
             display: block !important;
         }

@@ -23,6 +23,16 @@
                 max-width: calc(100% - var(--tgdl-rc, 0px)) !important;
                 transform: none !important;
             }
+
+            /* Search replaces the chat header and must follow the same left edge
+               as the standard desktop header instead of staying centered. */
+            #MiddleColumn #MiddleSearch:not(.visually-hidden) > :first-child {
+                top: 16px !important;
+                left: 0 !important;
+                right: auto !important;
+                margin-left: 0 !important;
+                margin-right: auto !important;
+            }
         `;
         document.head.appendChild(s);
     }
