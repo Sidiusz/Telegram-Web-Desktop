@@ -188,19 +188,20 @@ function registerIpc(getWindow) {
     // UI Lab visual variants bypass user privacy so every state can be inspected.
     // The settings preview uses the real duration/privacy/avatar settings, but still
     // bypasses popup/category enablement because clicking «Check» is an explicit test.
-    handle('preview_notification', (e, { mode, icon, peerId, title, body } = {}) => {
+    handle('preview_notification', (e, { mode, icon, peerId, title, body, previewSettings } = {}) => {
         const allowed = new Set(['normal','hidden-text','hidden-sender','hidden-all','no-avatar','long-text','settings']);
         const variant = allowed.has(mode) ? mode : 'normal';
         const settings = state.settings || loadSettings();
         const settingsPreview = variant === 'settings';
+        const explicit = previewSettings && typeof previewSettings === 'object' ? previewSettings : null;
         const hideSender = settingsPreview
-            ? settings.notif_hide_sender === true
+            ? (explicit ? explicit.hideSender === true : settings.notif_hide_sender === true)
             : (variant === 'hidden-sender' || variant === 'hidden-all');
         const hideText = settingsPreview
-            ? settings.notif_hide_text === true
+            ? (explicit ? explicit.hideText === true : settings.notif_hide_text === true)
             : (variant === 'hidden-text' || variant === 'hidden-all');
         const hideAvatar = settingsPreview
-            ? (hideSender || settings.notif_hide_avatar === true)
+            ? (hideSender || (explicit ? explicit.hideAvatar === true : settings.notif_hide_avatar === true))
             : (hideSender || variant === 'no-avatar');
         const previewBody = variant === 'long-text'
             ? (body || 'Длинный тестовый текст уведомления для проверки переноса строк, высоты карточки и поведения кнопок в расширенном desktop popup.')
@@ -214,7 +215,9 @@ function registerIpc(getWindow) {
             btnOpen: ntr('open'),
             btnRead: ntr('read'),
             playSound: false,
-            duration: settingsPreview ? (settings.notif_duration || 6) : 12,
+            duration: settingsPreview
+                ? (explicit && Number.isFinite(Number(explicit.duration)) ? Number(explicit.duration) : (settings.notif_duration || 6))
+                : 12,
         });
         return { ok: true, mode: variant };
     });

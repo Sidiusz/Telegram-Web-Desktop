@@ -197,11 +197,27 @@ async function telegramTarget(port) {
     assert.equal(fs.existsSync(streamedPath), false, 'smoke blob file must be deleted after verification');
 
     await waitFor(() => cdp.eval('window.__tgNotifIntercept === true'), 15000, 'notification interception');
-    await cdp.eval('window.tgBridge.invoke("show_notification",{title:"TWD smoke",body:"notification pipeline",peerId:"1"}).then(()=>true)');
-    await waitFor(async () => {
+    await cdp.eval(`window.tgBridge.invoke("preview_notification",{
+      mode:"settings",title:"VISIBLE PREVIEW NAME",body:"VISIBLE PREVIEW BODY",peerId:"1",icon:"",
+      previewSettings:{hideText:true,hideSender:true,hideAvatar:true,duration:2}
+    }).then(()=>true)`);
+    const popupTarget = await waitFor(async () => {
       const list = await jsonGet(port, '/json/list');
-      return list.some(x => x.type === 'page' && /^data:text\/html/.test(x.url));
+      return list.find(x => x.type === 'page' && /^data:text\/html/.test(x.url)) || null;
     }, 10000, 'notification popup renderer');
+    const popupCdp = new Cdp(popupTarget.webSocketDebuggerUrl);
+    await popupCdp.open();
+    try {
+      const privacyPreview = await waitFor(async () => popupCdp.eval(`(()=>{
+        const cards=[...document.querySelectorAll('.card')];const c=cards[cards.length-1];if(!c)return null;
+        return {title:c.querySelector('.title')?.textContent||'',body:c.querySelector('.text')?.textContent||'',hasImage:!!c.querySelector('.avatar img'),avatar:c.querySelector('.avatar')?.textContent?.trim()||''};
+      })()`), 5000, 'privacy notification preview');
+      assert.notEqual(privacyPreview.title, 'VISIBLE PREVIEW NAME');
+      assert.notEqual(privacyPreview.body, 'VISIBLE PREVIEW BODY');
+      assert.equal(privacyPreview.hasImage, false);
+      assert.equal(Array.from(privacyPreview.avatar).length, 1);
+    } finally { popupCdp.close(); }
+    await cdp.eval('window.tgBridge.invoke("show_notification",{title:"TWD smoke",body:"notification pipeline",peerId:"1"}).then(()=>true)');
 
     // Force the Telegram renderer to crash. window.cjs must recover it in-place.
     try { await cdp.call('Page.crash'); } catch (_) {}

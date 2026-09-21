@@ -535,9 +535,16 @@ function _twdNotificationPreviewIcon(){
 async function _twdPreviewCurrentNotification(){
     try{
         await _twdSaveQueue.catch(function(){});
+        var current=await INV('get_settings').catch(function(){return{};});
         var request=INV('preview_notification',{
             mode:'settings',icon:_twdNotificationPreviewIcon(),peerId:'',
-            title:T('twd_notif_check_sender'),body:T('twd_notif_check_body')
+            title:T('twd_notif_check_sender'),body:T('twd_notif_check_body'),
+            previewSettings:{
+                hideText:current.notif_hide_text===true,
+                hideSender:current.notif_hide_sender===true,
+                hideAvatar:current.notif_hide_avatar===true,
+                duration:Number(current.notif_duration)||6
+            }
         });
         try{window.dispatchEvent(new CustomEvent('__twd_preview_notification_sound'));}catch(_){}
         await request;
