@@ -723,33 +723,40 @@ window.__tgMarkAllRead=function(){
     // (INV('get_settings')), уведомления реагируют на переключатели без перезагрузки.
     var cfg={notif_sound:true,notif_volume:0.8,notif_cat_private:true,notif_cat_group:true,notif_cat_channel:true};
     function refreshCfg(){
-        try{ INV('get_settings').then(function(s){ if(s)cfg=s; }).catch(function(){}); }catch(e){}
+        try{return INV('get_settings').then(function(s){if(s)cfg=s;return cfg;}).catch(function(){return cfg;});}
+        catch(e){return Promise.resolve(cfg);}
     }
     refreshCfg();
     setInterval(refreshCfg,2000);
 
     // Ловим момент, когда сам Telegram играет notification.mp3 — для де-дупа.
+    var _nativeMediaPlay=null;
     try{
-        var _play=HTMLMediaElement.prototype.play;
+        _nativeMediaPlay=HTMLMediaElement.prototype.play;
         HTMLMediaElement.prototype.play=function(){
             try{ if((((this.src||this.currentSrc)||'')+'').indexOf('notification')>=0) lastTgSound=Date.now(); }catch(e){}
-            return _play.apply(this,arguments);
+            return _nativeMediaPlay.apply(this,arguments);
         };
     }catch(e){}
 
     var SND=location.origin+'/a/notification.mp3';
-    function playSound(){
+    function playSound(force){
         if(!cfg.notif_sound)return;                  // звук выключен в настройках
-        if(Date.now()-lastTgSound<1500)return;       // TG уже сыграл свой — не дублируем
+        if(!force&&Date.now()-lastTgSound<1500)return; // TG уже сыграл свой — не дублируем обычное уведомление
         try{
             var a=new Audio(SND);
             var v=parseFloat(cfg.notif_volume);
             if(!isNaN(v))a.volume=Math.max(0,Math.min(1,v));
-            a.play().catch(function(){});
+            var p=force&&typeof _nativeMediaPlay==='function'?_nativeMediaPlay.call(a):a.play();
+            if(p&&typeof p.catch==='function')p.catch(function(){});
         }catch(e){}
     }
 
     // Окно: открытый чат и фокус — для пропуска активного чата (нет состояния «фокус»).
+    window.addEventListener('__twd_preview_notification_sound',function(){
+        refreshCfg().then(function(){playSound(true);});
+    });
+
     function currentPeer(){
         var m=(location.hash||'').match(/#(-?\d+)/);if(m)return m[1];
         var el=document.querySelector('.MiddleHeader .ChatInfo .Avatar[data-peer-id]');return el?el.getAttribute('data-peer-id'):'';

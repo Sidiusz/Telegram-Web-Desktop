@@ -941,6 +941,12 @@ test('desktop notification popup follows Telegram toast geometry and has no dead
     assert.match(ipc, /hidden-text/);
     assert.match(ipc, /hidden-sender/);
     assert.match(ipc, /hidden-all/);
+    assert.match(ipc, /'settings'/);
+    assert.match(ipc, /const settingsPreview = variant === 'settings'/);
+    assert.match(ipc, /settings\.notif_hide_sender === true/);
+    assert.match(ipc, /settings\.notif_hide_text === true/);
+    assert.match(ipc, /settings\.notif_hide_avatar === true/);
+    assert.match(ipc, /settingsPreview \? \(settings\.notif_duration \|\| 6\) : 12/);
     assert.match(preload, /'preview_notification'/);
     assert.match(intercept, /__twdNotifHealthTimer/);
     assert.match(intercept, /__twdNotifStateRepairTimer/);
@@ -955,11 +961,23 @@ test('desktop notification popup follows Telegram toast geometry and has no dead
     const lang = read('electron/inject/ui/lang.js');
     assert.match(twdSettings, /T\('ns_hide_avatar'\)/);
     assert.match(twdSettings, /notif_hide_avatar/);
+    assert.match(twdSettings, /function _twdPreviewCurrentNotification\(\)/);
+    assert.match(twdSettings, /mode:'settings'/);
+    assert.match(twdSettings, /__twd_preview_notification_sound/);
+    assert.match(twdSettings, /T\('twd_notif_check'\)/);
     assert.match(lang, /ns_hide_avatar:[^\n]*Скрывать аватарки входящих сообщений/);
+    assert.match(lang, /twd_notif_check:\{ru:'Проверить'/);
+    assert.match(lang, /twd_notif_check_desc:[^\n]*звука, времени и приватности/);
 });
 
 test('notification category filter distinguishes Telegram channels from groups', () => {
     const bootstrap = read('electron/inject/ui/bootstrap.js');
+    assert.match(bootstrap, /function playSound\(force\)/);
+    assert.match(bootstrap, /var _nativeMediaPlay=null/);
+    assert.match(bootstrap, /force&&typeof _nativeMediaPlay==='function'\?_nativeMediaPlay\.call\(a\):a\.play\(\)/);
+    assert.match(bootstrap, /if\(!force&&Date\.now\(\)-lastTgSound<1500\)return/);
+    assert.match(bootstrap, /__twd_preview_notification_sound/);
+    assert.match(bootstrap, /refreshCfg\(\)\.then\(function\(\)\{playSound\(true\);\}\)/);
     assert.match(bootstrap, /function currentPeer\(\)[\s\S]{0,120}location\.hash[\s\S]{0,80}#\(-\?\\d\+\)/);
     assert.match(bootstrap, /function domAvatar\(pid\)[\s\S]{0,420}a\[href\^=\"#\"\][\s\S]{0,220}chatId===want/);
     assert.match(bootstrap, /indexedDB\.open\('tt-data'\)/);
