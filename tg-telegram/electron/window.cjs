@@ -46,8 +46,18 @@ function createWindow(state, onTelegramLink, options = {}) {
         ? 'fallback' : 'auto';
     if (webAMode === 'fallback') console.log('[TG-PROXY] Web A fallback pre-armed from previous direct failure');
     let fallbackReloadScheduled = false;
+    function isWebAUrl(url, protocol) {
+        try {
+            const u = new URL(url);
+            return (!protocol || u.protocol === protocol) && u.hostname === 'web.telegram.org' &&
+                (u.pathname === '/a' || u.pathname.startsWith('/a/'));
+        } catch (_) { return false; }
+    }
     function isWebAEntry(url) {
-        try { const p = new URL(url).pathname; return p === '/a' || p === '/a/'; } catch (_) { return false; }
+        try {
+            const u = new URL(url);
+            return u.hostname === 'web.telegram.org' && (u.pathname === '/a' || u.pathname === '/a/');
+        } catch (_) { return false; }
     }
     function scheduleFallbackReload() {
         if (fallbackReloadScheduled || !mainWindow || mainWindow.isDestroyed()) return;
@@ -129,7 +139,7 @@ function createWindow(state, onTelegramLink, options = {}) {
             ses.protocol.handle('https', async (request) => {
                 const url = request.url;
                 if (isTelegramWebsyncUrl(url)) return telegramWebsyncNoopResponse();
-                const isTgCandidate = url.startsWith('https://web.telegram.org/a');
+                const isTgCandidate = isWebAUrl(url, 'https:');
                 if (!isTgCandidate) {
                     return net.fetch(request, { bypassCustomProtocolHandlers: true });
                 }
@@ -157,7 +167,7 @@ function createWindow(state, onTelegramLink, options = {}) {
                     ses.protocol.handle('http', async (request) => {
                         const url = request.url;
                         if (isTelegramWebsyncUrl(url)) return telegramWebsyncNoopResponse();
-                        const isTgCandidate = url.startsWith('http://web.telegram.org/a');
+                        const isTgCandidate = isWebAUrl(url, 'http:');
                         if (!isTgCandidate) return net.fetch(request, { bypassCustomProtocolHandlers: true });
                         let resp = await fetchTelegramAsset(request, url);
                         resp = await injectTelegramWorkerProxy(resp, url);
@@ -366,6 +376,13 @@ function createWindow(state, onTelegramLink, options = {}) {
         const originalFilename = sanitizeFilename(rawName);
 
         const downloadDir = settings.save_path || app.getPath('downloads');
+        try {
+            fs.mkdirSync(downloadDir, { recursive: true });
+        } catch (e) {
+            console.error('[DOWNLOAD] save directory is unavailable:', e && e.message ? e.message : e);
+            try { item.cancel(); } catch (_) {}
+            return;
+        }
         item.setSavePath(uniquePath(path.join(downloadDir, originalFilename)));
 
         state.downloadCounter += 1;

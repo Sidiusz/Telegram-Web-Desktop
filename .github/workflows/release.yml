@@ -52,4 +52,8 @@ jobs:
           $installer = "tg-telegram/dist/Telegram.Web.Desktop.Setup.$version.exe"
           $notes = ".github/release-notes/$version.md"
           Copy-Item $source $installer -Force
-          gh release create $version $installer --title $version --notes-file $notes --verify-tag --latest
+          if (Test-Path $notes) {
+            gh release create $version $installer --title $version --notes-file $notes --verify-tag --latest
+          } else {
+            gh release create $version $installer --title $version --generate-notes --verify-tag --latest
+          }

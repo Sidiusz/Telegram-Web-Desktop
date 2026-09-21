@@ -86,7 +86,7 @@ function _twdConfigureHistory(patch){
     var map={
         messages_show_deleted:'showDeleted',messages_show_disappearing:'showDisappearing',
         messages_save_deleted:'saveDeleted',messages_save_disappearing:'saveDisappearing',
-        messages_edit_history:'editHistory',messages_history_scope:'scope'
+        messages_edit_history:'editHistory',messages_save_public:'savePublic',messages_history_scope:'scope'
     };
     var next={};
     Object.keys(patch||{}).forEach(function(k){if(map[k])next[map[k]]=patch[k];});
@@ -339,6 +339,9 @@ function _twdRenderMessages(content,ctx,s){
     saved.appendChild(_twdSwitchRow(ctx,T('twd_edit_history'),T('twd_edit_history_desc'),!!s.messages_edit_history,function(v){
         _twdConfigureHistory({messages_edit_history:v});
     }));
+    saved.appendChild(_twdSwitchRow(ctx,T('twd_save_public'),T('twd_save_public_desc'),s.messages_save_public===true,function(v){
+        _twdConfigureHistory({messages_save_public:v});
+    }));
     var scopes={chat:T('twd_history_scope_chat'),client:T('twd_history_scope_client'),always:T('twd_history_scope_always')};
     var scope=s.messages_history_scope||'client';
     var scopeRow=_genNativeSettingRow(ctx.liEl,T('twd_history_scope'),'',scopes[scope]||scopes.client,function(v){
@@ -377,7 +380,8 @@ function _twdRenderNotifications(content,ctx,s){
         function(v){return String(Math.round(v))+T('unit_sec');},
         function(v){_twdSave({notif_duration:Math.round(v)});}
     ));
-    var volume=Math.round((Number(s.notif_volume)||0.8)*100);
+    var rawVolume=Number(s.notif_volume);
+    var volume=Math.round((Number.isFinite(rawVolume)?rawVolume:0.8)*100);
     basic.appendChild(_twdRangeRow(
         ctx,T('twd_notif_volume'),' ',volume,0,100,5,
         function(v){return String(Math.round(v))+'%';},

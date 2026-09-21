@@ -18,6 +18,7 @@ test('Telegram deep links normalize without launching anything', () => {
     assert.equal(normalizeToTg('https://t.me/joinchat/AbCd_123'), 'tg://join?invite=AbCd_123');
     assert.equal(normalizeToTg('https://t.me/c/12345/678'), 'tg://privatepost?channel=12345&post=678');
     assert.equal(normalizeToTg('https://t.me/c/12345/7/678'), 'tg://privatepost?channel=12345&thread=7&post=678');
+    assert.equal(normalizeToTg('https://t.me/c/12345/678?channel=999&post=999&thread=9&single=1'), 'tg://privatepost?single=1&channel=12345&post=678');
     assert.equal(normalizeToTg('https://example.com/test'), null);
 });
 
@@ -95,6 +96,9 @@ test('navigation and renderer-crash recovery guards remain installed', () => {
     assert.match(src, /function repaintWindowSurface\(\)/);
     assert.match(src, /webContents\.invalidate\(\)/);
     assert.match(src, /WEB_A_ENTRY_TIMEOUT_MS = 8000/);
+    assert.match(src, /function isWebAUrl\(url, protocol\)/);
+    assert.match(src, /u\.hostname === 'web\.telegram\.org'[\s\S]{0,120}u\.pathname === '\/a' \|\| u\.pathname\.startsWith\('\/a\/'\)/);
+    assert.doesNotMatch(src, /url\.startsWith\('https:\/\/web\.telegram\.org\/a'\)/);
     assert.match(src, /AbortSignal\.timeout\(WEB_A_ENTRY_TIMEOUT_MS\)/);
     assert.doesNotMatch(src, /new AbortController\(\)/);
     assert.match(src, /if \(entry\) return fetchTelegramWebAFallback\(url\)/);
@@ -129,6 +133,7 @@ test('developer tools stay locked until the setting is enabled', () => {
 
 test('download and addon safety regressions stay covered', () => {
     const ipc = read('electron/ipc.cjs');
+    const win = read('electron/window.cjs');
     const downloads = read('electron/downloads.cjs');
     const downloadRegistry = read('electron/inject/ui/downloads-registry.js');
     const nativePanels = read('electron/inject/ui/native-panels.js');
@@ -149,6 +154,9 @@ test('download and addon safety regressions stay covered', () => {
     assert.match(ipc, /handle\('open_downloads_folder'/);
     assert.match(ipc, /shell\.openPath\(dir\)/);
     assert.match(ipc, /normalizeDownloadId/);
+    assert.match(ipc, /handle\('delete_download', async[\s\S]{0,300}cancelActive\(safeId\)[\s\S]{0,180}cancelBlobSaveByDownloadId\(safeId\)/);
+    assert.match(win, /fs\.mkdirSync\(downloadDir, \{ recursive: true \}\)/);
+    assert.match(win, /\[DOWNLOAD\] save directory is unavailable/);
     assert.match(nativePanels, /function _nativeDlRow\(/);
     assert.match(nativePanels, /function _downloadStatusText\(d\)/);
     assert.match(nativePanels, /fmtProgress\(recv,total\)/);
@@ -184,6 +192,11 @@ test('download and addon safety regressions stay covered', () => {
     assert.match(ipc, /type: 'progress'/);
     assert.match(ipc, /await fs\.promises\.rename\(item\.temp, item\.dest\)/);
     assert.match(ipc, /cancelBlobSaveByDownloadId/);
+    assert.match(ipc, /function detachBlobSender\(item\)/);
+    assert.match(ipc, /removeListener\('destroyed', item\.senderDestroyedHandler\)/);
+    assert.match(ipc, /senderDestroyedHandler: null/);
+    assert.match(ipc, /event\.sender\.once\('destroyed', item\.senderDestroyedHandler\)/);
+    assert.match(ipc, /handle\('begin_blob_save'[\s\S]{0,550}fs\.mkdirSync\(dir, \{ recursive: true \}\)[\s\S]{0,180}mkdir-failed/);
     assert.doesNotMatch(ipc, /handle\('save_blob'/);
     assert.doesNotMatch(ipc, /384 \* 1024 \* 1024/);
     assert.match(preload, /'open_downloads_folder'/);
@@ -217,6 +230,7 @@ test('notification interception and popup crash recovery are present', () => {
 test('release hardening fuses stay enabled', () => {
     const pkg = JSON.parse(read('package.json'));
     const release = read('scripts/release-build.cjs');
+    const workflow = fs.readFileSync(path.join(root, '..', '.github', 'workflows', 'release.yml'), 'utf8');
     const f = pkg.build.electronFuses;
     assert.equal(f.runAsNode, false);
     assert.equal(f.enableNodeOptionsEnvironmentVariable, false);
@@ -227,6 +241,8 @@ test('release hardening fuses stay enabled', () => {
     assert.match(release, /run\(process\.execPath, \[npmCli, 'test'\]/);
     assert.match(release, /run\(process\.execPath, \[npmCli, 'run', 'test:smoke'\]/);
     assert.match(release, /electron-builder.*out.*cli.*cli\.js/s);
+    assert.match(workflow, /if \(Test-Path \$notes\)/);
+    assert.match(workflow, /--generate-notes --verify-tag --latest/);
     assert.doesNotMatch(release, /WIN_CSC_LINK|CSC_LINK|forceCodeSigning|Authenticode|signingConfigured|Signed release|Unsigned release/i);
 });
 
@@ -615,6 +631,8 @@ test('custom UI stays inside Telegram Settings and keeps native navigation seman
     assert.match(twd, /messages_save_deleted/);
     assert.match(twd, /messages_save_disappearing/);
     assert.match(twd, /messages_edit_history/);
+    assert.match(twd, /messages_save_public/);
+    assert.match(twd, /T\('twd_save_public'\)/);
     assert.match(twd, /messages_history_scope/);
     assert.match(twd, /twd_history_limits/);
     assert.match(twd, /_twdPassiveText\(T\('twd_history_limits'\)\)/);
@@ -632,7 +650,12 @@ test('custom UI stays inside Telegram Settings and keeps native navigation seman
     assert.doesNotMatch(lang, /twd_history_scope_desc/);
     const ruVisibleStrings=[...lang.matchAll(/ru:'((?:\\.|[^'])*)'/g)].map(m=>m[1].replace(/<[^>]*>/g,''));
     ruVisibleStrings.forEach(text=>assert.doesNotMatch(text,/\"/,'Russian visible UI text must use «ёлочки», not straight quotes'));
+    assert.match(lang, /twd_save_deleted:\{ru:'Сохранять удалённые сообщения'/);
+    assert.doesNotMatch(lang, /twd_save_deleted:\{ru:'Сохранять все удалённые сообщения'/);
+    assert.match(lang, /twd_save_public:\{ru:'Сохранять публичные чаты'/);
     assert.match(lang, /twd_history_scope:\{ru:'Метод сохранения сообщений'/);
+    assert.match(lang, /twd_history_scope_client:\{ru:'Активный процесс'/);
+    assert.doesNotMatch(lang, /twd_history_scope_client:\{ru:'Пока открыт клиент'/);
     assert.doesNotMatch(lang, /twd_history_scope:\{ru:'Как сохранять'/);
     assert.match(lang, /twd_edit_history_desc:\{ru:'[^']*«\(ред\.\)»/);
     assert.doesNotMatch(lang, /twd_edit_history_desc:\{ru:'[^']*"\(ред\.\)"/);
@@ -654,6 +677,9 @@ test('custom UI stays inside Telegram Settings and keeps native navigation seman
     assert.match(twd, /_twdSaveQueue=_twdSaveQueue\.catch/);
     assert.match(twd, /input\.type='range'/);
     assert.match(twd, /notif_duration:Math\.round\(v\)/);
+    assert.match(twd, /var rawVolume=Number\(s\.notif_volume\)/);
+    assert.match(twd, /Number\.isFinite\(rawVolume\)\?rawVolume:0\.8/);
+    assert.doesNotMatch(twd, /Number\(s\.notif_volume\)\|\|0\.8/);
     assert.match(twd, /notif_volume:Math\.max\(0,Math\.min\(100,v\)\)\/100/);
     assert.doesNotMatch(twd, /\['updates','reload'/);
     assert.doesNotMatch(twd, /if\(page==='updates'\)/);
@@ -679,6 +705,8 @@ test('custom UI stays inside Telegram Settings and keeps native navigation seman
     assert.doesNotMatch(panels, /function openAppSettingsNative/);
 
     assert.match(bootstrap, /setupNativeWidgetCapture\(\)/);
+    assert.match(bootstrap, /let bound=null, boundObserver=null, seq=0/);
+    assert.match(bootstrap, /if\(boundObserver\)\{boundObserver\.disconnect\(\);boundObserver=null;\}/);
     assert.doesNotMatch(bootstrap, /setupNotificationSettingsSync\(\)/);
     assert.match(bootstrap, /__tgOpenAppSettings=function\(\)\{ try\{ openTwdNative\('root'\)/);
     assert.doesNotMatch(notifications, /injectNotifBlock|injectGeneralSettings|injectAboutSection/);
@@ -725,6 +753,7 @@ test('message history keeps memory independent from local persistence scope', ()
     const preload = read('electron/preload.js');
     assert.equal(fs.existsSync(path.join(root, 'electron/message-history.cjs')), false);
     assert.match(ipc, /get_history_bootstrap/);
+    assert.match(ipc, /savePublic: s\.messages_save_public === true/);
     assert.match(ipc, /handle\('get_window_state'/);
     assert.match(ipc, /win\.isVisible\(\)/);
     assert.match(ipc, /win\.isMinimized\(\)/);
@@ -732,7 +761,9 @@ test('message history keeps memory independent from local persistence scope', ()
     assert.doesNotMatch(ipc, /handle\('history_sync'/);
     assert.doesNotMatch(ipc, /handle\('history_mark_deleted'/);
     assert.match(preload, /historyHandleWorkerMessage/);
-    assert.match(preload, /const historyEnabled = true/);
+    assert.match(preload, /function historyEnabled\(\)/);
+    assert.match(preload, /c\.showDeleted === true[\s\S]{0,180}c\.editHistory === true/);
+    assert.doesNotMatch(preload, /const historyEnabled = true/);
     assert.match(preload, /__twd_history_config/);
     assert.match(preload, /this\.addEventListener\('message', historyHandleWorkerMessage\)/);
     assert.match(preload, /update\['@type'\] === 'deleteMessages'/);
@@ -740,13 +771,23 @@ test('message history keeps memory independent from local persistence scope', ()
     assert.match(preload, /historyByMessageId\.set/);
     assert.match(preload, /if \(!item && active\) item = historyDomSnapshot\(active, messageId\)/);
     assert.match(preload, /function historyIsPrivate\(chatId\)/);
-    assert.match(preload, /!historyIsPrivate\(chatId\)/);
-    assert.match(preload, /!historyIsPrivate\(item\.chatId\)/);
+    assert.match(preload, /function historyChatAllowed\(chatId\)/);
+    assert.match(preload, /historyConfig && historyConfig\.savePublic === true/);
+    assert.match(preload, /!historyChatAllowed\(chatId\)/);
+    assert.match(preload, /!historyChatAllowed\(item\.chatId\)/);
+    assert.match(feature, /function historyEnabled\(\)/);
+    assert.doesNotMatch(feature, /if \(!cfg\.showDeleted && !cfg\.showDisappearing && !cfg\.saveDeleted && !cfg\.saveDisappearing && !cfg\.editHistory\) return/);
+    assert.match(feature, /function isValidChatId\(chatId\)/);
     assert.match(feature, /function isPrivateChatId\(chatId\)/);
-    assert.match(feature, /!isPrivateChatId\(chatId\)/);
+    assert.match(feature, /function historyChatAllowed\(chatId\)/);
+    assert.match(feature, /cfg\.savePublic === true/);
+    assert.match(feature, /!historyChatAllowed\(chatId\)/);
+    assert.match(feature, /!isValidChatId\(rec\.chatId\)/);
+    assert.match(feature, /!isValidChatId\(x\.chatId\)/);
     assert.match(feature, /function shouldPersistEvent\(chatId\)/);
     assert.match(feature, /get_window_state/);
-    assert.match(feature, /state\.visible === true && state\.minimized !== true/);
+    assert.match(feature, /state\.visible === true \|\| state\.minimized === true/);
+    assert.doesNotMatch(feature, /state\.visible === true && state\.minimized !== true/);
     assert.match(feature, /savedEdits/);
     assert.match(feature, /persistEditIfAllowed/);
     assert.match(feature, /persistDeletionIfAllowed/);
@@ -760,7 +801,8 @@ test('message history keeps memory independent from local persistence scope', ()
     assert.match(feature, /document\.addEventListener\('contextmenu'/);
     assert.match(feature, /MessageContextMenu_items/);
     assert.match(feature, /_twd-edit-history-menu_/);
-    assert.match(feature, /_twdFitMenuViewport\(items\)/);
+    assert.match(feature, /window\.__twdFitMenuViewport\(items\)/);
+    assert.match(read('electron/inject/ui/core.js'), /window\.__twdFitMenuViewport=_twdFitMenuViewport/);
     assert.doesNotMatch(feature, /_twd-edit-history-badge_/);
     assert.match(feature, /domTextSnapshots/);
     assert.match(feature, /trackDomMessage/);
@@ -795,6 +837,9 @@ test('message history keeps memory independent from local persistence scope', ()
     assert.doesNotMatch(feature, /_twd-history-native_ \.modal-dialog/);
     assert.match(feature, /window\.__twdMessageHistoryApi/);
     assert.match(feature, /configure: function \(next\)/);
+    assert.match(feature, /if\(historyEnabled\(\)\)startAddedObserver\(\);else stopAddedObserver\(\)/);
+    assert.match(feature, /function stopAddedObserver\(\)/);
+    assert.match(feature, /if\(historyEnabled\(\)\)startAddedObserver\(\);/);
     assert.match(feature, /reconcileDeletedVisibility\(\)/);
 });
 
@@ -859,6 +904,9 @@ test('desktop notification popup follows Telegram toast geometry and has no dead
     assert.match(notif, /sanitizePopupIcon/);
     assert.match(notif, /const CARD_HEIGHT = 156/);
     assert.match(notif, /const STACK_HEIGHT = CARD_HEIGHT \* MAX_CARDS \+ CARD_GAP \* \(MAX_CARDS - 1\)/);
+    assert.match(notif, /function positionWin\(win\)/);
+    assert.match(notif, /win\.setPosition\(wa\.x \+ wa\.width - WIDTH - MARGIN, wa\.y \+ wa\.height - STACK_HEIGHT - MARGIN/);
+    assert.match(notif, /if \(_win && !_win\.isDestroyed\(\)\) \{ positionWin\(_win\); return _win; \}/);
     assert.match(notif, /height: STACK_HEIGHT/);
     assert.doesNotMatch(notif, /notif-resize|resizeWindow\(|contentHeight\(/);
     assert.match(notif, /ipcMain\.on\('notif-shape'/);
@@ -877,9 +925,11 @@ test('desktop notification popup follows Telegram toast geometry and has no dead
     assert.match(notif, /@keyframes barshrink\{from\{transform:scaleX\(1\);\}to\{transform:scaleX\(0\);\}\}/);
     assert.match(notif, /function pauseCard\(id\)/);
     assert.match(notif, /function resumeCard\(id\)/);
+    assert.match(notif, /function firstGlyph\(s\)/);
+    assert.match(notif, /Array\.from\(String\(s\|\|''\)\.trim\(\)\)/);
     assert.match(notif, /function initials\(s\)/);
-    assert.match(notif, /words\[0\]\[0\]/);
-    assert.match(notif, /words\[words\.length-1\]\[0\]/);
+    assert.match(notif, /firstGlyph\(words\[0\]\)/);
+    assert.match(notif, /firstGlyph\(words\[words\.length-1\]\)/);
     assert.match(notif, /function avatarColor\(peerId,title\)/);
     assert.match(notif, /avatarColor\(data\.peerId,title\)/);
     assert.match(notif, /data\.anon\?firstLetter\(title\):initials\(title\)/);
@@ -910,6 +960,8 @@ test('desktop notification popup follows Telegram toast geometry and has no dead
 
 test('notification category filter distinguishes Telegram channels from groups', () => {
     const bootstrap = read('electron/inject/ui/bootstrap.js');
+    assert.match(bootstrap, /function currentPeer\(\)[\s\S]{0,120}location\.hash[\s\S]{0,80}#\(-\?\\d\+\)/);
+    assert.match(bootstrap, /function domAvatar\(pid\)[\s\S]{0,420}a\[href\^=\"#\"\][\s\S]{0,220}chatId===want/);
     assert.match(bootstrap, /indexedDB\.open\('tt-data'\)/);
     assert.match(bootstrap, /\^tt-global-state\(\?:_\\d\+\)\?\$/);
     assert.match(bootstrap, /type==='chatTypeChannel'.*return 'channel'/s);

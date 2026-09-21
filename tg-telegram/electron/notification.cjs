@@ -168,13 +168,14 @@ function buildHtml() {
             if(c.el.isConnected)setPose(c,toY,toOpacity);
         });
     }
-    function firstLetter(s){s=(s||'T').trim();return(s[0]||'T').toUpperCase();}
+    function firstGlyph(s){const chars=Array.from(String(s||'').trim());return(chars[0]||'T').toUpperCase();}
+    function firstLetter(s){return firstGlyph(s||'T');}
     function initials(s){
         const words=String(s||'').trim().split(/\s+/).filter(Boolean);
         if(!words.length)return'T';
-        const first=(words[0][0]||'').toUpperCase();
+        const first=firstGlyph(words[0]);
         if(words.length===1)return first||'T';
-        const last=(words[words.length-1][0]||'').toUpperCase();
+        const last=firstGlyph(words[words.length-1]);
         return(first+last)||'T';
     }
     function avatarColor(peerId,title){
@@ -319,8 +320,13 @@ function buildHtml() {
 </body></html>`;
 }
 
+function positionWin(win) {
+    if (!win || win.isDestroyed()) return;
+    const wa = primaryWorkArea();
+    try { win.setPosition(wa.x + wa.width - WIDTH - MARGIN, wa.y + wa.height - STACK_HEIGHT - MARGIN, false); } catch (_) {}
+}
 function ensureWin() {
-    if (_win && !_win.isDestroyed()) return _win;
+    if (_win && !_win.isDestroyed()) { positionWin(_win); return _win; }
     const wa = primaryWorkArea();
     const win = _win = new BrowserWindow({
         width: WIDTH,

@@ -147,6 +147,29 @@ async function telegramTarget(port) {
     );
     assert.equal(standardLayout, true);
 
+    const historyRuntime = await waitFor(
+      () => cdp.eval('!!window.__twdMessageHistoryApi'),
+      10000,
+      'message history runtime'
+    );
+    assert.equal(historyRuntime, true, 'history runtime must exist even when all history options start disabled');
+    const historyDefaults = await cdp.eval('window.tgBridge.invoke("get_settings").then(s=>({savePublic:s.messages_save_public,scope:s.messages_history_scope}))');
+    assert.deepEqual(historyDefaults, { savePublic: false, scope: 'client' });
+    const historyToggle = await cdp.eval(`(()=>{
+      const api=window.__twdMessageHistoryApi;
+      const on=api.configure({showDeleted:true,savePublic:false});
+      const liveOn=window.__twdMessageHistoryConfig&&window.__twdMessageHistoryConfig.showDeleted===true;
+      window.dispatchEvent(new CustomEvent('__twd_history_update',{detail:{kind:'new',chatId:'-987654321',messageId:'1',text:'blocked public',timestamp:Date.now()}}));
+      const publicBlocked=api.get('-987654321','1')===null;
+      const publicOn=api.configure({savePublic:true});
+      window.dispatchEvent(new CustomEvent('__twd_history_update',{detail:{kind:'new',chatId:'-987654321',messageId:'2',text:'allowed public',timestamp:Date.now()}}));
+      const publicAllowed=!!api.get('-987654321','2');
+      const off=api.configure({showDeleted:false,savePublic:false});
+      const liveOff=window.__twdMessageHistoryConfig&&window.__twdMessageHistoryConfig.showDeleted===false&&window.__twdMessageHistoryConfig.savePublic===false;
+      return {on:on.showDeleted===true,liveOn,publicBlocked,publicOn:publicOn.savePublic===true,publicAllowed,off:off.showDeleted===false&&off.savePublic===false,liveOff};
+    })()`);
+    assert.deepEqual(historyToggle, { on: true, liveOn: true, publicBlocked: true, publicOn: true, publicAllowed: true, off: true, liveOff: true });
+
     const downloads = await cdp.eval('window.tgBridge.invoke("get_downloads")');
     assert.ok(Array.isArray(downloads));
 
@@ -187,7 +210,7 @@ async function telegramTarget(port) {
     assert.match(recovered.url, /^https:\/\/web\.telegram\.org\/a/);
     assert.equal(child.exitCode, null, 'browser process must survive renderer crash');
 
-    console.log('SMOKE PASS: launch, Telegram, proxy, IPC, addons, downloads, notifications, crash recovery');
+    console.log('SMOKE PASS: launch, Telegram, proxy, IPC, addons, live history, downloads, notifications, crash recovery');
   } catch (e) {
     console.error('SMOKE FAIL:', e.stack || e.message || e);
     if (log) console.error('--- Electron tail ---\n' + log);

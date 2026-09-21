@@ -45,11 +45,12 @@ function installAtomicQrReveal(){
     const style=document.createElement('style'); style.id='_twd_qr_atomic_css_';
     style.textContent='#auth-qr-form .qr-inner._twd_qr_wait_{visibility:hidden!important;}';
     (document.head||document.documentElement).appendChild(style);
-    let bound=null, seq=0;
+    let bound=null, boundObserver=null, seq=0;
     const bind=()=>{
         const inner=document.querySelector('#auth-qr-form .qr-inner');
         const qr=inner&&inner.querySelector('.qr-container');
         if(!inner||!qr||qr===bound) return;
+        if(boundObserver){boundObserver.disconnect();boundObserver=null;}
         bound=qr; inner.classList.add('_twd_qr_wait_');
         const sync=()=>{
             const n=++seq, svg=qr.querySelector('svg');
@@ -59,7 +60,7 @@ function installAtomicQrReveal(){
                 if(n===seq && qr.querySelector('svg')?.querySelectorAll('*').length>100) inner.classList.remove('_twd_qr_wait_');
             }));
         };
-        new MutationObserver(sync).observe(qr,{childList:true,subtree:true}); sync();
+        boundObserver=new MutationObserver(sync);boundObserver.observe(qr,{childList:true,subtree:true}); sync();
     };
     new MutationObserver(bind).observe(document.documentElement,{childList:true,subtree:true}); bind();
 }
@@ -749,14 +750,20 @@ window.__tgMarkAllRead=function(){
     }
 
     // Окно: открытый чат и фокус — для пропуска активного чата (нет состояния «фокус»).
-    function currentPeer(){var el=document.querySelector('.MiddleHeader .ChatInfo .Avatar[data-peer-id]');return el?el.getAttribute('data-peer-id'):'';}
+    function currentPeer(){
+        var m=(location.hash||'').match(/#(-?\d+)/);if(m)return m[1];
+        var el=document.querySelector('.MiddleHeader .ChatInfo .Avatar[data-peer-id]');return el?el.getAttribute('data-peer-id'):'';
+    }
     // Аватар best-effort: ищем строку чат-листа по peerId и берём уже отрисованный src.
     // Нет строки (виртуализация) → без иконки (main подставит первую букву).
     function domAvatar(pid){
-        var rows=document.querySelectorAll('.chat-list .ListItem.Chat .Avatar[data-peer-id]');
+        var rows=document.querySelectorAll('.chat-list .ListItem.Chat'),want=String(pid||'');
         for(var i=0;i<rows.length;i++){
-            if(rows[i].getAttribute('data-peer-id')===String(pid)){
-                var img=rows[i].querySelector('img.Avatar__media, img');
+            var av=rows[i].querySelector('.Avatar[data-peer-id]');
+            var link=rows[i].querySelector('a[href^="#"]');
+            var chatId=link&&String(link.getAttribute('href')||'').replace(/^#/, '');
+            if((chatId&&chatId===want)||(av&&av.getAttribute('data-peer-id')===want)){
+                var img=av&&av.querySelector('img.Avatar__media, img');
                 return img&&img.src?img.src:'';
             }
         }

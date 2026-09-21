@@ -106,6 +106,7 @@ function registerIpc(getWindow) {
                 saveDeleted: s.messages_save_deleted === true,
                 saveDisappearing: s.messages_save_disappearing === true,
                 editHistory: s.messages_edit_history === true,
+                savePublic: s.messages_save_public === true,
                 scope: s.messages_history_scope || 'client',
             } : null;
         } catch (_) { event.returnValue = null; }
@@ -349,9 +350,11 @@ function registerIpc(getWindow) {
         return { ok: true };
     });
 
-    handle('delete_download', (e, { id } = {}) => {
+    handle('delete_download', async (e, { id } = {}) => {
         const safeId = normalizeDownloadId(id);
         if (safeId == null) return { error: 'invalid-id' };
+        cancelActive(safeId);
+        await cancelBlobSaveByDownloadId(safeId);
         state.downloads = deleteDownload(state.downloads, safeId);
         return { ok: true };
     });
@@ -541,9 +544,16 @@ function registerIpc(getWindow) {
         if (ArrayBuffer.isView(raw)) return Buffer.from(raw.buffer, raw.byteOffset, raw.byteLength);
         return null;
     }
+    function detachBlobSender(item) {
+        if (!item || !item.sender || !item.senderDestroyedHandler) return;
+        try { item.sender.removeListener('destroyed', item.senderDestroyedHandler); } catch (_) {}
+        item.sender = null;
+        item.senderDestroyedHandler = null;
+    }
     async function failBlobSave(item, status = 'failed') {
         if (!item || item.finished) return false;
         item.finished = true;
+        detachBlobSender(item);
         blobSaves.delete(item.streamId);
         blobSaveByDownloadId.delete(item.id);
         try { await item.file.close(); } catch (_) {}
@@ -578,7 +588,11 @@ function registerIpc(getWindow) {
         const expectedTotal = Number.isSafeInteger(declaredTotal) && declaredTotal >= 0 ? declaredTotal : 0;
         const settings = state.settings || loadSettings();
         const dir = settings.save_path || app.getPath('downloads');
-        fs.mkdirSync(dir, { recursive: true });
+        try {
+            fs.mkdirSync(dir, { recursive: true });
+        } catch (e) {
+            return { error: e && e.message ? e.message : 'mkdir-failed' };
+        }
 
         const dest = uniquePath(path.join(dir, safeName));
         const temp = dest + '.' + process.pid + '.' + Date.now() + '.twd-part';
@@ -606,6 +620,8 @@ function registerIpc(getWindow) {
             received: 0,
             busy: false,
             finished: false,
+            sender: event.sender,
+            senderDestroyedHandler: null,
         };
         blobSaves.set(streamId, item);
         blobSaveByDownloadId.set(id, streamId);
@@ -616,10 +632,11 @@ function registerIpc(getWindow) {
         saveDownloads(state.downloads);
         emitBlobDownload({ type: 'start', id, filename: savedName, origName: safeName, total: expectedTotal });
 
-        event.sender.once('destroyed', () => {
+        item.senderDestroyedHandler = () => {
             const live = blobSaves.get(streamId);
             if (live) failBlobSave(live, 'failed');
-        });
+        };
+        event.sender.once('destroyed', item.senderDestroyedHandler);
         return { ok: true, streamId, id };
     });
 
@@ -678,6 +695,7 @@ function registerIpc(getWindow) {
         }
 
         item.finished = true;
+        detachBlobSender(item);
         blobSaves.delete(item.streamId);
         blobSaveByDownloadId.delete(item.id);
         const rec = state.downloads.find(d => d.id === item.id);

@@ -27,11 +27,11 @@ function normalizeToTg(raw) {
         return invite ? 'tg://join?invite=' + encodeURIComponent(invite) : null;
     }
     if (action === 'c' && /^\d+$/.test(parts[1] || '') && /^\d+$/.test(parts[2] || '')) {
-        const qs = new URLSearchParams();
+        const qs = new URLSearchParams(u.searchParams);
+        qs.delete('channel'); qs.delete('thread'); qs.delete('post');
         qs.set('channel', parts[1]);
         if (parts[3] && /^\d+$/.test(parts[3])) { qs.set('thread', parts[2]); qs.set('post', parts[3]); }
         else qs.set('post', parts[2]);
-        for (const [k, v] of u.searchParams) qs.append(k, v);
         return 'tg://privatepost?' + qs.toString();
     }
     if (action === 'share' && (parts[1] || '').toLowerCase() === 'url') {

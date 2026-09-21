@@ -3,8 +3,11 @@
     window.__twdMessageHistoryStarted = true;
 
     var cfg = window.__twdMessageHistoryConfig || {};
-    if (!cfg.showDeleted && !cfg.showDisappearing && !cfg.saveDeleted && !cfg.saveDisappearing && !cfg.editHistory) return;
     cfg.scope = cfg.scope === 'chat' || cfg.scope === 'always' ? cfg.scope : 'client';
+    function historyEnabled() {
+        return cfg.showDeleted === true || cfg.showDisappearing === true ||
+            cfg.saveDeleted === true || cfg.saveDisappearing === true || cfg.editHistory === true;
+    }
 
     var records = new Map();
     var recordsByChat = new Map();
@@ -22,17 +25,24 @@
         return String(document.documentElement.lang || navigator.language || '').toLowerCase().indexOf('ru') === 0;
     }
     function currentChatId() {
+        var m = String(location.hash || '').match(/#(-?\d+)/);
+        if (m) return m[1];
         var avatar = document.querySelector('#MiddleColumn .MiddleHeader .Avatar[data-peer-id]');
         var peerId = avatar && avatar.getAttribute('data-peer-id');
-        if (peerId) return String(peerId);
-        var m = String(location.hash || '').match(/#(-?\d+)/);
-        return m ? m[1] : '';
+        return peerId ? String(peerId) : '';
     }
     function keyOf(chatId, messageId) {
         return String(chatId) + ':' + String(messageId);
     }
+    function isValidChatId(chatId) {
+        try { return BigInt(String(chatId)) !== 0n; } catch (_) { return false; }
+    }
     function isPrivateChatId(chatId) {
         try { return BigInt(String(chatId)) > 0n; } catch (_) { return false; }
+    }
+    function historyChatAllowed(chatId) {
+        if (isPrivateChatId(chatId)) return true;
+        try { return BigInt(String(chatId)) < 0n && cfg.savePublic === true; } catch (_) { return false; }
     }
     function chatRecordMap(chatId, create) {
         var key=String(chatId), map=recordsByChat.get(key);
@@ -89,7 +99,9 @@
         try {
             if (window.tgBridge && typeof window.tgBridge.invoke === 'function') {
                 return window.tgBridge.invoke('get_window_state').then(function (state) {
-                    return !!(state && state.visible === true && state.minimized !== true);
+                    // Visible or taskbar-minimized counts as an active process.
+                    // Hidden-to-tray is the only normal state where both are false.
+                    return !!(state && (state.visible === true || state.minimized === true));
                 }).catch(function () { return false; });
             }
         } catch (_) {}
@@ -99,7 +111,7 @@
         try {
             var out = [];
             records.forEach(function (rec) {
-                if (!rec || !isPrivateChatId(rec.chatId)) return;
+                if (!rec || !isValidChatId(rec.chatId)) return;
                 var savedEdits = Array.isArray(rec.savedEdits) ? rec.savedEdits : [];
                 if (!rec.saved && !savedEdits.length) return;
                 var persistedText = rec.persistUpdatedAt > 0 ? rec.persistText : rec.text;
@@ -124,7 +136,7 @@
             var raw=localStorage.getItem(PERSIST_KEY);if(!raw)return;
             var parsed=JSON.parse(raw),arr=parsed&&Array.isArray(parsed.records)?parsed.records:[];
             arr.slice(-MAX_RECORDS).forEach(function(x){
-                if(!x||!isPrivateChatId(x.chatId)||!x.messageId)return;
+                if(!x||!isValidChatId(x.chatId)||!x.messageId)return;
                 var rec=ensureRecord(x.chatId,x.messageId,x.text,x.updatedAt);
                 var persistedEdits=Array.isArray(x.edits)?x.edits.slice(-MAX_EDITS).map(function(e){return{text:String(e&&e.text||''),timestamp:Number(e&&e.timestamp)||0};}):[];
                 rec.edits=persistedEdits.slice();
@@ -172,9 +184,9 @@
         });
     }
     function applyHistoryEvent(ev) {
-        if (!ev || typeof ev !== 'object') return;
+        if (!historyEnabled() || !ev || typeof ev !== 'object') return;
         if (ev.kind === 'new' || ev.kind === 'edit') {
-            if (!isPrivateChatId(ev.chatId)) return;
+            if (!historyChatAllowed(ev.chatId)) return;
             var rec = getRecord(ev.chatId, ev.messageId);
             if (!rec && ev.kind === 'edit' && ev.oldText != null) {
                 rec = ensureRecord(ev.chatId, ev.messageId, ev.oldText, ev.timestamp);
@@ -195,7 +207,7 @@
         }
         if (ev.kind === 'delete' && Array.isArray(ev.items)) {
             ev.items.forEach(function (item) {
-                if (!isPrivateChatId(item.chatId)) return;
+                if (!historyChatAllowed(item.chatId)) return;
                 var rec = ensureRecord(item.chatId, item.messageId, item.text, item.timestamp || ev.timestamp);
                 if (item.text != null && !rec.text) rec.text = String(item.text);
                 rec.ephemeral = item.ephemeral === true;
@@ -208,7 +220,7 @@
         }
     }
     function messageNode(chatId, messageId) {
-        if (!isPrivateChatId(chatId) || currentChatId() !== String(chatId)) return null;
+        if (!historyChatAllowed(chatId) || currentChatId() !== String(chatId)) return null;
         try {
             return document.querySelector('#MiddleColumn .Message[data-message-id="' + CSS.escape(String(messageId)) + '"]');
         } catch (_) { return null; }
@@ -238,7 +250,7 @@
     }
     function reconcileDeletedVisibility() {
         var chatId=currentChatId();
-        if(!chatId||!isPrivateChatId(chatId))return;
+        if(!chatId||!historyChatAllowed(chatId))return;
         document.querySelectorAll('#MiddleColumn .Message[data-message-id]').forEach(function(node){
             var rec=getRecord(chatId,String(node.getAttribute('data-message-id')||''));
             if(!rec||!rec.deleted){if(node.querySelector('._twd-deleted-trash_'))unmarkNodeDeleted(node);return;}
@@ -282,7 +294,7 @@
         if (msg.classList.contains('_twd-deleted-clone_') || msg.classList.contains('is-deleting') || msg.classList.contains('is-dissolving')) return;
         var chatId = currentChatId();
         var messageId = String(msg.getAttribute('data-message-id') || '');
-        if (!chatId || !messageId || !isPrivateChatId(chatId)) return;
+        if (!chatId || !messageId || !historyChatAllowed(chatId)) return;
         var text = visibleMessageText(msg);
         var key = keyOf(chatId, messageId);
         if (!domTextSnapshots.has(key)) {
@@ -336,7 +348,7 @@
         if (!msg.classList.contains('is-deleting') && !msg.classList.contains('is-dissolving')) return;
         var chatId = currentChatId();
         var messageId = String(msg.getAttribute('data-message-id') || '');
-        if (!chatId || !messageId || !isPrivateChatId(chatId)) return;
+        if (!chatId || !messageId || !historyChatAllowed(chatId)) return;
         var rec = getRecord(chatId,messageId) || ensureRecord(chatId, messageId, visibleMessageText(msg), Date.now());
         var show = rec.ephemeral ? cfg.showDisappearing === true : cfg.showDeleted === true;
         rec.text = rec.text || visibleMessageText(msg);
@@ -363,7 +375,7 @@
         return node;
     }
     function insertDeletedSnapshot(snapshot) {
-        if (!snapshot || !isPrivateChatId(snapshot.chatId) || currentChatId() !== String(snapshot.chatId)) return;
+        if (!snapshot || !historyChatAllowed(snapshot.chatId) || currentChatId() !== String(snapshot.chatId)) return;
         var messageId = String(snapshot.messageId || '');
         if (!messageId) return;
         var selector = '#MiddleColumn .Message[data-message-id="' + CSS.escape(messageId) + '"]';
@@ -391,7 +403,7 @@
     function restoreDeletedForCurrentChat() {
         if (!cfg.showDeleted && !cfg.showDisappearing) return;
         var chatId = currentChatId();
-        if (!chatId || !isPrivateChatId(chatId)) return;
+        if (!chatId || !historyChatAllowed(chatId)) return;
         var snapshots=deletedSnapshotMap(chatId,false);
         if(snapshots)snapshots.forEach(insertDeletedSnapshot);
         var chatRecords=chatRecordMap(chatId,false);
@@ -527,17 +539,20 @@
             showEditHistory(rec);
         });
         items.appendChild(item);
-        _twdFitMenuViewport(items);
-        setTimeout(function () { _twdFitMenuViewport(items); }, 120);
+        if (typeof window.__twdFitMenuViewport === 'function') {
+            window.__twdFitMenuViewport(items);
+            setTimeout(function () { window.__twdFitMenuViewport(items); }, 120);
+        }
     }
     document.addEventListener('contextmenu', function (e) {
+        if (!historyEnabled()) { lastContext = null; return; }
         var msg = e.target && e.target.closest && e.target.closest('#MiddleColumn .Message[data-message-id]');
         if (!msg) {
             lastContext = null;
             return;
         }
         var chatId = currentChatId();
-        if (!isPrivateChatId(chatId)) {
+        if (!historyChatAllowed(chatId)) {
             lastContext = null;
             return;
         }
@@ -556,6 +571,8 @@
     }, true);
 
     var observedMessageList = null;
+    var messageListTimer = null;
+    var historyNavHooksInstalled = false;
     var messageListObserver = new MutationObserver(function (mutations) {
         var treeChanged = false;
         mutations.forEach(function (mutation) {
@@ -570,6 +587,11 @@
         if (treeChanged) queueRestoreDeleted();
     });
     function bindMessageList() {
+        if(!historyEnabled()){
+            messageListObserver.disconnect();
+            observedMessageList=null;
+            return;
+        }
         var list=document.querySelector('#MiddleColumn .MessageList');
         if(list===observedMessageList)return;
         messageListObserver.disconnect();
@@ -580,14 +602,18 @@
         queueRestoreDeleted();
     }
     function queueBindMessageList() {
+        if(!historyEnabled())return;
         bindMessageList();
         setTimeout(bindMessageList,60);
         setTimeout(bindMessageList,180);
         setTimeout(bindMessageList,500);
     }
     function startAddedObserver() {
+        if(!historyEnabled())return;
         bindMessageList();
-        setInterval(bindMessageList,1000);
+        if(!messageListTimer)messageListTimer=setInterval(bindMessageList,1000);
+        if(historyNavHooksInstalled)return;
+        historyNavHooksInstalled=true;
         window.addEventListener('popstate',queueBindMessageList);
         window.addEventListener('hashchange',queueBindMessageList);
         ['pushState','replaceState'].forEach(function(k){
@@ -597,6 +623,11 @@
             wrapped.__twdHistoryWrapped=true;
             history[k]=wrapped;
         });
+    }
+    function stopAddedObserver() {
+        messageListObserver.disconnect();
+        observedMessageList=null;
+        if(messageListTimer){clearInterval(messageListTimer);messageListTimer=null;}
     }
 
     function ensureStyle() {
@@ -632,7 +663,9 @@
     window.__twdMessageHistoryApi = {
         configure: function (next) {
             Object.assign(cfg,next||{});
+            cfg.scope=cfg.scope==='chat'||cfg.scope==='always'?cfg.scope:'client';
             window.__twdMessageHistoryConfig=Object.assign({},window.__twdMessageHistoryConfig||{},cfg);
+            if(historyEnabled())startAddedObserver();else stopAddedObserver();
             reconcileDeletedVisibility();
             return Object.assign({},cfg);
         },
@@ -665,5 +698,5 @@
     ensureStyle();
     loadPersisted();
     drainQueue();
-    startAddedObserver();
+    if(historyEnabled())startAddedObserver();
 })();

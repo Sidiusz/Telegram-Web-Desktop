@@ -2,7 +2,7 @@
 const { contextBridge, ipcRenderer } = require('electron');
 
 let _proxyBootstrap = { active: false, domains: [], revision: 0 };
-let _historyBootstrap = { showDeleted: false, showDisappearing: false, saveDeleted: false, saveDisappearing: false, editHistory: false, scope: 'client' };
+let _historyBootstrap = { showDeleted: false, showDisappearing: false, saveDeleted: false, saveDisappearing: false, editHistory: false, savePublic: false, scope: 'client' };
 let _privacyBootstrap = {
     noReadReceipts: false, noTyping: false,
     noReadForceOn: [], noReadForceOff: [], noTypingForceOn: [], noTypingForceOff: [],
@@ -58,7 +58,11 @@ ipcRenderer.on('privacy-state-changed', (_e, payload) => publishPrivacyState(pay
 try {
     contextBridge.executeInMainWorld({
         func: (proxyChannelName, historyConfig) => {
-            const historyEnabled = true;
+            function historyEnabled() {
+                const c = historyConfig || {};
+                return c.showDeleted === true || c.showDisappearing === true ||
+                    c.saveDeleted === true || c.saveDisappearing === true || c.editHistory === true;
+            }
             window.addEventListener('__twd_history_config', e => {
                 historyConfig = Object.assign({}, historyConfig || {}, e.detail || {});
             });
@@ -70,15 +74,20 @@ try {
             const proxyWorkerNonce = Date.now().toString(36) + Math.random().toString(36).slice(2);
             function historyActiveChatId() {
                 try {
+                    const match = String(location.hash || '').match(/#(-?\d+)/);
+                    if (match) return match[1];
                     const avatar = document.querySelector('#MiddleColumn .MiddleHeader .Avatar[data-peer-id]');
                     const peerId = avatar && avatar.getAttribute('data-peer-id');
-                    if (peerId) return String(peerId);
-                    const match = String(location.hash || '').match(/#(-?\d+)/);
-                    return match ? match[1] : '';
+                    return peerId ? String(peerId) : '';
                 } catch (_) { return ''; }
             }
             function historyIsPrivate(chatId) {
                 try { return BigInt(String(chatId)) > 0n; } catch (_) { return false; }
+            }
+            function historyChatAllowed(chatId) {
+                if (historyIsPrivate(chatId)) return true;
+                try { return BigInt(String(chatId)) < 0n && historyConfig && historyConfig.savePublic === true; }
+                catch (_) { return false; }
             }
             function historyMessageText(message) {
                 try {
@@ -95,7 +104,7 @@ try {
                 return String(chatId) + ':' + String(messageId);
             }
             function historyEmit(detail) {
-                if (!historyEnabled || !detail) return;
+                if (!historyEnabled() || !detail) return;
                 const q = window.__twdHistoryUpdateQueue || (window.__twdHistoryUpdateQueue = []);
                 q.push(detail);
                 if (q.length > 1500) q.splice(0, q.length - 1500);
@@ -132,12 +141,12 @@ try {
                 }
             }
             function historyTrackMessage(update) {
-                if (!historyEnabled || !update || (update['@type'] !== 'newMessage' && update['@type'] !== 'updateMessage')) return;
+                if (!historyEnabled() || !update || (update['@type'] !== 'newMessage' && update['@type'] !== 'updateMessage')) return;
                 const message = update.message;
                 if (!message || !message.content) return;
                 const chatId = String(update.chatId != null ? update.chatId : message.chatId != null ? message.chatId : '');
                 const messageId = String(update.id != null ? update.id : message.id != null ? message.id : '');
-                if (!chatId || !messageId || !historyIsPrivate(chatId)) return;
+                if (!chatId || !messageId || !historyChatAllowed(chatId)) return;
                 const active = historyActiveChatId();
                 const key = historyKey(chatId, messageId);
                 let previous = historyTracked.get(key);
@@ -226,7 +235,7 @@ try {
                 if (!historyConfig || !update || !Array.isArray(update.ids)) return true;
                 const active = historyActiveChatId();
                 const explicitChat = update.chatId != null ? String(update.chatId) : '';
-                if (explicitChat && !historyIsPrivate(explicitChat)) return true;
+                if (explicitChat && !historyChatAllowed(explicitChat)) return true;
                 const captured = [];
                 const remaining = [];
                 let blockedAny = false;
@@ -242,7 +251,7 @@ try {
                         item = key ? historyTracked.get(key) || null : null;
                         if (!item && active) item = historyDomSnapshot(active, messageId);
                     }
-                    if (!item || !historyIsPrivate(item.chatId)) {
+                    if (!item || !historyChatAllowed(item.chatId)) {
                         remaining.push(rawId);
                         return;
                     }
@@ -266,7 +275,7 @@ try {
                 return remaining.length > 0;
             }
             function historyHandleWorkerMessage(event) {
-                if (!historyEnabled) return;
+                if (!historyEnabled()) return;
                 const payloads = event && event.data && event.data.payloads;
                 if (!Array.isArray(payloads)) return;
                 payloads.forEach((payload) => {

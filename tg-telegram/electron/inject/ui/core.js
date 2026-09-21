@@ -153,6 +153,7 @@ function _twdFitMenuViewport(node){
     if(r.top+dy<pad)dy+=pad-(r.top+dy);
     if(Math.abs(dy)>.5)menu.style.translate='0 '+Math.round(dy)+'px';
 }
+window.__twdFitMenuViewport=_twdFitMenuViewport;
 
 // ── Рантайм Telegram webZ: getGlobal() / getActions() ───────────────────────
 // Прямой доступ к состоянию и экшенам TG вместо эмуляции через DOM. Минифициро-
