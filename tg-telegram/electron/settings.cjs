@@ -61,6 +61,17 @@ const DEFAULTS = {
     messages_save_public: false,
     messages_history_scope: 'client',
     messages_extended_pins: false,
+    message_filter_enabled: false,
+    message_filter_standard: true,
+    message_filter_hashtags: true,
+    message_filter_short_links: true,
+    message_filter_ref_links: true,
+    message_filter_private: false,
+    message_filter_mark_only: false,
+    message_filter_ignore_symbols: false,
+    message_filter_short_disabled: [],
+    message_filter_ref_disabled: [],
+    message_filter_custom: [],
     privacy_no_read_receipts: false,
     privacy_no_typing: false,
     privacy_no_read_force_on: [],
@@ -135,6 +146,8 @@ const BOOL_KEYS = new Set([
     'notif_cat_group','notif_cat_channel','notif_hide_text','notif_hide_sender','notif_hide_avatar',
     'devtools_enabled','appearance_hide_ads','messages_show_deleted','messages_show_disappearing',
     'messages_save_deleted','messages_save_disappearing','messages_edit_history','messages_save_public','messages_extended_pins',
+    'message_filter_enabled','message_filter_standard','message_filter_hashtags','message_filter_short_links','message_filter_ref_links',
+    'message_filter_private','message_filter_mark_only','message_filter_ignore_symbols',
     'privacy_no_read_receipts','privacy_no_typing',
     'proxy_auto_latched','proxy_worker_enabled',
     'proxy_web_fallback','proxy_web_fallback_latched',
@@ -148,6 +161,7 @@ const PRIVACY_PEER_LIST_KEYS = new Set([
     'privacy_no_read_force_on','privacy_no_read_force_off',
     'privacy_no_typing_force_on','privacy_no_typing_force_off',
 ]);
+const MESSAGE_FILTER_DOMAIN_LIST_KEYS = new Set(['message_filter_short_disabled','message_filter_ref_disabled']);
 const INVALID = Symbol('invalid-setting');
 
 function normalizeSetting(k, v) {
@@ -183,6 +197,26 @@ function normalizeSetting(k, v) {
             const id = String(item);
             if (!/^-?\d{1,24}$/.test(id)) return INVALID;
             if (!out.includes(id)) out.push(id);
+        }
+        return out;
+    }
+    if (MESSAGE_FILTER_DOMAIN_LIST_KEYS.has(k)) {
+        if (!Array.isArray(v) || v.length > 128) return INVALID;
+        const out = [];
+        for (const item of v) {
+            const domain = String(item || '').trim().toLowerCase();
+            if (!/^[a-z0-9.-]{1,253}$/.test(domain)) return INVALID;
+            if (!out.includes(domain)) out.push(domain);
+        }
+        return out;
+    }
+    if (k === 'message_filter_custom') {
+        if (!Array.isArray(v) || v.length > 256) return INVALID;
+        const out = [];
+        for (const item of v) {
+            const phrase = String(item || '').trim();
+            if (!phrase || phrase.length > 160) return INVALID;
+            if (!out.includes(phrase)) out.push(phrase);
         }
         return out;
     }

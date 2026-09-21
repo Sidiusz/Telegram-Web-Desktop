@@ -281,6 +281,7 @@ test('built-in client features are separate from user add-ons', () => {
     assert.equal(fs.existsSync(path.join(dir, 'desktop_like_standard.js')), true);
     assert.equal(fs.existsSync(path.join(dir, 'desktop_like_wide.js')), true);
     assert.equal(fs.existsSync(path.join(dir, 'hide_ads.js')), true);
+    assert.equal(fs.existsSync(path.join(dir, 'message_filter.js')), true);
     assert.equal(fs.existsSync(path.join(dir, 'message_history.js')), true);
     assert.match(loader, /appearance_message_layout === 'wide' \|\| s\.appearance_message_layout === 'left'/);
     assert.match(loader, /readFeature\('desktop_like_base\.js'\)/);
@@ -308,11 +309,47 @@ test('built-in client features are separate from user add-ons', () => {
     assert.doesNotMatch(wide, /function injectAvatars\(/);
     assert.match(loader, /window\.__twdHideAdsEnabled=/);
     assert.match(loader, /readFeature\('hide_ads\.js'\)/);
+    assert.match(loader, /window\.__twdMessageFilterConfig=/);
+    assert.match(loader, /readFeature\('message_filter\.js'\)/);
+    assert.match(loader, /message_filter_private === true/);
+    assert.match(loader, /message_filter_mark_only === true/);
     assert.match(loader, /window\.__twdMessageHistoryConfig=/);
     assert.match(loader, /readFeature\('message_history\.js'\)/);
     assert.doesNotMatch(loader, /if \(s\.appearance_hide_ads !== false\)/);
     assert.doesNotMatch(loader, /if \(s\.messages_show_deleted/);
     assert.doesNotMatch(addons, /desktop_like|hide_ads|embedded_addons/);
+});
+
+
+test('message filter stays channel-first, keeps private chats opt-in, and separates Telegram sponsored blocks', () => {
+    const feature = read('electron/features/message_filter.js');
+    const ui = read('electron/inject/ui/twd-settings-native.js');
+    const lang = read('electron/inject/ui/lang.js');
+    const settings = read('electron/settings.cjs');
+
+    assert.match(settings, /message_filter_enabled: false/);
+    assert.match(settings, /message_filter_private: false/);
+    assert.match(settings, /message_filter_mark_only: false/);
+    assert.match(settings, /message_filter_short_disabled: \[\]/);
+    assert.match(settings, /message_filter_custom: \[\]/);
+    assert.match(feature, /cat==='channel'\|\|\(cat==='private'&&cfg\.includePrivate===true\)/);
+    assert.match(feature, /cat==='private'&&msg\.classList\.contains\('own'\)/);
+    assert.match(feature, /#\(\?:реклама\|ad\|ads\|advertisement\|advertising\|sponsored\|promo\)/);
+    assert.match(feature, /bit\.ly/);
+    assert.match(feature, /ali\.pub/);
+    assert.match(feature, /_twd-filter-marked_/);
+    assert.match(feature, /#ff9800/);
+    assert.doesNotMatch(feature, /полит|военн|war|politic/i);
+
+    assert.match(ui, /T\('twd_hide_ads'\)/);
+    assert.match(ui, /T\('twd_message_filter_enabled'\)/);
+    assert.match(ui, /_twdExpandableFilterGroup/);
+    assert.match(ui, /_TWD_FILTER_SHORT_DOMAINS/);
+    assert.match(ui, /_TWD_FILTER_REF_DOMAINS/);
+    assert.match(ui, /message_filter_custom/);
+    assert.match(lang, /Скрывать рекламу внизу чатов/);
+    assert.match(lang, /Скрывать рекламные сообщения в каналах/);
+    assert.match(lang, /Фильтр сообщений/);
 });
 
 const { UpstreamHealth, DEFAULT_COOLDOWN_MS } = require('../electron/tg-flowseal-health.cjs');
@@ -736,10 +773,11 @@ test('custom UI stays inside Telegram Settings and keeps native navigation seman
     assert.match(lang, /twd_save_deleted:\{ru:'Сохранять удалённые сообщения'/);
     assert.doesNotMatch(lang, /twd_save_deleted:\{ru:'Сохранять все удалённые сообщения'/);
     assert.match(lang, /twd_save_public:\{ru:'Сохранять публичные чаты'/);
-    assert.match(lang, /twd_history_scope:\{ru:'Метод сохранения сообщений'/);
-    assert.match(lang, /twd_history_scope_client:\{ru:'Активный процесс'/);
-    assert.doesNotMatch(lang, /twd_history_scope_client:\{ru:'Пока открыт клиент'/);
-    assert.doesNotMatch(lang, /twd_history_scope:\{ru:'Как сохранять'/);
+    assert.match(lang, /twd_history_scope:\{ru:'Хранить историю'/);
+    assert.match(lang, /twd_history_scope_chat:\{ru:'Пока открыт чат'/);
+    assert.match(lang, /twd_history_scope_client:\{ru:'Пока открыто приложение'/);
+    assert.match(lang, /twd_history_scope_always:\{ru:'Даже когда приложение в трее'/);
+    assert.doesNotMatch(lang, /twd_history_scope:\{ru:'Метод сохранения сообщений'/);
     assert.match(lang, /twd_edit_history_desc:\{ru:'Для просмотра выберите соответствующий пункт в меню действий с сообщением\.'/);
     assert.doesNotMatch(lang, /twd_edit_history_desc:\{ru:'[^']*«\(ред\.\)»/);
     assert.doesNotMatch(lang, /в зависимости от режима «Как сохранять»/);

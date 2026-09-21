@@ -23,6 +23,21 @@ function loadFeatureScripts(settings) {
 
     scripts.push('window.__twdHideAdsEnabled=' + JSON.stringify(s.appearance_hide_ads !== false) + ';\n' + readFeature('hide_ads.js'));
 
+    const messageFilterCfg = JSON.stringify({
+        enabled: s.message_filter_enabled === true,
+        standard: s.message_filter_standard !== false,
+        hashtags: s.message_filter_hashtags !== false,
+        shortLinks: s.message_filter_short_links !== false,
+        refLinks: s.message_filter_ref_links !== false,
+        includePrivate: s.message_filter_private === true,
+        markOnly: s.message_filter_mark_only === true,
+        ignoreSymbols: s.message_filter_ignore_symbols === true,
+        shortDisabled: Array.isArray(s.message_filter_short_disabled) ? s.message_filter_short_disabled : [],
+        refDisabled: Array.isArray(s.message_filter_ref_disabled) ? s.message_filter_ref_disabled : [],
+        custom: Array.isArray(s.message_filter_custom) ? s.message_filter_custom : [],
+    });
+    scripts.push('window.__twdMessageFilterConfig=' + messageFilterCfg + ';\n' + readFeature('message_filter.js'));
+
     const cfg = JSON.stringify({
         showDeleted: s.messages_show_deleted === true,
         showDisappearing: s.messages_show_disappearing === true,
