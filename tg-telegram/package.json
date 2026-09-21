@@ -17,7 +17,6 @@
   "license": "MIT",
   "build": {
     "asar": true,
-    "electronDist": "node_modules/electron/dist",
     "files": [
       "main.cjs",
       "electron/**/*",

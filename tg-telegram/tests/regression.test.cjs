@@ -232,6 +232,7 @@ test('release hardening fuses stay enabled', () => {
     const release = read('scripts/release-build.cjs');
     const workflow = fs.readFileSync(path.join(root, '..', '.github', 'workflows', 'release.yml'), 'utf8');
     const f = pkg.build.electronFuses;
+    assert.equal(pkg.build.electronDist, undefined, 'global electronDist breaks clean CI builds');
     assert.equal(f.runAsNode, false);
     assert.equal(f.enableNodeOptionsEnvironmentVariable, false);
     assert.equal(f.enableNodeCliInspectArguments, false);
