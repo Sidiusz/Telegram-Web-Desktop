@@ -616,6 +616,53 @@ test('extended chat pins add five local slots on top of the account pin limit', 
     assert.match(prelude, /limit\(s\)\{return this\.cap\(s\)\+5\}/);
     assert.match(prelude, /cur\.length>=this\.limit\(s\)/);
     assert.match(prelude, /isPremium===true\?10:5/);
+    assert.match(prelude, /serverAfter\(before,next,id,pin,cap\)/);
+    assert.match(prelude, /inc=uniq\(\[\.\.\.pins,\.\.\.\(f\.includedChatIds\|\|\[\]\)\]\)/);
+
+    const storage = new Map();
+    const context = {
+        localStorage: {
+            getItem(key) { return storage.has(key) ? storage.get(key) : null; },
+            setItem(key, value) { storage.set(key, String(value)); },
+        },
+    };
+    vm.createContext(context);
+    vm.runInContext(prelude, context);
+    const api = context.__twdExtendedPins;
+    const chats = Object.fromEntries(['1','2','3','4','5','6','7'].map(id => [id, { id, folderId: 0 }]));
+    const state = {
+        currentUserId: '99',
+        users: { byId: { '99': { isPremium: false } } },
+        chats: { byId: chats, orderedPinnedIds: { active: ['1','2','3','4','5'], archived: [] } },
+        chatFolders: { byId: {} },
+    };
+    const updates = [];
+    const rpcCalls = [];
+    const actions = { apiUpdate(update) { updates.push(update); } };
+    const rpc = (...args) => { rpcCalls.push(args); return Promise.resolve(); };
+
+    assert.equal(api.toggle(state, actions, { id: '6', folderId: 0 }, rpc), true);
+    let saved = JSON.parse(storage.get('__twd_extended_pins_v1'));
+    assert.deepEqual(Array.from(saved.accounts['99'].orders['0']), ['6','1','2','3','4','5']);
+    assert.deepEqual(Array.from(saved.accounts['99'].server['0']), ['1','2','3','4','5']);
+    assert.equal(rpcCalls.length, 0, 'the sixth local pin must not reshuffle a full server pin set');
+
+    assert.equal(api.toggle(state, actions, { id: '6', folderId: 0 }, rpc), true);
+    saved = JSON.parse(storage.get('__twd_extended_pins_v1'));
+    assert.deepEqual(Array.from(saved.accounts['99'].orders['0']), ['1','2','3','4','5']);
+    assert.deepEqual(Array.from(saved.accounts['99'].server['0']), ['1','2','3','4','5']);
+    assert.equal(rpcCalls.length, 0, 'pinning then unpinning a local extra must be server-neutral');
+
+    state.chatFolders.byId[2] = {
+        id: 2,
+        pinnedChatIds: ['1','2','3','4','5'],
+        includedChatIds: Array.from({ length: 30 }, (_, i) => String(100 + i)),
+    };
+    chats['6'].folderId = 2;
+    updates.length = 0;
+    assert.equal(api.toggle(state, actions, { id: '6', folderId: 2 }, rpc), true);
+    assert.ok(updates[0].folder.includedChatIds.length > 15, 'extended pins must not truncate ordinary folder members');
+    assert.equal(rpcCalls.length, 0, 'an extra local folder pin must not rewrite a full server pin set');
 
     const actionSource = 'z(`toggleChatPinned`,(e,n,r)=>{let{ id:i }=r,s=w(e,i);R(`toggleChatPinned`,{chat:s,shouldBePinned:true})}),z(`toggleChatArchived`,()=>{})';
     const action = pins.patchTelegramExtendedPins(actionSource);
