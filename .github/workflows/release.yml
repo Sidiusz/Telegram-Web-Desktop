@@ -51,13 +51,28 @@ jobs:
           $source = "tg-telegram/dist/Telegram Web Desktop Setup $version.exe"
           $installer = "tg-telegram/dist/Telegram.Web.Desktop.Setup.$version.exe"
           $notes = ".github/release-notes/$version.md"
-          Copy-Item $source $installer -Force
-          if (gh release view $version *> $null) {
+          $headers = @{
+            Authorization = "Bearer $env:GH_TOKEN"
+            Accept = "application/vnd.github+json"
+            "X-GitHub-Api-Version" = "2022-11-28"
+          }
+          $release = $null
+          try {
+            $release = Invoke-RestMethod -Headers $headers -Uri "https://api.github.com/repos/$env:GITHUB_REPOSITORY/releases/tags/$version"
+          } catch {
+            if ($_.Exception.Response.StatusCode.value__ -ne 404) { throw }
+          }
+          if ($release) {
             if (Test-Path $notes) {
-              gh release edit $version --title $version --notes-file $notes
+              $body = Get-Content $notes -Raw
+              $payload = @{ name = $version; body = $body; draft = $false; prerelease = $false } | ConvertTo-Json
+              Invoke-RestMethod -Method Patch -Headers $headers -ContentType "application/json" -Body $payload -Uri "https://api.github.com/repos/$env:GITHUB_REPOSITORY/releases/$($release.id)" | Out-Null
             }
-          } elseif (Test-Path $notes) {
-            gh release create $version $installer --title $version --notes-file $notes --verify-tag --latest
           } else {
-            gh release create $version $installer --title $version --generate-notes --verify-tag --latest
+            Copy-Item $source $installer -Force
+            if (Test-Path $notes) {
+              gh release create $version $installer --title $version --notes-file $notes --verify-tag --latest
+            } else {
+              gh release create $version $installer --title $version --generate-notes --verify-tag --latest
+            }
           }
