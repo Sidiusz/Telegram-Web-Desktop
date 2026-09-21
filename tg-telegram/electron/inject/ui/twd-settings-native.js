@@ -505,21 +505,6 @@ function _twdRenderMessages(content,ctx,s){
     saved.appendChild(scopeRow);
     saved.appendChild(_twdPassiveText(T('twd_history_limits')));
     ctx.section(T('twd_message_storage'),saved);
-
-    var data=ctx.card();
-    var clear=_twdStaticRow(ctx,T('twd_clear_history'),T('twd_clear_history_desc'),'',function(){
-        showModal({
-            title:T('twd_clear_history'),
-            msg:T('twd_clear_history_confirm'),
-            okText:T('del_upper'),
-            okDanger:true,
-            footerNote:T('twd_reload_notice'),
-            onOk:function(){toast(T('twd_history_cleared'),'icon-check');return _twdClearMessageHistory();}
-        });
-    },'trash_bin','red');
-    clear.classList.add('destructive');
-    data.appendChild(clear);
-    ctx.section(T('twd_local_data'),data);
 }
 function _twdNotificationPreviewIcon(){
     try{

@@ -684,6 +684,10 @@ test('custom UI stays inside Telegram Settings and keeps native navigation seman
     assert.match(twd, /messages_show_disappearing/);
     assert.match(twd, /messages_save_deleted/);
     assert.match(twd, /messages_save_disappearing/);
+    const messagesSection=twd.slice(twd.indexOf('function _twdRenderMessages'),twd.indexOf('function _twdNotificationPreviewIcon'));
+    const dataSection=twd.slice(twd.indexOf('function _twdRenderData'),twd.indexOf('function _twdRenderAbout'));
+    assert.doesNotMatch(messagesSection, /twd_clear_history/);
+    assert.match(dataSection, /twd_clear_history/);
     assert.match(twd, /messages_edit_history/);
     assert.match(twd, /messages_save_public/);
     assert.match(twd, /T\('twd_save_public'\)/);
