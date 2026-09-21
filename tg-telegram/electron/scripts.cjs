@@ -6,7 +6,7 @@ const path = require('path');
 const { app } = require('electron');
 
 const rd = p => fs.readFileSync(path.join(__dirname, 'inject', p), 'utf8');
-const LARGE_ICON_NAMES = ['settings','visual_interface','messages','notifications','proxy','data','info','download','addons','trash_bin'];
+const LARGE_ICON_NAMES = ['settings','messages','notifications','proxy','data','info','download','addons','trash_bin'];
 function readLargeIcons() {
     const dir = path.join(__dirname, 'assets', 'icons');
     const out = {};

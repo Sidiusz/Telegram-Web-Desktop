@@ -322,7 +322,6 @@ function _twdNativeTitle(page){
     var map={
         root:'Telegram Web Desktop',
         general:T('twd_general'),
-        appearance:T('twd_appearance'),
         messages:T('twd_messages'),
         privacy_peers:T('twd_privacy_personal'),
         notifications:T('twd_notifications'),
@@ -389,7 +388,6 @@ async function _twdRenderNativePage(content,page){
     if(!ctx){setTimeout(function(){if(content.isConnected)_twdRenderNativePage(content,page);},120);return;}
     if(page==='root')return _twdRenderRoot(content,ctx);
     if(page==='general')return _twdRenderGeneral(content,ctx,s);
-    if(page==='appearance')return _twdRenderAppearance(content,ctx,s);
     if(page==='messages')return _twdRenderMessages(content,ctx,s);
     if(page==='privacy_peers')return _twdRenderPrivacyPeers(content,ctx,s);
     if(page==='notifications')return _twdRenderNotifications(content,ctx,s);
@@ -401,7 +399,6 @@ function _twdRenderRoot(content,ctx){
     var card=ctx.card();
     [
         ['general','settings',T('twd_general'),T('twd_general_desc'),'blue'],
-        ['appearance','visual_interface',T('twd_appearance'),T('twd_appearance_desc'),'purple'],
         ['messages','messages',T('twd_messages'),T('twd_messages_desc'),'green'],
         ['notifications','notifications',T('twd_notifications'),T('twd_notifications_desc'),'red'],
         ['proxy','proxy',T('proxy'),T('proxy_desc'),'blue'],
@@ -426,32 +423,6 @@ function _twdRenderGeneral(content,ctx,s){
     },'link','blue'));
     ctx.section(T('sec_integration'),integ);
 }
-function _twdRenderAppearance(content,ctx,s){
-    var card=ctx.card();
-    var layout=s.appearance_message_layout||'left';
-    var labels={native:T('twd_layout_native'),left:T('twd_layout_left'),wide:T('twd_layout_wide')};
-    var row=_genNativeSettingRow(ctx.liEl,T('twd_layout'),T('twd_layout_desc'),labels[layout]||labels.left,function(v){
-        pickModal({
-            title:T('twd_layout'),
-            current:layout,
-            options:[
-                {value:'native',label:labels.native},
-                {value:'left',label:labels.left},
-                {value:'wide',label:labels.wide}
-            ],
-            footerNote:T('twd_reload_notice'),
-            onSave:function(next){
-                if(next===layout)return;
-                layout=next;
-                v.textContent=labels[next]||labels.left;
-                _twdSave({appearance_message_layout:next}).then(function(){return INV('apply_features');}).catch(function(){});
-            }
-        });
-    });
-    card.appendChild(row);
-    ctx.section(T('twd_appearance'),card);
-}
-
 var _TWD_FILTER_SHORT_DOMAINS=['bit.ly','gg.gg','clck.ru','cutt.ly','kutt.it','rebrand.ly','tinyurl.com','t.co','is.gd','rb.gy','goo.su','vk.cc','tiny.cc','shorturl.at','lnkd.in'];
 var _TWD_FILTER_REF_DOMAINS=['ali.pub','alii.pub','lite.al','lite.bz','aliclick.link','aliclick.shop','dea.ls','alitems.co','s.click.aliexpress.com','ad.admitad.com','fas.st','epn.bz','redirect.appmetrica.yandex.com','go.redirectingat.com'];
 function _twdExpandableFilterGroup(ctx,title,sub,checked,onChange,body){
@@ -503,6 +474,26 @@ function _twdCustomFilterBlock(ctx,s,content){
 }
 
 function _twdRenderMessages(content,ctx,s){
+    var display=ctx.card();
+    var layout=s.appearance_message_layout||'left';
+    var labels={native:T('twd_layout_native'),left:T('twd_layout_left'),wide:T('twd_layout_wide')};
+    display.appendChild(_genNativeSettingRow(ctx.liEl,T('twd_layout'),T('twd_layout_desc'),labels[layout]||labels.left,function(v){
+        pickModal({
+            title:T('twd_layout'),current:layout,
+            options:[{value:'native',label:labels.native},{value:'left',label:labels.left},{value:'wide',label:labels.wide}],
+            footerNote:T('twd_reload_notice'),
+            onSave:function(next){
+                if(next===layout)return;
+                layout=next;v.textContent=labels[next]||labels.left;
+                _twdSave({appearance_message_layout:next}).then(function(){return INV('apply_features');}).catch(function(){});
+            }
+        });
+    }));
+    display.appendChild(_twdSwitchRow(ctx,T('twd_extended_pins'),T('twd_extended_pins_desc'),s.messages_extended_pins===true,function(v){
+        _twdSetExtendedPins(v).catch(function(){toast(T('error'),'icon-close');});
+    }));
+    ctx.section(T('twd_message_display'),display);
+
     var privacy=ctx.card();
     privacy.appendChild(_twdSwitchRow(ctx,T('twd_no_read'),T('twd_no_read_desc'),s.privacy_no_read_receipts===true,function(v){
         _twdSave({privacy_no_read_receipts:v});
@@ -565,10 +556,7 @@ function _twdRenderMessages(content,ctx,s){
     card.appendChild(_twdSwitchRow(ctx,T('twd_show_disappearing'),T('twd_show_disappearing_desc'),!!s.messages_show_disappearing,function(v){
         _twdConfigureHistory({messages_show_disappearing:v});
     }));
-    card.appendChild(_twdSwitchRow(ctx,T('twd_extended_pins'),T('twd_extended_pins_desc'),s.messages_extended_pins===true,function(v){
-        _twdSetExtendedPins(v).catch(function(){toast(T('error'),'icon-close');});
-    }));
-    ctx.section(T('twd_messages'),card);
+    ctx.section(T('twd_message_visibility'),card);
 
     var saved=ctx.card();
     saved.appendChild(_twdSwitchRow(ctx,T('twd_save_deleted'),T('twd_save_deleted_desc'),!!s.messages_save_deleted,function(v){
