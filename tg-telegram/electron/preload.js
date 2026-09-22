@@ -103,6 +103,9 @@ try {
             function historyKey(chatId, messageId) {
                 return String(chatId) + ':' + String(messageId);
             }
+            function historyIsServerMessageId(messageId) {
+                return Number.isInteger(Number(messageId));
+            }
             function historyEmit(detail) {
                 if (!historyEnabled() || !detail) return;
                 const q = window.__twdHistoryUpdateQueue || (window.__twdHistoryUpdateQueue = []);
@@ -112,7 +115,7 @@ try {
             }
             function historyDomSnapshot(chatId, messageId) {
                 try {
-                    if (historyActiveChatId() !== String(chatId)) return null;
+                    if (!historyIsServerMessageId(messageId) || historyActiveChatId() !== String(chatId)) return null;
                     const selector = '#MiddleColumn .Message[data-message-id="' + CSS.escape(String(messageId)) + '"]';
                     const node = document.querySelector(selector);
                     if (!node) return null;
@@ -129,7 +132,7 @@ try {
                 } catch (_) { return null; }
             }
             function historyRemember(item) {
-                if (!item || !item.chatId || !item.messageId) return;
+                if (!item || !item.chatId || !item.messageId || !historyIsServerMessageId(item.messageId)) return;
                 const key = historyKey(item.chatId, item.messageId);
                 historyTracked.set(key, item);
                 historyByMessageId.set(String(item.messageId), key);
@@ -146,7 +149,7 @@ try {
                 if (!message || !message.content) return;
                 const chatId = String(update.chatId != null ? update.chatId : message.chatId != null ? message.chatId : '');
                 const messageId = String(update.id != null ? update.id : message.id != null ? message.id : '');
-                if (!chatId || !messageId || !historyChatAllowed(chatId)) return;
+                if (!chatId || !messageId || !historyChatAllowed(chatId) || !historyIsServerMessageId(messageId)) return;
                 const active = historyActiveChatId();
                 const key = historyKey(chatId, messageId);
                 let previous = historyTracked.get(key);
@@ -241,6 +244,10 @@ try {
                 let blockedAny = false;
                 update.ids.forEach((rawId) => {
                     const messageId = String(rawId);
+                    if (!historyIsServerMessageId(messageId)) {
+                        remaining.push(rawId);
+                        return;
+                    }
                     let item = null;
                     if (explicitChat) {
                         const key = historyKey(explicitChat, messageId);

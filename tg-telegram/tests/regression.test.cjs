@@ -981,6 +981,9 @@ test('message history keeps memory independent from local persistence scope', ()
     assert.match(preload, /update\['@type'\] === 'deleteMessages'/);
     assert.match(preload, /update\['@type'\] === 'newMessage' \|\| update\['@type'\] === 'updateMessage'/);
     assert.match(preload, /historyByMessageId\.set/);
+    assert.match(preload, /function historyIsServerMessageId\(messageId\)/);
+    assert.match(preload, /return Number\.isInteger\(Number\(messageId\)\)/);
+    assert.match(preload, /if \(!historyIsServerMessageId\(messageId\)\) \{[\s\S]{0,100}remaining\.push\(rawId\);[\s\S]{0,100}return;/);
     assert.match(preload, /if \(!item && active\) item = historyDomSnapshot\(active, messageId\)/);
     assert.match(preload, /function historyIsPrivate\(chatId\)/);
     assert.match(preload, /function historyChatAllowed\(chatId\)/);
@@ -989,6 +992,9 @@ test('message history keeps memory independent from local persistence scope', ()
     assert.match(preload, /!historyChatAllowed\(item\.chatId\)/);
     assert.match(feature, /function historyEnabled\(\)/);
     assert.doesNotMatch(feature, /if \(!cfg\.showDeleted && !cfg\.showDisappearing && !cfg\.saveDeleted && !cfg\.saveDisappearing && !cfg\.editHistory\) return/);
+    assert.match(feature, /function isServerMessageId\(messageId\)/);
+    assert.match(feature, /return Number\.isInteger\(Number\(messageId\)\)/);
+    assert.match(feature, /discardedLocal=true/);
     assert.match(feature, /function isValidChatId\(chatId\)/);
     assert.match(feature, /function isPrivateChatId\(chatId\)/);
     assert.match(feature, /function historyChatAllowed\(chatId\)/);

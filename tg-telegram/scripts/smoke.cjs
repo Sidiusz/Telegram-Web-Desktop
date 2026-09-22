@@ -164,11 +164,13 @@ async function telegramTarget(port) {
       const publicOn=api.configure({savePublic:true});
       window.dispatchEvent(new CustomEvent('__twd_history_update',{detail:{kind:'new',chatId:'-987654321',messageId:'2',text:'allowed public',timestamp:Date.now()}}));
       const publicAllowed=!!api.get('-987654321','2');
+      window.dispatchEvent(new CustomEvent('__twd_history_update',{detail:{kind:'delete',items:[{chatId:'123456789',messageId:'7.125',text:'cancelled local upload',outgoing:true,timestamp:Date.now()}],timestamp:Date.now()}}));
+      const localIgnored=api.get('123456789','7.125')===null;
       const off=api.configure({showDeleted:false,savePublic:false});
       const liveOff=window.__twdMessageHistoryConfig&&window.__twdMessageHistoryConfig.showDeleted===false&&window.__twdMessageHistoryConfig.savePublic===false;
-      return {on:on.showDeleted===true,liveOn,publicBlocked,publicOn:publicOn.savePublic===true,publicAllowed,off:off.showDeleted===false&&off.savePublic===false,liveOff};
+      return {on:on.showDeleted===true,liveOn,publicBlocked,publicOn:publicOn.savePublic===true,publicAllowed,localIgnored,off:off.showDeleted===false&&off.savePublic===false,liveOff};
     })()`);
-    assert.deepEqual(historyToggle, { on: true, liveOn: true, publicBlocked: true, publicOn: true, publicAllowed: true, off: true, liveOff: true });
+    assert.deepEqual(historyToggle, { on: true, liveOn: true, publicBlocked: true, publicOn: true, publicAllowed: true, localIgnored: true, off: true, liveOff: true });
 
     const downloads = await cdp.eval('window.tgBridge.invoke("get_downloads")');
     assert.ok(Array.isArray(downloads));

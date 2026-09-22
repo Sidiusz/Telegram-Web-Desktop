@@ -34,6 +34,9 @@
     function keyOf(chatId, messageId) {
         return String(chatId) + ':' + String(messageId);
     }
+    function isServerMessageId(messageId) {
+        return Number.isInteger(Number(messageId));
+    }
     function isValidChatId(chatId) {
         try { return BigInt(String(chatId)) !== 0n; } catch (_) { return false; }
     }
@@ -111,7 +114,7 @@
         try {
             var out = [];
             records.forEach(function (rec) {
-                if (!rec || !isValidChatId(rec.chatId)) return;
+                if (!rec || !isValidChatId(rec.chatId) || !isServerMessageId(rec.messageId)) return;
                 var savedEdits = Array.isArray(rec.savedEdits) ? rec.savedEdits : [];
                 if (!rec.saved && !savedEdits.length) return;
                 var persistedText = rec.persistUpdatedAt > 0 ? rec.persistText : rec.text;
@@ -134,8 +137,9 @@
     function loadPersisted() {
         try {
             var raw=localStorage.getItem(PERSIST_KEY);if(!raw)return;
-            var parsed=JSON.parse(raw),arr=parsed&&Array.isArray(parsed.records)?parsed.records:[];
+            var parsed=JSON.parse(raw),arr=parsed&&Array.isArray(parsed.records)?parsed.records:[],discardedLocal=false;
             arr.slice(-MAX_RECORDS).forEach(function(x){
+                if(x&&x.messageId&&!isServerMessageId(x.messageId)){discardedLocal=true;return;}
                 if(!x||!isValidChatId(x.chatId)||!x.messageId)return;
                 var rec=ensureRecord(x.chatId,x.messageId,x.text,x.updatedAt);
                 var persistedEdits=Array.isArray(x.edits)?x.edits.slice(-MAX_EDITS).map(function(e){return{text:String(e&&e.text||''),timestamp:Number(e&&e.timestamp)||0};}):[];
@@ -145,6 +149,7 @@
                 rec.persistText=String(x.text||'');rec.persistUpdatedAt=Number(x.updatedAt)||0;
                 rec.updatedAt=Number(x.updatedAt)||rec.updatedAt;rec.deletedAt=Number(x.deletedAt)||0;
             });
+            if(discardedLocal)schedulePersist();
         } catch (_) {}
     }
     function clearSessionRecords() {
@@ -186,7 +191,7 @@
     function applyHistoryEvent(ev) {
         if (!historyEnabled() || !ev || typeof ev !== 'object') return;
         if (ev.kind === 'new' || ev.kind === 'edit') {
-            if (!historyChatAllowed(ev.chatId)) return;
+            if (!historyChatAllowed(ev.chatId) || !isServerMessageId(ev.messageId)) return;
             var rec = getRecord(ev.chatId, ev.messageId);
             if (!rec && ev.kind === 'edit' && ev.oldText != null) {
                 rec = ensureRecord(ev.chatId, ev.messageId, ev.oldText, ev.timestamp);
@@ -207,7 +212,7 @@
         }
         if (ev.kind === 'delete' && Array.isArray(ev.items)) {
             ev.items.forEach(function (item) {
-                if (!historyChatAllowed(item.chatId)) return;
+                if (!historyChatAllowed(item.chatId) || !isServerMessageId(item.messageId)) return;
                 var rec = ensureRecord(item.chatId, item.messageId, item.text, item.timestamp || ev.timestamp);
                 if (item.text != null && !rec.text) rec.text = String(item.text);
                 rec.ephemeral = item.ephemeral === true;
@@ -294,7 +299,7 @@
         if (msg.classList.contains('_twd-deleted-clone_') || msg.classList.contains('is-deleting') || msg.classList.contains('is-dissolving')) return;
         var chatId = currentChatId();
         var messageId = String(msg.getAttribute('data-message-id') || '');
-        if (!chatId || !messageId || !historyChatAllowed(chatId)) return;
+        if (!chatId || !messageId || !historyChatAllowed(chatId) || !isServerMessageId(messageId)) return;
         var text = visibleMessageText(msg);
         var key = keyOf(chatId, messageId);
         if (!domTextSnapshots.has(key)) {
@@ -348,7 +353,7 @@
         if (!msg.classList.contains('is-deleting') && !msg.classList.contains('is-dissolving')) return;
         var chatId = currentChatId();
         var messageId = String(msg.getAttribute('data-message-id') || '');
-        if (!chatId || !messageId || !historyChatAllowed(chatId)) return;
+        if (!chatId || !messageId || !historyChatAllowed(chatId) || !isServerMessageId(messageId)) return;
         var rec = getRecord(chatId,messageId) || ensureRecord(chatId, messageId, visibleMessageText(msg), Date.now());
         var show = rec.ephemeral ? cfg.showDisappearing === true : cfg.showDeleted === true;
         rec.text = rec.text || visibleMessageText(msg);
@@ -377,7 +382,7 @@
     function insertDeletedSnapshot(snapshot) {
         if (!snapshot || !historyChatAllowed(snapshot.chatId) || currentChatId() !== String(snapshot.chatId)) return;
         var messageId = String(snapshot.messageId || '');
-        if (!messageId) return;
+        if (!messageId || !isServerMessageId(messageId)) return;
         var selector = '#MiddleColumn .Message[data-message-id="' + CSS.escape(messageId) + '"]';
         var existing = document.querySelector(selector);
         var rec = getRecord(snapshot.chatId, messageId);
