@@ -41,6 +41,9 @@ function getWindow() {
 
 function createWindow(state, onTelegramLink, options = {}) {
     const startHidden = options.startHidden === true;
+    const mobileReference = process.env.TWD_MOBILE_REFERENCE === '1';
+    const mobileReferenceWidth = Math.max(320, Number.parseInt(process.env.TWD_REFERENCE_WIDTH || '412', 10) || 412);
+    const mobileReferenceHeight = Math.max(568, Number.parseInt(process.env.TWD_REFERENCE_HEIGHT || '915', 10) || 915);
     const initialSettings = loadSettings();
     installFlowsealWsRoute(session.defaultSession, initialSettings);
     let webAMode = initialSettings.proxy_web_fallback !== false && initialSettings.proxy_web_fallback_latched === true
@@ -195,12 +198,12 @@ function createWindow(state, onTelegramLink, options = {}) {
     }
 
     mainWindow = new BrowserWindow({
-        width: 1280,
-        height: 860,
-        minWidth: 640,
-        minHeight: 480,
+        width: mobileReference ? mobileReferenceWidth : 1280,
+        height: mobileReference ? mobileReferenceHeight : 860,
+        minWidth: mobileReference ? 320 : 640,
+        minHeight: mobileReference ? 568 : 480,
         backgroundColor: '#0e1621',
-        title: 'Telegram Web Desktop',
+        title: mobileReference ? 'Telegram Web Desktop - Mobile Reference' : 'Telegram Web Desktop',
         show: false,
         webPreferences: {
             preload: path.join(__dirname, 'preload.js'),
@@ -211,6 +214,18 @@ function createWindow(state, onTelegramLink, options = {}) {
             backgroundThrottling: false,
         },
     });
+    if (mobileReference) {
+        // Keep the renderer viewport deterministic so DOM measurements match the Android
+        // target instead of including the Windows title-bar/frame size.
+        try { mainWindow.setContentSize(mobileReferenceWidth, mobileReferenceHeight); } catch (_) {}
+        try { mainWindow.center(); } catch (_) {}
+        try {
+            mainWindow.webContents.setUserAgent(
+                'Mozilla/5.0 (Linux; Android 14; Pixel 7) AppleWebKit/537.36 ' +
+                '(KHTML, like Gecko) Chrome/132.0.0.0 Mobile Safari/537.36'
+            );
+        } catch (_) {}
+    }
 
     // CSP can be delivered as HTTP header (older) or as <meta http-equiv> (current).
     // protocol.handle above strips the meta; this strips the header variant.
@@ -532,7 +547,12 @@ function createWindow(state, onTelegramLink, options = {}) {
     mainWindow.on('ready-to-show', () => {
         if (process.env.TWD_SMOKE_HIDDEN === '1' || startHidden) return;
         if (!mainWindow || mainWindow.isDestroyed()) return;
-        try { if (!mainWindow.isMaximized()) mainWindow.maximize(); } catch (_) {}
+        if (!mobileReference) {
+            try { if (!mainWindow.isMaximized()) mainWindow.maximize(); } catch (_) {}
+        } else {
+            try { mainWindow.setContentSize(mobileReferenceWidth, mobileReferenceHeight); } catch (_) {}
+            try { mainWindow.center(); } catch (_) {}
+        }
         mainWindow.show();
         mainWindow.focus();
     });
