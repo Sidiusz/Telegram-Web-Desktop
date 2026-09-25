@@ -51,8 +51,20 @@ jobs:
           $source = "tg-telegram/dist/Telegram Web Desktop Setup $version.exe"
           $installer = "tg-telegram/dist/Telegram.Web.Desktop.Setup.$version.exe"
           $notes = ".github/release-notes/$version.md"
-          $releaseId = gh api "repos/$env:GITHUB_REPOSITORY/releases/tags/$version" --jq '.id' 2>$null
-          if ($LASTEXITCODE -eq 0 -and $releaseId) {
+          $headers = @{
+            Authorization = "Bearer $env:GH_TOKEN"
+            Accept = 'application/vnd.github+json'
+            'X-GitHub-Api-Version' = '2022-11-28'
+          }
+          $releaseId = $null
+          try {
+            $existing = Invoke-RestMethod -Headers $headers -Uri "https://api.github.com/repos/$env:GITHUB_REPOSITORY/releases/tags/$version"
+            $releaseId = $existing.id
+          } catch {
+            $status = $_.Exception.Response.StatusCode.value__
+            if ($status -ne 404) { throw }
+          }
+          if ($releaseId) {
             if (Test-Path $notes) {
               $payloadPath = Join-Path $env:RUNNER_TEMP 'release-notes.json'
               $notesText = [IO.File]::ReadAllText((Resolve-Path $notes), [Text.Encoding]::UTF8)
