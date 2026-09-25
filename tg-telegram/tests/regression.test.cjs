@@ -9,6 +9,7 @@ const root = path.resolve(__dirname, '..');
 const read = rel => fs.readFileSync(path.join(root, rel), 'utf8');
 const { normalizeToTg, getTgUrlFromArgs, isTelegramWebLink } = require('../electron/deep-links.cjs');
 const { sanitizeFilename } = require('../electron/utils.cjs');
+const { patchTelegramMediaCache } = require('../electron/tg-media-cache.cjs');
 
 test('Telegram deep links normalize without launching anything', () => {
     assert.equal(normalizeToTg('tg://resolve?domain=microsoft_help_bot'), 'tg://resolve?domain=microsoft_help_bot');
@@ -1247,6 +1248,41 @@ test('notification backlog stays memory-bounded if the popup renderer is unavail
     assert.match(popup, /const MAX_PENDING = 32/);
     assert.match(popup, /if \(_pending\.length > MAX_PENDING\) _pending\.splice\(0, _pending\.length - MAX_PENDING\)/);
     assert.match(popup, /const MAX_ICON_DATA_URL = 2 \* 1024 \* 1024/);
+});
+
+test('detached Telegram media releases decoder and canvas backing resources', () => {
+    const feature = read('electron/features/media_cleanup.js');
+    const loader = read('electron/features.cjs');
+    assert.match(loader, /readFeature\('media_cleanup\.js'\)/);
+    assert.match(feature, /mutation\.removedNodes\.forEach\(collect\)/);
+    assert.match(feature, /if \(root\.parentElement && !root\.parentElement\.isConnected\) return/);
+    assert.match(feature, /el\.srcObject = null/);
+    assert.match(feature, /el\.removeAttribute\('src'\)/);
+    assert.match(feature, /el\.width = 0/);
+    assert.match(feature, /el\.height = 0/);
+    assert.match(feature, /__twdDetachedMediaStats/);
+});
+
+test('Telegram media cache patch evicts only unreferenced blob URLs and keeps diagnostics', () => {
+    const sample = 'var vt=new Map,yt=new Map;function Ct(e){return vt.get(e)}' +
+        'async function Ot(e){let n=`blob:a`;vt.set(e,n);if(!n)throw Error(`Failed to fetch media ${e}`);' +
+        'let l=`blob:b`;return vt.set(e,l),l}async function kt(e){vt.delete(e);await Promise.resolve()}';
+    const patched = patchTelegramMediaCache(sample);
+    assert.equal(patched.patched, true);
+    assert.match(patched.body, /__twdMediaCacheSet/);
+    assert.match(patched.body, /__twdMediaCacheDrop/);
+    assert.match(patched.body, /__twdMediaCacheRefs/);
+    assert.match(patched.body, /globalThis\.__twdMediaCacheStats/);
+    assert.match(patched.body, /if\([^)]*\.size<=96\)return/);
+    assert.match(patched.body, /if\([^)]*\.size<=64\)break/);
+    assert.match(patched.body, /refs\.has\(v\)/);
+    assert.match(patched.body, /URL\.revokeObjectURL\(v\)/);
+
+    const win = read('electron/window.cjs');
+    assert.match(win, /injectTelegramMediaCache/);
+    assert.match(win, /WEB_ASSET_PATCH_REVISION = 'memory-v4'/);
+    assert.match(win, /clearStorageData\(\{ origin: 'https:\/\/web\.telegram\.org', storages: \['cachestorage'\] \}\)/);
+    assert.doesNotMatch(win, /storages: \[[^\]]*(?:cookies|indexdb|localstorage)/);
 });
 
 test('proxy stall recovery activates auto proxy and rotates away from a stalled domain', () => {

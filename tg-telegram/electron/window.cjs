@@ -13,6 +13,7 @@ const { installFlowsealWsRoute, noteTelegramLoadFailure, isWebFallbackEnabled } 
 const { fetchTelegramWebAFallback } = require('./telegram-web-fallback.cjs');
 const { injectTelegramWorkerProxy } = require('./tg-flowseal-worker.cjs');
 const { injectTelegramExtendedPins, injectExtendedPinsPrelude } = require('./tg-extended-pins.cjs');
+const { injectTelegramMediaCache } = require('./tg-media-cache.cjs');
 
 const TG_URL = 'https://web.telegram.org/a/';
 const WEBSYNC_HOSTS = new Set(['t.me', 'telegram.me', 'telegram.dog']);
@@ -33,6 +34,18 @@ function startupTheme(settings) {
 }
 function startupBackground(theme) {
     return theme === 'light' ? '#ffffff' : '#212121';
+}
+
+const WEB_ASSET_PATCH_REVISION = 'memory-v4';
+async function refreshPatchedTelegramAssetCache(ses) {
+    const marker = path.join(app.getPath('userData'), '.twd-web-assets-revision');
+    try {
+        if (fs.readFileSync(marker, 'utf8').trim() === WEB_ASSET_PATCH_REVISION) return false;
+    } catch (_) {}
+    await ses.clearStorageData({ origin: 'https://web.telegram.org', storages: ['cachestorage'] });
+    try { fs.writeFileSync(marker, WEB_ASSET_PATCH_REVISION, 'utf8'); } catch (_) {}
+    console.log('[TWD-MEMORY] refreshed Telegram CacheStorage for memory patches');
+    return true;
 }
 function injectStartupSurface(body, theme) {
     const dark = theme !== 'light';
@@ -162,6 +175,7 @@ function createWindow(state, onTelegramLink, options = {}) {
                 let resp = await fetchTelegramAsset(request, url);
                 resp = await injectTelegramWorkerProxy(resp, url);
                 resp = await injectTelegramExtendedPins(resp, url);
+                resp = await injectTelegramMediaCache(resp, url);
                 const ct = (resp.headers.get('content-type') || '').toLowerCase();
                 if (!ct.includes('text/html')) return resp;
                 let body = await resp.text();
@@ -189,6 +203,7 @@ function createWindow(state, onTelegramLink, options = {}) {
                         let resp = await fetchTelegramAsset(request, url);
                         resp = await injectTelegramWorkerProxy(resp, url);
                         resp = await injectTelegramExtendedPins(resp, url);
+                        resp = await injectTelegramMediaCache(resp, url);
                         const ct = (resp.headers.get('content-type') || '').toLowerCase();
                         if (!ct.includes('text/html')) return resp;
                         let body = await resp.text();
@@ -657,7 +672,11 @@ function createWindow(state, onTelegramLink, options = {}) {
         if (!forceQuit) setImmediate(() => { if (!forceQuit) app.quit(); });
     });
 
-    mainWindow.loadURL(TG_URL);
+    refreshPatchedTelegramAssetCache(session.defaultSession)
+        .catch((e) => console.warn('[TWD-MEMORY] CacheStorage refresh failed:', e && e.message ? e.message : e))
+        .finally(() => {
+            if (mainWindow && !mainWindow.isDestroyed()) mainWindow.loadURL(TG_URL).catch(() => {});
+        });
     return mainWindow;
 }
 

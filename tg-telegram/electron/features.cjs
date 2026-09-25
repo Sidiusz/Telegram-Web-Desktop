@@ -15,6 +15,8 @@ function loadFeatureScripts(settings) {
     const s = settings || {};
     const scripts = [];
 
+    scripts.push(readFeature('media_cleanup.js'));
+
     if (s.appearance_message_layout === 'wide' || s.appearance_message_layout === 'left') {
         scripts.push(readFeature('desktop_like_base.js'));
         scripts.push(readFeature('desktop_like_common.js'));
