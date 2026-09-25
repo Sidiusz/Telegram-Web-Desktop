@@ -4,9 +4,9 @@
     try { ensureStyles(); } catch (_) {}
     if (window.__twdDesktopLikeRuntimeStarted) return;
     window.__twdDesktopLikeRuntimeStarted = true;
-    var PARTNER_TTL = 90, MY_TTL = 30;
+    var PARTNER_TTL_MS = 90 * 1000, MY_TTL_MS = 30 * 1000;
     var _partnerCache = {};
-    var _myAvatar = { src: '', age: 0 };
+    var _myAvatar = { src: '', expires: 0 };
     var _mySrcMenu = '';
     var _lastPeerId = '';
     var _myPeerId = '';
@@ -30,29 +30,31 @@
         return '';
     }
     function findMySrc() {
-        _myAvatar.age++;
-        if (_myAvatar.age >= MY_TTL) { _myAvatar.src = ''; _myAvatar.age = 0; _mySrcMenu = ''; }
-        if (_myAvatar.src) return _myAvatar.src;
+        var now = Date.now();
+        if (_myAvatar.src && _myAvatar.expires > now) return _myAvatar.src;
+        if (_myAvatar.expires && _myAvatar.expires <= now) { _myAvatar.src = ''; _myAvatar.expires = 0; _mySrcMenu = ''; }
         var profileImg = document.querySelector('.settings-content .ProfileInfo .Avatar[data-peer-id] img.Avatar__media');
-        if (profileImg && profileImg.src && profileImg.src.startsWith('blob:')) { _myAvatar.src = profileImg.src; return _myAvatar.src; }
+        if (profileImg && profileImg.src && profileImg.src.startsWith('blob:')) { _myAvatar.src = profileImg.src; _myAvatar.expires = now + MY_TTL_MS; return _myAvatar.src; }
         var pid = findMyPeerId();
         if (pid) {
             var any = document.querySelector('.Avatar[data-peer-id="' + pid + '"] img.Avatar__media');
-            if (any && any.src && any.src.startsWith('blob:')) { _myAvatar.src = any.src; return _myAvatar.src; }
+            if (any && any.src && any.src.startsWith('blob:')) { _myAvatar.src = any.src; _myAvatar.expires = now + MY_TTL_MS; return _myAvatar.src; }
         }
         if (!_mySrcMenu) {
             var menuImg = document.querySelector('.MenuItem.account-menu-item .Avatar img');
             if (menuImg && menuImg.src && (menuImg.src.startsWith('data:') || menuImg.src.startsWith('blob:'))) _mySrcMenu = menuImg.src;
         }
+        if (_mySrcMenu) { _myAvatar.src = _mySrcMenu; _myAvatar.expires = now + MY_TTL_MS; }
         return _mySrcMenu;
     }
     function findPartnerSrc(peerId) {
         if (!peerId) return '';
-        var entry = _partnerCache[peerId];
-        if (entry) { entry.age++; if (entry.age < PARTNER_TTL) return entry.src; delete _partnerCache[peerId]; }
+        var now = Date.now(), entry = _partnerCache[peerId];
+        if (entry && entry.expires > now) return entry.src;
+        if (entry) delete _partnerCache[peerId];
         var img = document.querySelector('.MiddleHeader .ChatInfo .Avatar[data-peer-id="' + peerId + '"] img.Avatar__media');
         if (img && img.src && (img.src.startsWith('blob:') || img.src.startsWith('data:'))) {
-            _partnerCache[peerId] = { src: img.src, age: 0 };
+            _partnerCache[peerId] = { src: img.src, expires: now + PARTNER_TTL_MS };
             return img.src;
         }
         return '';
@@ -215,9 +217,11 @@
     var _rcTicks = 0, _rcRaf = 0, _rcOpen = null;
     // Follow the panel while it slides so widths don't snap a frame late.
     function rcFollow(){
+        if (window.__twdVisualActive === false) return;
         _rcTicks = 40;
         if (_rcRaf) return;
         _rcRaf = requestAnimationFrame(function step(){
+            if (window.__twdVisualActive === false) { _rcTicks = 0; _rcRaf = 0; return; }
             measureRc();
             _rcRaf = (--_rcTicks > 0) ? requestAnimationFrame(step) : 0;
         });
@@ -231,34 +235,61 @@
             if (open !== _rcOpen) { _rcOpen = open; rcFollow(); } else { measureRc(); }
         }catch(e){}
     }
-    window.addEventListener('resize', function(){ try{ rcFollow(); }catch(e){} });
-    function tick() { ensureStyles(); applyPrivateClass(); injectAvatars(); ensureOwnMediaAppendix(); recolorAppendixes(); syncRightColumn(); }
-    setInterval(tick, 1000);
-    tick();
-
-    // After a chat switch, run a short 150ms burst (~2s) so avatars appear before the next 1s tick.
-    var _avT = null;
-    function avatarBurst() {
-        if (_avT) clearInterval(_avT);
-        var n = 0;
-        _avT = setInterval(function () {
-            injectAvatars(); ensureOwnMediaAppendix(); recolorAppendixes();
-            if (++n >= 14) { clearInterval(_avT); _avT = null; }
-        }, 150);
+    var _msgRaf = 0, _observedList = null;
+    var _messageObserver = new MutationObserver(function(){ scheduleMessageRefresh(); });
+    var _layoutMain = null;
+    var _layoutObserver = new MutationObserver(function(){ if(window.__twdVisualActive!==false)syncRightColumn(); });
+    function refreshMessages(){
+        if(window.__twdVisualActive===false)return;
+        try{ensureStyles();}catch(_){}
+        applyPrivateClass();injectAvatars();ensureOwnMediaAppendix();recolorAppendixes();
     }
-    function onNav() { applyPrivateClass(); injectAvatars(); avatarBurst(); }
+    function scheduleMessageRefresh(){
+        if(window.__twdVisualActive===false||_msgRaf)return;
+        _msgRaf=requestAnimationFrame(function(){_msgRaf=0;refreshMessages();});
+    }
+    function bindMessageObserver(){
+        var list=document.querySelector('#MiddleColumn .MessageList');
+        if(list===_observedList)return;
+        _messageObserver.disconnect();_observedList=list||null;
+        if(list)_messageObserver.observe(list,{childList:true,subtree:true,attributes:true,attributeFilter:['class']});
+        scheduleMessageRefresh();
+    }
+    function bindLayoutObserver(){
+        var main=document.getElementById('Main');
+        if(main===_layoutMain)return;
+        _layoutObserver.disconnect();_layoutMain=main||null;
+        _layoutObserver.observe(document.documentElement,{attributes:true,attributeFilter:['class']});
+        if(document.body)_layoutObserver.observe(document.body,{attributes:true,attributeFilter:['class']});
+        if(main)_layoutObserver.observe(main,{attributes:true,attributeFilter:['class']});
+    }
+    function onMediaReady(e){var t=e&&e.target;if(t&&t.closest&&t.closest('#MiddleColumn'))scheduleMessageRefresh();}
+    document.addEventListener('load',onMediaReady,true);
+    document.addEventListener('loadeddata',onMediaReady,true);
+    window.addEventListener('resize',function(){try{rcFollow();scheduleMessageRefresh();}catch(e){}});
+    function refreshBindings(){bindMessageObserver();bindLayoutObserver();scheduleMessageRefresh();syncRightColumn();}
+    function onNav(){
+        applyPrivateClass();
+        refreshBindings();
+        setTimeout(function(){if(window.__twdVisualActive!==false)refreshBindings();},350);
+    }
 
-    // TG switches chats via pushState (no hashchange) — patch it to apply .tgdl-private synchronously and avoid a flash of own bubbles.
-    ['pushState', 'replaceState'].forEach(function (k) {
-        var orig = history[k];
-        if (typeof orig !== 'function') return;
-        history[k] = function () {
-            var r = orig.apply(this, arguments);
-            try { onNav(); } catch (e) {}
-            return r;
-        };
+    // TG switches chats via pushState (no hashchange). Keep the synchronous class update,
+    // then let actual DOM mutations drive avatar/media work instead of a 150ms polling burst.
+    ['pushState','replaceState'].forEach(function(k){
+        var orig=history[k];
+        if(typeof orig!=='function'||orig.__twdDesktopLikeWrapped)return;
+        function wrapped(){var result=orig.apply(this,arguments);try{onNav();}catch(e){}return result;}
+        wrapped.__twdDesktopLikeWrapped=true;history[k]=wrapped;
     });
-    window.addEventListener('popstate', onNav);
-    window.addEventListener('hashchange', onNav);
+    window.addEventListener('popstate',onNav);
+    window.addEventListener('hashchange',onNav);
+    window.addEventListener('__twd_window_state',function(e){
+        if(e.detail&&e.detail.active){refreshBindings();return;}
+        if(_msgRaf){cancelAnimationFrame(_msgRaf);_msgRaf=0;}
+        if(_rcRaf){cancelAnimationFrame(_rcRaf);_rcRaf=0;_rcTicks=0;}
+    });
+    refreshBindings();
+    setInterval(function(){if(window.__twdVisualActive!==false)refreshBindings();},10000);
     };
 })();

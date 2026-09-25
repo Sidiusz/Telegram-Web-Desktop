@@ -558,6 +558,16 @@ function createWindow(state, onTelegramLink, options = {}) {
         }, 300);
     });
 
+    const emitWindowState = () => {
+        if (!mainWindow || mainWindow.isDestroyed()) return;
+        try {
+            mainWindow.webContents.send('window-state-changed', {
+                visible: mainWindow.isVisible(),
+                minimized: mainWindow.isMinimized(),
+            });
+        } catch (_) {}
+    };
+
     mainWindow.on('ready-to-show', () => {
         if (process.env.TWD_SMOKE_HIDDEN === '1' || startHidden) return;
         if (!mainWindow || mainWindow.isDestroyed()) return;
@@ -590,8 +600,9 @@ function createWindow(state, onTelegramLink, options = {}) {
         repaintTimers.push(setTimeout(repaint, 220));
     }
 
-    mainWindow.on('show', () => { reapplyBadge(); wakeTelegramForeground(); repaintWindowSurface(); });
-    mainWindow.on('restore', () => { reapplyBadge(); wakeTelegramForeground(); repaintWindowSurface(); });
+    mainWindow.on('show', () => { reapplyBadge(); wakeTelegramForeground(); repaintWindowSurface(); emitWindowState(); });
+    mainWindow.on('restore', () => { reapplyBadge(); wakeTelegramForeground(); repaintWindowSurface(); emitWindowState(); });
+    mainWindow.on('minimize', emitWindowState);
 
     // TG's column layout caches window width via ResizeObserver and won't recompute after a
     // monitor change or mid-transition reload (chat stays narrow); a synthetic resize event doesn't trigger it, but nudging zoom by 0.001 does (no visible jump, unlike resizing the frame).
@@ -626,6 +637,7 @@ function createWindow(state, onTelegramLink, options = {}) {
     mainWindow.webContents.on('did-stop-loading', repaintWindowSurface);
     mainWindow.on('hide', () => {
         if (!mainWindow || mainWindow.isDestroyed()) return;
+        emitWindowState();
         mainWindow.webContents.executeJavaScript(`try{window.__tgHiddenCtrl&&window.__tgHiddenCtrl.setHasFocus(false)}catch(e){}`).catch(()=>{});
     });
     mainWindow.on('close', (e) => {

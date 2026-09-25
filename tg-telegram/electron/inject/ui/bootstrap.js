@@ -37,6 +37,19 @@ function installStartupThemeSync(){
     sync();
 }
 
+function installVisualStateSync(){
+    if(window.__twdVisualStateSync)return;window.__twdVisualStateSync=true;
+    window.__twdVisualActive=true;
+    const apply=(state)=>{
+        const active=!!(state&&state.visible&&!state.minimized);
+        if(window.__twdVisualActive===active)return;
+        window.__twdVisualActive=active;
+        window.dispatchEvent(new CustomEvent('__twd_window_state',{detail:{active}}));
+    };
+    try{ INV('get_window_state').then(apply).catch(()=>{}); }catch(_){}
+    try{ if(window.tgBridge&&typeof window.tgBridge.onWindowStateChanged==='function')window.tgBridge.onWindowStateChanged(apply); }catch(_){}
+}
+
 function installProxyStallRecovery(){
     if(window.__twdProxyStallRecovery)return;window.__twdProxyStallRecovery=true;
     let waitingSince=0,lastKick=0;
@@ -80,27 +93,43 @@ function installAtomicQrReveal(){
 }
 
 waitBody(()=>{
+    installVisualStateSync();
     installAtomicQrReveal();
     installStartupThemeSync();
     installProxyStallRecovery();
     tryInject();
     new MutationObserver(tryInject).observe(document.body,{childList:true,subtree:false});
     
-    // Запускаем инжект с интервалом, ловим меню в момент его появления
-    setInterval(injectMenu, 500);
-    setInterval(injectSettingsRows, 500);
-    // Реактивный инжект: стреляет почти в тот же кадр, как только React смонтировал
-    // список настроек/меню (иначе был виден «провал» — до 500мс нативные строки без
-    // наших). Глубокий observer (subtree:true), но с дебаунсом 40мс — TG мутирует
-    // DOM постоянно (печать/скролл), и inject на каждой мутации сам бы дёргал меню.
-    // inject идемпотентен (guard по id), повторные вызовы ничего не пишут в DOM.
+    // Reactively inject only when Telegram mounts menu/settings-related nodes.
+    // A slow repair pass remains as a safety net, but normal chat mutations no longer
+    // wake the settings injectors every 40ms or every 500ms.
     let _injT=null;
-    const _stObs=new MutationObserver(()=>{
-        if(_injT)return;
-        _injT=setTimeout(()=>{_injT=null;injectMenu();injectSettingsRows();},40);
+    const _injectionNodeRelevant=(node)=>{
+        if(!node||node.nodeType!==1)return false;
+        const sel='.bubble.menu-container,#Settings,.settings-main-scroll,.icon-saved-messages,.icon-settings-filled';
+        try{return node.matches(sel)||!!node.querySelector(sel);}catch(_){return false;}
+    };
+    const _runUiInject=()=>{
+        if(window.__twdVisualActive===false)return;
+        injectMenu();injectSettingsRows();
+    };
+    const _stObs=new MutationObserver((mutations)=>{
+        if(window.__twdVisualActive===false||_injT)return;
+        let relevant=false;
+        for(const m of mutations){
+            for(const node of m.addedNodes){if(_injectionNodeRelevant(node)){relevant=true;break;}}
+            if(relevant)break;
+        }
+        if(!relevant)return;
+        _injT=setTimeout(()=>{_injT=null;_runUiInject();},40);
     });
     const _startObs=()=>{ if(document.body) _stObs.observe(document.body,{childList:true,subtree:true}); else setTimeout(_startObs,80); };
     _startObs();
+    setInterval(()=>{
+        if(window.__twdVisualActive===false)return;
+        if(document.querySelector('.bubble.menu-container .icon-saved-messages,#Settings .settings-main-scroll'))_runUiInject();
+    },15000);
+    window.addEventListener('__twd_window_state',(e)=>{if(e.detail&&e.detail.active){tryInject();_runUiInject();}});
 
     setupNativeWidgetCapture();
 
@@ -366,12 +395,19 @@ document.addEventListener('click', function(e){
             try{ startImmediateDownloadCard(origNameFor(t), curPeer()); }catch(_){}
         }
     }, true);
-    // Смена чата → пересчитать визуал карточек (в чате / фоновая).
-    var _lastP='';
-    setInterval(function(){
-        var p=curPeer(); if(p===_lastP) return; _lastP=p;
-        if(window.__tgdlReflowCards) try{ window.__tgdlReflowCards(); }catch(_){}
-    }, 500);
+    // Смена чата → пересчитать визуал карточек без постоянного 500ms polling.
+    var _lastP=curPeer();
+    function reflowOnPeerChange(){
+        var p=curPeer();if(p===_lastP)return;_lastP=p;
+        if(window.__tgdlReflowCards)try{window.__tgdlReflowCards();}catch(_){}
+    }
+    ['pushState','replaceState'].forEach(function(k){
+        var orig=history[k];if(typeof orig!=='function'||orig.__twdDownloadNavWrapped)return;
+        function wrapped(){var result=orig.apply(this,arguments);reflowOnPeerChange();return result;}
+        wrapped.__twdDownloadNavWrapped=true;history[k]=wrapped;
+    });
+    window.addEventListener('popstate',reflowOnPeerChange);
+    window.addEventListener('hashchange',reflowOnPeerChange);
 })();
 // ──────────────────────────────────────────────────────────────────────────
 
@@ -738,15 +774,19 @@ window.__tgMarkAllRead=function(){
 // не дублируем (lastTgSound).
 (function setupIncomingNotifications(){
     var seen={}, seeded=false, lastTgSound=0;
-    // Кэш настроек (звук/громкость/категории). Обновляем периодически — дёшево
-    // (INV('get_settings')), уведомления реагируют на переключатели без перезагрузки.
+    // Кэш настроек (звук/громкость/категории). Загружаем один раз, затем main
+    // пушит изменения сразу после save_settings — без постоянного IPC polling.
     var cfg={notif_sound:true,notif_volume:0.8,notif_cat_private:true,notif_cat_group:true,notif_cat_channel:true};
     function refreshCfg(){
         try{return INV('get_settings').then(function(s){if(s)cfg=s;return cfg;}).catch(function(){return cfg;});}
         catch(e){return Promise.resolve(cfg);}
     }
     refreshCfg();
-    setInterval(refreshCfg,2000);
+    try{
+        if(window.tgBridge&&typeof window.tgBridge.onSettingsChanged==='function'){
+            window.tgBridge.onSettingsChanged(function(s){if(s)cfg=Object.assign({},cfg,s);});
+        }
+    }catch(_){}
 
     // Ловим момент, когда сам Telegram играет notification.mp3 — для де-дупа.
     var _nativeMediaPlay=null;

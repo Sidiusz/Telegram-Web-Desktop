@@ -28,10 +28,54 @@
     function clearMessage(msg){msg.classList.remove('_twd-filter-hidden_','_twd-filter-marked_');msg.removeAttribute('data-twd-filtered');}
     function paintMessage(msg,hit){clearMessage(msg);if(!hit)return;msg.setAttribute('data-twd-filtered','1');msg.classList.add(cfg.markOnly===true?'_twd-filter-marked_':'_twd-filter-hidden_');}
     function clearAll(){document.querySelectorAll('#MiddleColumn .Message._twd-filter-hidden_,#MiddleColumn .Message._twd-filter-marked_').forEach(clearMessage);}
-    var scanToken=0;function scan(){var token=++scanToken;if(cfg.enabled!==true){clearAll();return Promise.resolve();}var pid=currentPeer();return resolveCategory(pid).then(function(cat){if(token!==scanToken)return;var allowed=cat==='channel'||(cat==='private'&&cfg.includePrivate===true);if(!allowed){clearAll();return;}document.querySelectorAll('#MiddleColumn .Message').forEach(function(msg){if(cat==='private'&&msg.classList.contains('own')){clearMessage(msg);return;}paintMessage(msg,matches(msg));});}).catch(clearAll);}
-    var timer=null;function schedule(){if(timer)return;timer=setTimeout(function(){timer=null;scan();},80);}
-    function configure(next){cfg=Object.assign({},cfg,next||{});window.__twdMessageFilterConfig=Object.assign({},cfg);schedule();}
+    var scanToken=0,timer=null,fullScanPending=true,dirtyMessages=new Set();
+    function queueNode(node){
+        var el=node&&node.nodeType===1?node:(node&&node.parentElement);if(!el)return;
+        var msg=el.matches&&el.matches('#MiddleColumn .Message')?el:(el.closest&&el.closest('#MiddleColumn .Message'));
+        if(msg)dirtyMessages.add(msg);
+        if(el.querySelectorAll)el.querySelectorAll('.Message').forEach(function(x){if(x.closest('#MiddleColumn'))dirtyMessages.add(x);});
+    }
+    function schedule(full){
+        if(full){fullScanPending=true;dirtyMessages.clear();}
+        if(window.__twdVisualActive===false){fullScanPending=true;dirtyMessages.clear();if(timer){clearTimeout(timer);timer=null;}return;}
+        if(timer)return;
+        timer=setTimeout(function(){timer=null;scan();},80);
+    }
+    function scan(){
+        var token=++scanToken,full=fullScanPending;fullScanPending=false;
+        var targets=full?Array.from(document.querySelectorAll('#MiddleColumn .Message')):Array.from(dirtyMessages);
+        dirtyMessages.clear();
+        if(cfg.enabled!==true){clearAll();return Promise.resolve();}
+        var pid=currentPeer();
+        return resolveCategory(pid).then(function(cat){
+            if(token!==scanToken){schedule(true);return;}
+            var allowed=cat==='channel'||(cat==='private'&&cfg.includePrivate===true);
+            if(!allowed){clearAll();return;}
+            targets.forEach(function(msg){
+                if(!msg||!msg.isConnected||!msg.closest('#MiddleColumn'))return;
+                if(cat==='private'&&msg.classList.contains('own')){clearMessage(msg);return;}
+                paintMessage(msg,matches(msg));
+            });
+        }).catch(function(){clearAll();});
+    }
+    function configure(next){cfg=Object.assign({},cfg,next||{});window.__twdMessageFilterConfig=Object.assign({},cfg);schedule(true);}
     window.addEventListener('__twd_message_filter_config',function(e){configure(e.detail||{});});
-    window.__twdMessageFilterApi={configure:configure,scan:scan,testText:function(text){var fake=document.createElement('div');fake.innerText=String(text||'');return matches(fake);},shortDomains:SHORT.slice(),refDomains:REF.slice()};
-    var observer=new MutationObserver(schedule);function start(){var root=document.querySelector('#MiddleColumn');if(!root){setTimeout(start,250);return;}observer.observe(root,{childList:true,subtree:true,characterData:true});loadChatTypes(false).then(scan);setInterval(function(){var p=currentPeer();if(p!==start._peer){start._peer=p;schedule();}},700);}start();
+    window.addEventListener('__twd_window_state',function(e){if(e.detail&&e.detail.active)schedule(true);});
+    window.__twdMessageFilterApi={configure:configure,scan:function(){fullScanPending=true;return scan();},testText:function(text){var fake=document.createElement('div');fake.innerText=String(text||'');return matches(fake);},shortDomains:SHORT.slice(),refDomains:REF.slice()};
+    var observer=new MutationObserver(function(mutations){
+        if(cfg.enabled!==true)return;
+        if(window.__twdVisualActive===false){fullScanPending=true;dirtyMessages.clear();return;}
+        mutations.forEach(function(m){
+            queueNode(m.target);
+            m.addedNodes.forEach(queueNode);
+        });
+        if(dirtyMessages.size)schedule(false);
+    });
+    function onNav(){schedule(true);}
+    function installNavHooks(){
+        ['pushState','replaceState'].forEach(function(k){var orig=history[k];if(typeof orig!=='function'||orig.__twdFilterWrapped)return;function wrapped(){var result=orig.apply(this,arguments);onNav();return result;}wrapped.__twdFilterWrapped=true;history[k]=wrapped;});
+        window.addEventListener('popstate',onNav);window.addEventListener('hashchange',onNav);
+    }
+    function start(){var root=document.querySelector('#MiddleColumn');if(!root){setTimeout(start,250);return;}observer.observe(root,{childList:true,subtree:true,characterData:true});installNavHooks();loadChatTypes(false).then(function(){schedule(true);});}
+    start();
 })();

@@ -1252,6 +1252,42 @@ test('proxy stall recovery activates auto proxy and rotates away from a stalled 
     assert.match(route, /state\.reconnectEpoch\+\+/);
 });
 
+test('visual maintenance is event-driven instead of hot polling', () => {
+    const bootstrap = read('electron/inject/ui/bootstrap.js');
+    const filter = read('electron/features/message_filter.js');
+    const desktop = read('electron/features/desktop_like_common.js');
+    const preload = read('electron/preload.js');
+    const ipc = read('electron/ipc.cjs');
+    const win = read('electron/window.cjs');
+
+    assert.doesNotMatch(bootstrap, /setInterval\(injectMenu,\s*500\)/);
+    assert.doesNotMatch(bootstrap, /setInterval\(injectSettingsRows,\s*500\)/);
+    assert.match(bootstrap, /_injectionNodeRelevant/);
+    assert.match(bootstrap, /15000/);
+    assert.doesNotMatch(bootstrap, /setInterval\(refreshCfg,\s*2000\)/);
+    assert.match(bootstrap, /onSettingsChanged/);
+    assert.match(bootstrap, /installVisualStateSync/);
+    assert.match(bootstrap, /__twdVisualActive/);
+    assert.doesNotMatch(bootstrap, /setInterval\(function\(\)\{\s*var p=curPeer\(\)/);
+
+    assert.match(filter, /dirtyMessages=new Set\(\)/);
+    assert.match(filter, /m\.addedNodes\.forEach\(queueNode\)/);
+    assert.match(filter, /__twd_window_state/);
+    assert.doesNotMatch(filter, /},700\)/);
+
+    assert.match(desktop, /scheduleMessageRefresh/);
+    assert.match(desktop, /new MutationObserver\(function\(\)\{ scheduleMessageRefresh\(\); \}\)/);
+    assert.match(desktop, /10000/);
+    assert.doesNotMatch(desktop, /setInterval\(tick,\s*1000\)/);
+    assert.doesNotMatch(desktop, /avatarBurst/);
+
+    assert.match(preload, /onSettingsChanged/);
+    assert.match(preload, /onWindowStateChanged/);
+    assert.match(ipc, /webContents\.send\('settings-changed', state\.settings\)/);
+    assert.match(win, /webContents\.send\('window-state-changed'/);
+    assert.match(win, /mainWindow\.on\('minimize', emitWindowState\)/);
+});
+
 test('desktop-like modes keep reactions below messages and fade both list edges', () => {
     const base = read('electron/features/desktop_like_base.js');
     const standard = read('electron/features/desktop_like_standard.js');

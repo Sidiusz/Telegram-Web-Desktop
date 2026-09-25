@@ -264,6 +264,10 @@ function registerIpc(getWindow) {
             const win = getWindow();
             if (win && !win.isDestroyed()) win.webContents.send('privacy-state-changed', privacy);
         }
+        {
+            const win = getWindow();
+            if (win && !win.isDestroyed()) win.webContents.send('settings-changed', state.settings);
+        }
         if (proxyConfigChanged) configureProxySettings(state.settings);
         scheduleChecks();
         if (state.settings.devtools_enabled !== true) {
