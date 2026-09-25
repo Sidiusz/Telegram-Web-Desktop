@@ -1049,6 +1049,13 @@ test('message history keeps memory independent from local persistence scope', ()
     assert.match(feature, /View changes/);
     assert.match(feature, /recordsByChat/);
     assert.match(feature, /deletedDomSnapshots/);
+    assert.match(feature, /domTextSnapshots\.delete\(key\)/);
+    assert.match(feature, /html: clone\.outerHTML/);
+    assert.doesNotMatch(feature, /node: clone/);
+    assert.match(feature, /tpl\.innerHTML=String\(snapshot\.html\)\.trim\(\)/);
+    assert.match(preload, /const HISTORY_MAX_RECORDS = 5000/);
+    assert.match(preload, /const historyDeletedOrder = \[\]/);
+    assert.match(preload, /while \(historyDeletedOrder\.length > HISTORY_MAX_RECORDS\)/);
     assert.match(feature, /deletedDomSnapshotsByChat/);
     assert.match(feature, /messageListObserver\.observe\(list/);
     assert.match(feature, /setInterval\(bindMessageList,1000\)/);
@@ -1233,6 +1240,13 @@ test('notification category filter distinguishes Telegram channels from groups',
     assert.match(bootstrap, /type==='chatTypeBasicGroup'\|\|type==='chatTypeSuperGroup'.*return 'group'/s);
     assert.match(bootstrap, /resolveChatCategory\(pid\)\.then/);
     assert.doesNotMatch(bootstrap, /var cat = \(pid\.charAt\(0\)==='-'\) \? 'group' : 'private'/);
+});
+
+test('notification backlog stays memory-bounded if the popup renderer is unavailable', () => {
+    const popup = read('electron/notification.cjs');
+    assert.match(popup, /const MAX_PENDING = 32/);
+    assert.match(popup, /if \(_pending\.length > MAX_PENDING\) _pending\.splice\(0, _pending\.length - MAX_PENDING\)/);
+    assert.match(popup, /const MAX_ICON_DATA_URL = 2 \* 1024 \* 1024/);
 });
 
 test('proxy stall recovery activates auto proxy and rotates away from a stalled domain', () => {

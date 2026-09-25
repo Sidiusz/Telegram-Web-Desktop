@@ -12,6 +12,7 @@ const MARGIN = 16;
 const CARD_HEIGHT = 156;
 const CARD_GAP = 8;
 const MAX_CARDS = 3;
+const MAX_PENDING = 32;
 const STACK_HEIGHT = CARD_HEIGHT * MAX_CARDS + CARD_GAP * (MAX_CARDS - 1);
 const MAX_ICON_DATA_URL = 2 * 1024 * 1024;
 
@@ -409,6 +410,7 @@ function queueNotification(data) {
     };
     ensureWin();
     _pending.push(payload);
+    if (_pending.length > MAX_PENDING) _pending.splice(0, _pending.length - MAX_PENDING);
     if (_ready) flush();
 }
 

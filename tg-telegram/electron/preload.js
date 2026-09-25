@@ -66,9 +66,11 @@ try {
             window.addEventListener('__twd_history_config', e => {
                 historyConfig = Object.assign({}, historyConfig || {}, e.detail || {});
             });
+            const HISTORY_MAX_RECORDS = 5000;
             const historyTracked = new Map();
             const historyByMessageId = new Map();
             const historyDeletedByChat = new Map();
+            const historyDeletedOrder = [];
             // A unique query per renderer boot prevents Chromium/Telegram's service worker
             // from reusing an older already-patched transport worker after an app update.
             const proxyWorkerNonce = Date.now().toString(36) + Math.random().toString(36).slice(2);
@@ -136,7 +138,7 @@ try {
                 const key = historyKey(item.chatId, item.messageId);
                 historyTracked.set(key, item);
                 historyByMessageId.set(String(item.messageId), key);
-                if (historyTracked.size > 5000) {
+                if (historyTracked.size > HISTORY_MAX_RECORDS) {
                     const first = historyTracked.keys().next().value;
                     const old = historyTracked.get(first);
                     historyTracked.delete(first);
@@ -230,9 +232,19 @@ try {
             }
             function historyMarkDeleted(item) {
                 if (!item) return;
-                let set = historyDeletedByChat.get(String(item.chatId));
-                if (!set) historyDeletedByChat.set(String(item.chatId), set = new Set());
-                set.add(String(item.messageId));
+                const chatId = String(item.chatId), messageId = String(item.messageId);
+                let set = historyDeletedByChat.get(chatId);
+                if (!set) historyDeletedByChat.set(chatId, set = new Set());
+                if (set.has(messageId)) return;
+                set.add(messageId);
+                historyDeletedOrder.push({ chatId, messageId });
+                while (historyDeletedOrder.length > HISTORY_MAX_RECORDS) {
+                    const old = historyDeletedOrder.shift();
+                    const oldSet = historyDeletedByChat.get(old.chatId);
+                    if (!oldSet) continue;
+                    oldSet.delete(old.messageId);
+                    if (!oldSet.size) historyDeletedByChat.delete(old.chatId);
+                }
             }
             function historyProtectDelete(update) {
                 if (!historyConfig || !update || !Array.isArray(update.ids)) return true;

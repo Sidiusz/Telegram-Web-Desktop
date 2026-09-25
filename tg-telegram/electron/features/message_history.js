@@ -57,6 +57,7 @@
             var key=records.keys().next().value;
             var rec=records.get(key);
             records.delete(key);
+            domTextSnapshots.delete(key);
             if(rec){var map=chatRecordMap(rec.chatId,false);if(map){map.delete(String(rec.messageId));if(!map.size)recordsByChat.delete(String(rec.chatId));}}
         }
     }
@@ -363,7 +364,10 @@
         if (show) {
             var clone = msg.cloneNode(true);
             prepareDeletedClone(clone, rec);
-            setDeletedSnapshot({ chatId: String(chatId), messageId: messageId, node: clone });
+            // Keep the visual snapshot without retaining an entire detached live DOM tree.
+            // cloneNode does not preserve event listeners anyway; serialized markup restores
+            // the same static message/media structure while allowing Blink to reclaim nodes.
+            setDeletedSnapshot({ chatId: String(chatId), messageId: messageId, html: clone.outerHTML });
         }
         persistDeletionIfAllowed(rec, rec.deletedAt);
     }
@@ -390,8 +394,14 @@
         if (existing) { markNodeDeleted(existing, rec); return; }
         var list = document.querySelector('#MiddleColumn .MessageList .messages-container') || document.querySelector('#MiddleColumn .MessageList');
         if (!list) return;
-        var source=snapshot.node||createDeletedNode(rec);
-        var node = source.cloneNode(true);
+        var node=null;
+        if(snapshot.html){
+            try{
+                var tpl=document.createElement('template');tpl.innerHTML=String(snapshot.html).trim();
+                node=tpl.content.firstElementChild;
+            }catch(_){}
+        }
+        if(!node)node=createDeletedNode(rec);
         prepareDeletedClone(node, rec);
         var numericId = Number(messageId);
         var rows = Array.from(list.querySelectorAll('.Message[data-message-id]'));
@@ -415,7 +425,7 @@
         if(!chatRecords)return;
         chatRecords.forEach(function(rec){
             if(!recordShouldShow(rec))return;
-            if(!snapshots||!snapshots.has(String(rec.messageId)))insertDeletedSnapshot({chatId:rec.chatId,messageId:rec.messageId,node:null});
+            if(!snapshots||!snapshots.has(String(rec.messageId)))insertDeletedSnapshot({chatId:rec.chatId,messageId:rec.messageId,html:''});
         });
     }
     function queueRestoreDeleted() {
