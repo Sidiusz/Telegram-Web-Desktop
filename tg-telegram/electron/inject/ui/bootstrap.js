@@ -23,6 +23,20 @@ function makeTrayPng(count){
 }
 function waitBody(cb){if(document.body)cb();else{const t=setInterval(()=>{if(document.body){clearInterval(t);cb();}},50);}}
 
+function installStartupThemeSync(){
+    if(window.__twdStartupThemeSync)return;window.__twdStartupThemeSync=true;
+    let last='';
+    const sync=()=>{
+        const root=document.documentElement;
+        const theme=root.classList.contains('theme-dark')?'dark':(root.classList.contains('theme-light')?'light':'');
+        if(!theme||theme===last)return;
+        last=theme;
+        INV('save_settings',{settings:{appearance_startup_theme:theme}}).catch(()=>{});
+    };
+    new MutationObserver(sync).observe(document.documentElement,{attributes:true,attributeFilter:['class']});
+    sync();
+}
+
 function installProxyStallRecovery(){
     if(window.__twdProxyStallRecovery)return;window.__twdProxyStallRecovery=true;
     let waitingSince=0,lastKick=0;
@@ -67,6 +81,7 @@ function installAtomicQrReveal(){
 
 waitBody(()=>{
     installAtomicQrReveal();
+    installStartupThemeSync();
     installProxyStallRecovery();
     tryInject();
     new MutationObserver(tryInject).observe(document.body,{childList:true,subtree:false});

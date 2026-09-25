@@ -6,6 +6,7 @@ const { loadSettings, saveSettings } = require('./settings.cjs');
 const FLOWSEAL_DOMAIN_LIST_URL =
     'https://raw.githubusercontent.com/Flowseal/tg-ws-proxy/main/.github/cfproxy-domains.txt';
 const DOMAIN_REFRESH_MS = 60 * 60 * 1000;
+const STALL_ROTATE_COOLDOWN_MS = 45 * 1000;
 const DEFAULT_CF_BASE_DOMAINS = [
     'pclead.co.uk', 'offshor.co.uk', 'cakeisalie.co.uk', 'noskomnadzor.co.uk',
     'lovetrue.co.uk', 'sorokdva.co.uk', 'pyatdesyatdva.co.uk', 'kartoshka.co.uk',
@@ -29,6 +30,7 @@ const state = {
     dcIps: { ...DC_IPS }, cursor: new Map(), directFailures: [],
     lastRoute: 'direct', lastDomain: '', lastError: '', lastDc: 0,
     refreshTimer: null, revision: 0, reconnectEpoch: 0, bridgePort: 0, bridgeToken: '',
+    avoidControlDomain: '', avoidControlUntil: 0,
 };function normalizeMode(mode) { return mode === 'always' || mode === 'off' ? mode : 'auto'; }
 function isProxyActive() { return state.mode === 'always' || (state.mode === 'auto' && state.autoLatched); }
 function validDomain(domain) {
@@ -65,9 +67,16 @@ function activeDomains() {
     return pool.length ? pool.slice() : DEFAULT_CF_BASE_DOMAINS.slice();
 }
 function getProxyBootstrap() {
+    const avoidControlActive = state.avoidControlDomain && state.avoidControlUntil > Date.now();
+    if (!avoidControlActive && state.avoidControlDomain) {
+        state.avoidControlDomain = '';
+        state.avoidControlUntil = 0;
+    }
     return {
         active: isProxyActive(), domains: activeDomains(), revision: state.revision,
         reconnectEpoch: state.reconnectEpoch,
+        avoidControlDomain: avoidControlActive ? state.avoidControlDomain : '',
+        avoidControlUntil: avoidControlActive ? state.avoidControlUntil : 0,
         preferredControlDomain: state.preferredControlDomain,
         preferredMediaDomain: state.preferredMediaDomain,
         workerEnabled: state.workerEnabled && state.workerDomains.length > 0,
@@ -228,6 +237,14 @@ function forceProxyReconnect(reason = 'renderer-network-stall') {
         }
         return getProxyStatus();
     }
+    const stalledDomain = state.preferredControlDomain ||
+        (state.lastRoute !== 'direct' ? state.lastDomain : '');
+    if (validDomain(stalledDomain)) {
+        state.avoidControlDomain = String(stalledDomain).trim().toLowerCase();
+        state.avoidControlUntil = Date.now() + STALL_ROTATE_COOLDOWN_MS;
+        clearBridgePreferredDomain(state.avoidControlDomain, false);
+        console.warn(`[TG-PROXY] temporarily avoiding stalled control domain ${state.avoidControlDomain}`);
+    }
     state.reconnectEpoch++;
     state.lastError = '';
     console.warn(`[TG-PROXY] forcing Telegram socket reconnect (${reason})`);
@@ -287,6 +304,8 @@ function getProxyStatus() {
         workerEnabled: state.workerEnabled, workerDomains: state.workerDomains.slice(),
         autoFailures: state.autoFailures, autoWindowSec: state.autoWindowSec,
         reconnectEpoch: state.reconnectEpoch,
+        avoidControlDomain: state.avoidControlUntil > Date.now() ? state.avoidControlDomain : '',
+        avoidControlUntil: state.avoidControlUntil > Date.now() ? state.avoidControlUntil : 0,
         webFallback: state.webFallback, webFallbackLatched: state.webFallbackLatched,
         dcIps: { ...state.dcIps },
     };

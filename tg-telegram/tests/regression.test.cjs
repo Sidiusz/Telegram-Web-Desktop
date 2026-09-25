@@ -387,14 +387,16 @@ test('proxy cooldown suppresses failed domains while healthy routes exist', () =
     assert.equal(DEFAULT_COOLDOWN_MS, 45_000);
 });
 
-test('proxy health does not add heartbeat traffic and validates media by response plus throughput', () => {
+test('proxy health does not add heartbeat traffic and validates routes by MTProto response', () => {
     const bridge = read('electron/tg-flowseal-bridge.cjs');
     assert.doesNotMatch(bridge, /\.ping\s*\(/);
     assert.doesNotMatch(bridge, /['"]pong['"]/i);
     assert.match(bridge, /const controlUpstreamHealth = new UpstreamHealth\(\)/);
     assert.match(bridge, /const mediaUpstreamHealth = new UpstreamHealth\(\)/);
     assert.match(bridge, /health\.seedPreferred\(media \? cfg\.preferredMediaDomain : cfg\.preferredControlDomain\)/);
-    assert.match(bridge, /reportBridgePreferredDomain\(candidate\.domain, false\)/);
+    assert.match(bridge, /CONTROL_RESPONSE_TIMEOUT_MS = 8_000/);
+    assert.match(bridge, /controlUpstreamHealth\.markSuccess\(upstreamCandidate\.domain\)/);
+    assert.match(bridge, /reportBridgePreferredDomain\(upstreamCandidate\.domain, false\)/);
     assert.match(bridge, /reportBridgePreferredDomain\(upstreamCandidate\.domain, true\)/);
     assert.match(bridge, /clearBridgePreferredDomain\(domain, media\)/);
     assert.match(bridge, /MEDIA_SLOW_RESPONSE_MS = 3_000/);
@@ -402,7 +404,9 @@ test('proxy health does not add heartbeat traffic and validates media by respons
     assert.match(bridge, /MEDIA_THROUGHPUT_SAMPLE_BYTES = 128 \* 1024/);
     assert.match(bridge, /MEDIA_MIN_THROUGHPUT_BPS = 96 \* 1024/);
     assert.match(bridge, /MEDIA_THROUGHPUT_WINDOW_MS = 4_000/);
-    assert.match(bridge, /if \(!media\)\s*\{\s*health\.markSuccess\(candidate\.domain\);\s*reportBridgePreferredDomain\(candidate\.domain, false\);/);
+    assert.match(bridge, /finishControlProbe\(\)/);
+    assert.match(bridge, /control first response timeout/);
+    assert.match(bridge, /cfg\.avoidControlDomain/);
     assert.match(bridge, /finishMediaProbe\(raw\.length\)/);
     assert.match(bridge, /finishMediaSample\('window'\)/);
     assert.match(bridge, /else if \(!mediaSampleActive\) startMediaSample\(0\)/);
@@ -759,6 +763,21 @@ test('manual launch maximizes while autostart stays hidden', () => {
     assert.match(win, /process\.env\.TWD_SMOKE_HIDDEN === '1' \|\| startHidden/);
     assert.match(settings, /minimize_to_tray:\s*true/);
     assert.match(win, /if \(settings\.minimize_to_tray\) \{[\s\S]*e\.preventDefault\(\);[\s\S]*mainWindow\.hide\(\)/);
+});
+
+test('startup surface follows the persisted Telegram theme without a blocking overlay', () => {
+    const win = read('electron/window.cjs');
+    const bootstrap = read('electron/inject/ui/bootstrap.js');
+    const settings = read('electron/settings.cjs');
+    assert.match(settings, /appearance_startup_theme:\s*'dark'/);
+    assert.match(settings, /STARTUP_THEMES = new Set\(\['light','dark'\]\)/);
+    assert.match(win, /function injectStartupSurface\(body, theme\)/);
+    assert.doesNotMatch(win, /twd-startup-loader/);
+    assert.match(win, /backgroundColor: startupBackground\(startupTheme\(initialSettings\)\)/);
+    assert.match(win, /injectStartupSurface\(body, startupTheme\(loadSettings\(\)\)\)/);
+    assert.match(bootstrap, /function installStartupThemeSync\(\)/);
+    assert.match(bootstrap, /classList\.contains\('theme-dark'\)/);
+    assert.match(bootstrap, /appearance_startup_theme:theme/);
 });
 
 test('custom UI stays inside Telegram Settings and keeps native navigation semantics', () => {
@@ -1216,7 +1235,7 @@ test('notification category filter distinguishes Telegram channels from groups',
     assert.doesNotMatch(bootstrap, /var cat = \(pid\.charAt\(0\)==='-'\) \? 'group' : 'private'/);
 });
 
-test('proxy stall recovery activates auto proxy and reconnects without heartbeat traffic', () => {
+test('proxy stall recovery activates auto proxy and rotates away from a stalled domain', () => {
     const bootstrap = read('electron/inject/ui/bootstrap.js');
     const preload = read('electron/preload.js');
     const route = read('electron/tg-flowseal-route.cjs');
@@ -1227,6 +1246,9 @@ test('proxy stall recovery activates auto proxy and reconnects without heartbeat
     assert.match(route, /function forceProxyReconnect/);
     assert.match(route, /state\.mode === 'auto' && !state\.autoLatched/);
     assert.match(route, /persistAutoLatch\(reason === 'renderer-network-stall' \? 'direct-network-stall'/);
+    assert.match(route, /STALL_ROTATE_COOLDOWN_MS = 45 \* 1000/);
+    assert.match(route, /state\.avoidControlDomain = String\(stalledDomain\)/);
+    assert.match(route, /clearBridgePreferredDomain\(state\.avoidControlDomain, false\)/);
     assert.match(route, /state\.reconnectEpoch\+\+/);
 });
 

@@ -9,8 +9,8 @@ const path = require('path');
 app.commandLine.appendSwitch('autoplay-policy', 'no-user-gesture-required');
 // Dev/test only: expose CDP for local UI/smoke testing. Packaged test builds may opt in
 // explicitly with TWD_ALLOW_MULTI_INSTANCE + TWD_CDP_PORT; normal shipped runs never do.
-if (!app.isPackaged || (process.env.TWD_ALLOW_MULTI_INSTANCE === '1' && process.env.TWD_CDP_PORT)) {
-    app.commandLine.appendSwitch('remote-debugging-port', process.env.TWD_CDP_PORT || '9222');
+if (process.env.TWD_CDP_PORT && (!app.isPackaged || process.env.TWD_ALLOW_MULTI_INSTANCE === '1')) {
+    app.commandLine.appendSwitch('remote-debugging-port', process.env.TWD_CDP_PORT);
 }
 
 // Dev/test runs can use an isolated profile without competing with the installed app.

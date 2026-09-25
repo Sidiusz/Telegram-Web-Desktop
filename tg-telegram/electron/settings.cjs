@@ -53,6 +53,7 @@ const DEFAULTS = {
     skipped_version: null,
     appearance_message_layout: 'left',
     appearance_hide_ads: true,
+    appearance_startup_theme: 'dark',
     messages_show_deleted: false,
     messages_show_disappearing: false,
     messages_save_deleted: false,
@@ -154,6 +155,7 @@ const BOOL_KEYS = new Set([
 ]);
 const UPDATE_INTERVALS = new Set(['30m','1h','12h','24h','3d','7d','30d','never']);
 const MESSAGE_LAYOUTS = new Set(['native','left','wide']);
+const STARTUP_THEMES = new Set(['light','dark']);
 const MESSAGE_HISTORY_SCOPES = new Set(['chat','client','always']);
 const PROXY_MODES = new Set(['auto','always','off']);
 const PROXY_DOMAIN_SOURCES = new Set(['flowseal','custom']);
@@ -180,6 +182,7 @@ function normalizeSetting(k, v) {
     }
     if (k === 'update_check_interval') return UPDATE_INTERVALS.has(v) ? v : INVALID;
     if (k === 'appearance_message_layout') return MESSAGE_LAYOUTS.has(v) ? v : INVALID;
+    if (k === 'appearance_startup_theme') return STARTUP_THEMES.has(v) ? v : INVALID;
     if (k === 'messages_history_scope') return MESSAGE_HISTORY_SCOPES.has(v) ? v : INVALID;
     if (k === 'proxy_mode') return PROXY_MODES.has(v) ? v : INVALID;
     if (k === 'proxy_domain_source') return PROXY_DOMAIN_SOURCES.has(v) ? v : INVALID;

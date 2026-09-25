@@ -28,6 +28,18 @@ function telegramWebsyncNoopResponse() {
         headers: { 'content-type': 'text/javascript; charset=utf-8', 'cache-control': 'no-store' },
     });
 }
+function startupTheme(settings) {
+    return settings && settings.appearance_startup_theme === 'light' ? 'light' : 'dark';
+}
+function startupBackground(theme) {
+    return theme === 'light' ? '#ffffff' : '#212121';
+}
+function injectStartupSurface(body, theme) {
+    const dark = theme !== 'light';
+    const background = dark ? '#212121' : '#ffffff';
+    const style = `<style id="twd-startup-surface">html,body#root{background:${background}!important;color-scheme:${dark ? 'dark' : 'light'};}</style>`;
+    return String(body || '').replace(/<head([^>]*)>/i, `<head$1>${style}`);
+}
 
 let mainWindow = null;
 let forceQuit = false;
@@ -156,6 +168,7 @@ function createWindow(state, onTelegramLink, options = {}) {
                 body = injectExtendedPinsPrelude(body, loadSettings().messages_extended_pins === true);
                 body = body.replace(/<meta[^>]*http-equiv=["']content-security-policy["'][^>]*>/gi, '');
                 body = body.replace(/<meta[^>]*http-equiv=["']content-security-policy-report-only["'][^>]*>/gi, '');
+                body = injectStartupSurface(body, startupTheme(loadSettings()));
                 const headers = new Headers(resp.headers);
                 headers.delete('content-security-policy');
                 headers.delete('content-security-policy-report-only');
@@ -182,6 +195,7 @@ function createWindow(state, onTelegramLink, options = {}) {
                         body = injectExtendedPinsPrelude(body, loadSettings().messages_extended_pins === true);
                         body = body.replace(/<meta[^>]*http-equiv=["']content-security-policy["'][^>]*>/gi, '');
                         body = body.replace(/<meta[^>]*http-equiv=["']content-security-policy-report-only["'][^>]*>/gi, '');
+                        body = injectStartupSurface(body, startupTheme(loadSettings()));
                         const headers = new Headers(resp.headers);
                         headers.delete('content-security-policy');
                         headers.delete('content-security-policy-report-only');
@@ -202,7 +216,7 @@ function createWindow(state, onTelegramLink, options = {}) {
         height: mobileReference ? mobileReferenceHeight : 860,
         minWidth: mobileReference ? 320 : 640,
         minHeight: mobileReference ? 568 : 480,
-        backgroundColor: '#0e1621',
+        backgroundColor: startupBackground(startupTheme(initialSettings)),
         title: mobileReference ? 'Telegram Web Desktop - Mobile Reference' : 'Telegram Web Desktop',
         show: false,
         webPreferences: {

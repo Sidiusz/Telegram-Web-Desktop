@@ -106,6 +106,7 @@ function upstreamCandidates(cfg, dc, media) {
 
 const controlUpstreamHealth = new UpstreamHealth();
 const mediaUpstreamHealth = new UpstreamHealth();
+const CONTROL_RESPONSE_TIMEOUT_MS = 8_000;
 const MEDIA_SLOW_RESPONSE_MS = 3_000;
 const MEDIA_RESPONSE_TIMEOUT_MS = 6_000;
 const MEDIA_THROUGHPUT_SAMPLE_BYTES = 128 * 1024;
@@ -127,6 +128,9 @@ function noteUpstreamFailure(candidate, reason, media = false) {
 function openUpstream(cfg, dc, media) {
     const health = healthFor(media);
     health.seedPreferred(media ? cfg.preferredMediaDomain : cfg.preferredControlDomain);
+    if (!media && cfg.avoidControlDomain && Number(cfg.avoidControlUntil) > Date.now()) {
+        health.markFailure(cfg.avoidControlDomain);
+    }
     const candidates = health.rank(upstreamCandidates(cfg, dc, media));
     return new Promise((resolve, reject) => {
         if (!candidates.length) return reject(new Error('no upstream routes'));
@@ -180,13 +184,9 @@ function openUpstream(cfg, dc, media) {
                 done = true;
                 settled = true;
                 clearTimeout(timer);
-                // A media socket is not considered healthy merely because the
-                // WebSocket handshake succeeded. Its domain earns preference only
-                // after it actually returns MTProto data for a media request.
-                if (!media) {
-                    health.markSuccess(candidate.domain);
-                    reportBridgePreferredDomain(candidate.domain, false);
-                }
+                // A route is not considered healthy merely because the WebSocket
+                // handshake succeeded. Control and media domains earn preference
+                // only after they actually return MTProto data.
                 const latencyMs = Date.now() - startedAt;
                 cleanup(upstream);
                 console.log(`[TG-PROXY-BRIDGE] upstream ${candidate.domain} opened in ${latencyMs}ms`);
@@ -235,6 +235,8 @@ function handleLocalConnection(local, request) {
     let ctx = null;
     let closed = false;
     let chain = Promise.resolve();
+    let controlProbeTimer = null;
+    let controlProbeDone = media;
     let mediaProbeTimer = null;
     let mediaProbeStartedAt = 0;
     let mediaProbeDone = !media;
@@ -249,6 +251,10 @@ function handleLocalConnection(local, request) {
         ? openUpstream(initialCfg, dc, media).then(opened => ({ opened }), error => ({ error }))
         : null;
 
+    const clearControlProbe = () => {
+        if (controlProbeTimer) clearTimeout(controlProbeTimer);
+        controlProbeTimer = null;
+    };
     const clearMediaProbe = () => {
         if (mediaProbeTimer) clearTimeout(mediaProbeTimer);
         mediaProbeTimer = null;
@@ -263,6 +269,7 @@ function handleLocalConnection(local, request) {
         mediaSampleStartedAt = 0;
     };
     const fail = err => {
+        clearControlProbe();
         clearMediaProbe();
         clearMediaSample();
         if (closed) return;
@@ -276,6 +283,25 @@ function handleLocalConnection(local, request) {
         if (upstreamFailureNoted) return;
         upstreamFailureNoted = true;
         noteUpstreamFailure(upstreamCandidate, reason, media);
+    };
+    const armControlProbe = () => {
+        if (media || controlProbeDone || controlProbeTimer || !upstreamCandidate) return;
+        controlProbeTimer = setTimeout(() => {
+            controlProbeTimer = null;
+            if (closed || controlProbeDone) return;
+            const reason = `control first response timeout after ${CONTROL_RESPONSE_TIMEOUT_MS}ms`;
+            noteActiveFailure(reason);
+            fail(new Error(reason));
+        }, CONTROL_RESPONSE_TIMEOUT_MS);
+        if (controlProbeTimer.unref) controlProbeTimer.unref();
+    };
+    const finishControlProbe = () => {
+        if (media || controlProbeDone || !upstreamCandidate) return;
+        clearControlProbe();
+        controlProbeDone = true;
+        controlUpstreamHealth.markSuccess(upstreamCandidate.domain);
+        reportBridgePreferredDomain(upstreamCandidate.domain, false);
+        console.log(`[TG-PROXY-BRIDGE] ${upstreamCandidate.domain} control route returned MTProto data`);
     };
     const armMediaProbe = () => {
         if (!media || mediaProbeDone || mediaProbeTimer || !upstreamCandidate) return;
@@ -386,6 +412,7 @@ function handleLocalConnection(local, request) {
                 upstream.on('message', incoming => {
                     try {
                         const raw = Buffer.from(incoming);
+                        if (!media && !controlProbeDone) finishControlProbe();
                         if (!mediaProbeDone) finishMediaProbe(raw.length);
                         else addMediaSampleBytes(raw.length);
                         const plain = ctx.relayIn.update(raw);
@@ -396,7 +423,7 @@ function handleLocalConnection(local, request) {
                 upstream.on('close', (code, reason) => {
                     if (closed) return;
                     const why = reason?.toString() || `upstream closed ${code}`;
-                    if (code !== 1000) noteActiveFailure(why);
+                    if (code !== 1000 || (!media && !controlProbeDone) || (media && !mediaProbeDone)) noteActiveFailure(why);
                     closePeer(local, code === 1000 ? 1000 : 1011, why);
                 });
                 upstream.on('error', err => {
@@ -413,11 +440,14 @@ function handleLocalConnection(local, request) {
             if (media) {
                 if (!mediaProbeDone) armMediaProbe();
                 else if (!mediaSampleActive) startMediaSample(0);
+            } else if (!controlProbeDone) {
+                armControlProbe();
             }
             upstream.send(relayed, { binary: true });
         }).catch(fail);
     });
     local.on('close', () => {
+        clearControlProbe();
         clearMediaProbe();
         clearMediaSample();
         closed = true;
