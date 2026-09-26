@@ -222,6 +222,7 @@ test('download and addon safety regressions stay covered', () => {
 test('notification interception and popup crash recovery are present', () => {
     const intercept = read('electron/inject/notif-intercept.js');
     const popup = read('electron/notification.cjs');
+    const bootstrap = read('electron/inject/ui/bootstrap.js');
     assert.match(intercept, /window\.__tgNotifIntercept/);
     assert.match(intercept, /ServiceWorker\.prototype/);
     assert.match(intercept, /Object\.defineProperty\(proto, 'postMessage'/);
@@ -229,6 +230,29 @@ test('notification interception and popup crash recovery are present', () => {
     assert.match(intercept, /hasPushNotifications/);
     assert.match(popup, /render-process-gone/);
     assert.match(popup, /unresponsive/);
+    assert.match(bootstrap, /timer=setTimeout\(function\(\)\{finish\(''\);\},250\)/);
+    assert.match(bootstrap, /fr\.onabort=function\(\)\{finish\(''\);\}/);
+    assert.match(bootstrap, /if\(done\)return;/);
+});
+
+test('notification avatar conversion cannot block popup delivery', async () => {
+    const src = read('electron/inject/ui/bootstrap.js');
+    const start = src.indexOf('function toDataUrl(src){');
+    const end = src.indexOf('// Реальный тип чата', start);
+    assert.ok(start >= 0 && end > start, 'toDataUrl helper not found');
+
+    const context = vm.createContext({
+        Promise,
+        setTimeout,
+        clearTimeout,
+        fetch: () => new Promise(() => {}),
+        FileReader: class {},
+    });
+    vm.runInContext(src.slice(start, end) + '; this.toDataUrl = toDataUrl;', context);
+
+    const started = Date.now();
+    assert.equal(await context.toDataUrl('blob:stale-avatar'), '');
+    assert.ok(Date.now() - started < 1000, 'stale avatar blocked notification delivery');
 });
 
 test('release hardening fuses stay enabled', () => {

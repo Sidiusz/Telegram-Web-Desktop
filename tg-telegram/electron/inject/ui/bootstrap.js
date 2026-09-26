@@ -837,10 +837,28 @@ window.__tgMarkAllRead=function(){
     }
     function toDataUrl(src){
         return new Promise(function(res){
-            if(!src||src.indexOf('blob:')!==0)return res(src||'');
-            fetch(src).then(function(r){return r.blob();}).then(function(b){
-                var fr=new FileReader();fr.onload=function(){res(fr.result);};fr.onerror=function(){res('');};fr.readAsDataURL(b);
-            }).catch(function(){res('');});
+            var done=false,timer=null;
+            function finish(value){
+                if(done)return;
+                done=true;
+                if(timer)clearTimeout(timer);
+                res(value||'');
+            }
+            if(!src||src.indexOf('blob:')!==0)return finish(src||'');
+            // Avatar loading is cosmetic. A stale blob: URL must never block the
+            // actual popup: sound and popup are one notification event, not two
+            // independently reliable paths.
+            timer=setTimeout(function(){finish('');},250);
+            try{
+                fetch(src).then(function(r){return r.blob();}).then(function(b){
+                    if(done)return;
+                    var fr=new FileReader();
+                    fr.onload=function(){finish(typeof fr.result==='string'?fr.result:'');};
+                    fr.onerror=function(){finish('');};
+                    fr.onabort=function(){finish('');};
+                    try{fr.readAsDataURL(b);}catch(e){finish('');}
+                }).catch(function(){finish('');});
+            }catch(e){finish('');}
         });
     }
 
