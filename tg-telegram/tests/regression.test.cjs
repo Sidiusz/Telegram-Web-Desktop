@@ -1428,6 +1428,14 @@ test('Telegram notifications are not held hostage by avatar downloads or a missi
     assert.equal((win.match(/resp = await injectTelegramNotifications\(resp, url\);/g) || []).length, 2);
 });
 
+test('inline media load/cancel buttons never open a save-to-disk download card', () => {
+    const bootstrap = read('electron/inject/ui/bootstrap.js');
+    const trigger = bootstrap.slice(bootstrap.indexOf('function isDownloadTrigger'), bootstrap.indexOf('document.addEventListener(\'click\', function(e){', bootstrap.indexOf('function isDownloadTrigger')));
+    assert.match(trigger, /\.media-inner,\.RoundVideo,\.media-loading/);
+    const exclusion = trigger.indexOf('.media-inner');
+    assert.ok(exclusion > 0 && exclusion < trigger.indexOf('.icon-download'), 'media exclusion runs before icon matching');
+});
+
 test('Telegram media cache never hands back a revoked blob for a fresh or on-screen entry', () => {
     const sample = 'var vt=new Map;function Ct(e){return vt.get(e)}' +
         'function Ot(e,n){if(!n)throw Error(`Failed to fetch media ${e}`);vt.set(e,n);return vt.set(e,n),n}' +
