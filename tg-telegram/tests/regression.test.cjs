@@ -1582,6 +1582,37 @@ test('a notification arriving during the last fade-out re-shows the popup', () =
     assert.match(popup, /_win\.setShape\(\[\{ x: 0, y: STACK_HEIGHT - height, width: WIDTH, height \}\]\);[\s\S]{0,200}if \(!_win\.isVisible\(\) && process\.env\.TWD_SMOKE_HIDDEN !== '1'\) _win\.showInactive\(\);/);
 });
 
+test('every injected script compiles exactly as it is shipped', () => {
+    const Module = require('node:module');
+    const origLoad = Module._load;
+    Module._load = function (request, ...rest) {
+        if (request === 'electron') return { app: { isPackaged: false } };
+        return origLoad.call(this, request, ...rest);
+    };
+    try {
+        delete require.cache[require.resolve('../electron/scripts.cjs')];
+        const { getScripts } = require('../electron/scripts.cjs');
+        const { loadFeatureScripts } = require('../electron/features.cjs');
+        const scripts = getScripts();
+        for (const name of ['UI_JS', 'NOTIF_INTERCEPT_JS', 'AUDIO_JS', 'EXTERNAL_JS']) {
+            assert.doesNotThrow(() => new vm.Script(scripts[name], { filename: name }), `${name} must parse`);
+        }
+        for (const layout of ['native', 'left', 'wide']) {
+            loadFeatureScripts({ appearance_message_layout: layout, message_filter_enabled: true }).forEach((code, i) => {
+                assert.doesNotThrow(() => new vm.Script(code, { filename: `${layout}-feature-${i}` }), `${layout} feature ${i} must parse`);
+            });
+        }
+    } finally {
+        Module._load = origLoad;
+    }
+    const panels = read('electron/inject/ui/native-panels.js');
+    assert.match(panels, /msgHtml:T\('dl_clear_m'\)/);
+    assert.match(panels, /msgHtml:'«'\+_escHtml\(String\(d\.filename\|\|''\)\)/);
+    assert.match(panels, /if\(content\.__twdDlSig===sig&&content\.childElementCount\)return;/);
+    assert.match(read('electron/inject/ui/twd-settings-native.js'), /input\.maxLength=160;/);
+    assert.match(read('electron/inject/ui/bootstrap.js'), /function waitBody\(cb\)\{const run=\(\)=>\{try\{cb\(\);\}catch\(e\)/);
+});
+
 test('external link hook never bypasses Telegram link confirmation or double-opens', () => {
     const source = read('electron/inject/external.js');
     const opened = [];
