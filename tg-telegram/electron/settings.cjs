@@ -129,10 +129,12 @@ function migrateLegacyBuiltinFeatures() {
 
 function loadSettings() {
     migrateLegacyBuiltinFeatures();
+    // electron-store re-reads the file on every get(); read it once per call.
+    const all = store.store || {};
     const out = {};
     for (const key of Object.keys(DEFAULTS)) {
         const fallback = DEFAULTS[key];
-        const raw = store.get(key, fallback);
+        const raw = Object.prototype.hasOwnProperty.call(all, key) ? all[key] : fallback;
         if (raw === null || raw === undefined) {
             out[key] = cloneDefault(fallback);
             continue;
@@ -260,14 +262,19 @@ function normalizeSetting(k, v) {
 
 function saveSettings(settings) {
     if (!settings || typeof settings !== 'object' || Array.isArray(settings)) return;
+    const current = store.store || {};
+    const patch = {};
     for (const [k, v] of Object.entries(settings)) {
         // Renderer settings are intentionally constrained to the schema above.
         // Never let arbitrary IPC input create new keys or poison expected types.
         if (!Object.prototype.hasOwnProperty.call(DEFAULTS, k)) continue;
-        if (v === null || v === undefined) { store.delete(k); continue; }
+        if (v === null || v === undefined) { if (Object.prototype.hasOwnProperty.call(current, k)) store.delete(k); continue; }
         const normalized = normalizeSetting(k, v);
-        if (normalized !== INVALID) store.set(k, normalized);
+        if (normalized === INVALID || JSON.stringify(current[k]) === JSON.stringify(normalized)) continue;
+        patch[k] = normalized;
     }
+    // One atomic write for the whole change instead of one per key.
+    if (Object.keys(patch).length) store.set(patch);
 }
 
 module.exports = { loadSettings, saveSettings };
