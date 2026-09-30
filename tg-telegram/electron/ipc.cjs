@@ -579,6 +579,8 @@ function registerIpc(getWindow) {
     function detachBlobSender(item) {
         if (!item || !item.sender || !item.senderDestroyedHandler) return;
         try { item.sender.removeListener('destroyed', item.senderDestroyedHandler); } catch (_) {}
+        try { item.sender.removeListener('render-process-gone', item.senderDestroyedHandler); } catch (_) {}
+        try { item.sender.removeListener('did-start-navigation', item.senderNavigationHandler); } catch (_) {}
         item.sender = null;
         item.senderDestroyedHandler = null;
     }
@@ -658,6 +660,7 @@ function registerIpc(getWindow) {
             finished: false,
             sender: event.sender,
             senderDestroyedHandler: null,
+            senderNavigationHandler: null,
         };
         blobSaves.set(streamId, item);
         blobSaveByDownloadId.set(id, streamId);
@@ -673,6 +676,14 @@ function registerIpc(getWindow) {
             if (live) failBlobSave(live, 'failed');
         };
         event.sender.once('destroyed', item.senderDestroyedHandler);
+        // A reload or crash ends the page-side stream too; otherwise the handle and .twd-part file stay forever.
+        event.sender.once('render-process-gone', item.senderDestroyedHandler);
+        item.senderNavigationHandler = (details, _url, isInPlace, isMainFrame) => {
+            const main = details && typeof details.isMainFrame === 'boolean' ? details.isMainFrame : isMainFrame;
+            const sameDocument = details && typeof details.isSameDocument === 'boolean' ? details.isSameDocument : isInPlace;
+            if (main && !sameDocument) item.senderDestroyedHandler();
+        };
+        event.sender.on('did-start-navigation', item.senderNavigationHandler);
         return { ok: true, streamId, id };
     });
 
