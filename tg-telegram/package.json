@@ -16,11 +16,12 @@
   },
   "license": "MIT",
   "build": {
+    "appId": "com.electron.com.sidiusz.telegram-web",
     "asar": true,
     "files": [
       "main.cjs",
       "electron/**/*",
-      "build/installer.nsh",
+      "!**/*.tmp",
       "!**/.cdp*.mjs",
       "!**/.devlog.txt",
       "!**/out.log",
