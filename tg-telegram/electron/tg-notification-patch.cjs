@@ -20,7 +20,9 @@ function transformedJsResponse(response, body) {
 function patchTelegramNotifications(body) {
     const source = String(body || '');
     if (!source.includes(NOTIFY_MARKER)) return { body: source, iconPatched: false, sinkPatched: false };
-    if (source.includes('__twdNotifyIcon(')) return { body: source, iconPatched: true, sinkPatched: source.includes('__twdNotifySink(') };
+    if (source.includes('__twdNotifyIcon(')) {
+        return { body: source, iconPatched: true, sinkPatched: source.includes('__twdNotifySink('), runtimeExposed: source.includes('__twdTelegramRuntime') };
+    }
     const at = source.indexOf(`type:\`${NOTIFY_MARKER}\``);
     if (at < 0) return { body: source, iconPatched: false, sinkPatched: false };
     const fnStart = source.lastIndexOf('async function ', at);
@@ -44,16 +46,23 @@ function patchTelegramNotifications(body) {
         segment = segment.slice(0, postAt) + '__twdNotifySink(' + segment.slice(postAt + post.length);
         sinkPatched = true;
     }
-    if (!iconPatched && !sinkPatched) return { body: source, iconPatched, sinkPatched };
+    if (!iconPatched && !sinkPatched) return { body: source, iconPatched, sinkPatched, runtimeExposed: false };
 
+    // This chunk imports Web A's getGlobal/getActions; publish them for the desktop UI (Vite has no webpack registry).
+    const getGlobal = /\{chat:e,message:t,isReaction:r=!1\}\)\{let [\w$]+=([\w$]+)\(\),\{hasWebNotifications/.exec(source);
+    const getActions = /else\{let [\w$]+=([\w$]+)\(\),[\w$]+=\{body:[\w$]+,icon:/.exec(source);
+    const runtime = getGlobal && getActions
+        ? `globalThis.__twdTelegramRuntime={getGlobal:()=>${getGlobal[1]}(),getActions:()=>${getActions[1]}()};\n`
+        : '';
     const helper = `
 function __twdNotifyIcon(load){let p;try{p=Promise.resolve(load()).catch(()=>{})}catch(_){p=Promise.resolve()}return Promise.race([p,new Promise(r=>setTimeout(r,${ICON_WAIT_MS}))])}
 function __twdNotifySink(m){try{if(typeof globalThis.__twdConsumeSwNotification==='function'&&globalThis.__twdConsumeSwNotification(m))return}catch(_){}const c=navigator.serviceWorker&&navigator.serviceWorker.controller;c&&c.postMessage(m)}
-`;
+${runtime}`;
     return {
         body: source.slice(0, fnStart) + segment + source.slice(at) + helper,
         iconPatched,
         sinkPatched,
+        runtimeExposed: !!runtime,
     };
 }
 
@@ -63,8 +72,10 @@ async function injectTelegramNotifications(response, urlString) {
     if (u.hostname !== 'web.telegram.org' || !NOTIFY_CHUNK_RE.test(u.pathname)) return response;
     const source = await response.text();
     const patched = patchTelegramNotifications(source);
-    if (patched.iconPatched && patched.sinkPatched) console.log('[TWD-NOTIF] Telegram notification hooks installed');
-    else if (source.includes(NOTIFY_MARKER)) console.warn(`[TWD-NOTIF] Telegram notification hooks partial: icon=${patched.iconPatched} sink=${patched.sinkPatched}`);
+    if (patched.iconPatched && patched.sinkPatched && patched.runtimeExposed) console.log('[TWD-NOTIF] Telegram notification hooks installed');
+    else if (source.includes(NOTIFY_MARKER)) {
+        console.warn(`[TWD-NOTIF] Telegram notification hooks partial: icon=${patched.iconPatched} sink=${patched.sinkPatched} runtime=${patched.runtimeExposed}`);
+    }
     return transformedJsResponse(response, patched.body);
 }
 
