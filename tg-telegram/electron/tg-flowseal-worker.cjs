@@ -32,6 +32,8 @@ function transformedJsResponse(response, body) {
     headers.delete('content-length');
     headers.delete('content-encoding');
     headers.delete('content-security-policy');
+    // The per-launch channel makes every URL unique; Vary:* stops the SW caching a copy (with its token) per launch.
+    headers.set('vary', '*');
     return new Response(body, { status: response.status, statusText: response.statusText, headers });
 }
 
