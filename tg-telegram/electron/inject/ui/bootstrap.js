@@ -581,21 +581,8 @@ window.__tgNotif=(function(){
         var a=row&&row.querySelector&&row.querySelector('.Avatar[data-peer-id],[data-peer-id]');
         return a&&a.getAttribute('data-peer-id')||'';
     }
-    function effective(s,peerId,baseKey,onKey,offKey){
-        var on=(s[onKey]||[]).map(String),off=(s[offKey]||[]).map(String);
-        if(off.indexOf(peerId)>=0)return false;
-        if(on.indexOf(peerId)>=0)return true;
-        return s[baseKey]===true;
-    }
-    function patchRule(s,peerId,baseKey,onKey,offKey,next){
-        var on=(s[onKey]||[]).map(String).filter(function(x){return x!==peerId;});
-        var off=(s[offKey]||[]).map(String).filter(function(x){return x!==peerId;});
-        var base=s[baseKey]===true;
-        if(next!==base)(next?on:off).push(peerId);
-        var p={};p[onKey]=on;p[offKey]=off;return p;
-    }
     function readEnabled(peerId){
-        return !!privacyCfg&&effective(privacyCfg,peerId,'privacy_no_read_receipts','privacy_no_read_force_on','privacy_no_read_force_off');
+        return !!privacyCfg&&_twdPrivacyEffective(privacyCfg,peerId,'privacy_no_read_receipts','privacy_no_read_force_on','privacy_no_read_force_off');
     }
     function clearUnreadKeep(peerId){
         peerId=String(peerId||'');if(!peerId)return;
@@ -696,14 +683,14 @@ window.__tgNotif=(function(){
                 return !!x.querySelector('.icon-readchats,.icon-unread') ||
                     /пометить (?:не)?прочитанн|отметить как (?:не)?прочитанн|mark as (?:un)?read/i.test((x.textContent||'').trim());
             });
-            var typingOn=effective(s,peerId,'privacy_no_typing','privacy_no_typing_force_on','privacy_no_typing_force_off');
-            var readOn=effective(s,peerId,'privacy_no_read_receipts','privacy_no_read_force_on','privacy_no_read_force_off');
+            var typingOn=_twdPrivacyEffective(s,peerId,'privacy_no_typing','privacy_no_typing_force_on','privacy_no_typing_force_off');
+            var readOn=_twdPrivacyEffective(s,peerId,'privacy_no_read_receipts','privacy_no_read_force_on','privacy_no_read_force_off');
             var typing=makeItem('_twd-chat-privacy-typing_',typingOn?'icon-edit':'icon-edit _twd-crossed-pencil_',T(typingOn?'ctx_no_typing_off':'ctx_no_typing_on'),function(){
-                var patch=patchRule(s,peerId,'privacy_no_typing','privacy_no_typing_force_on','privacy_no_typing_force_off',!typingOn);
+                var patch=_twdPrivacyPatchRule(s,peerId,'privacy_no_typing','privacy_no_typing_force_on','privacy_no_typing_force_off',!typingOn);
                 INV('save_settings',{settings:patch}).catch(function(){});closeMenu();
             });
             var read=makeItem('_twd-chat-privacy-read_',readOn?'icon-eye':'icon-eye-crossed',T(readOn?'ctx_no_read_off':'ctx_no_read_on'),function(){
-                var patch=patchRule(s,peerId,'privacy_no_read_receipts','privacy_no_read_force_on','privacy_no_read_force_off',!readOn);
+                var patch=_twdPrivacyPatchRule(s,peerId,'privacy_no_read_receipts','privacy_no_read_force_on','privacy_no_read_force_off',!readOn);
                 if(readOn)clearUnreadKeep(peerId);
                 INV('save_settings',{settings:patch}).then(refreshPrivacyCfg).catch(function(){});closeMenu();
             });
@@ -937,6 +924,8 @@ window.__tgMarkAllRead=function(){
         });
     }
     loadChatTypes(false);
+    // Shared with the message filter feature so there is one tt-global-state chat-type cache.
+    window.__twdChatCategory=resolveChatCategory;
 
     // Источник уведомлений — перехват notify-пайплайна Telegram (см. notif-intercept.js).
     // На desktop Web A сначала сам решает, нужно ли уведомлять (обычно только когда

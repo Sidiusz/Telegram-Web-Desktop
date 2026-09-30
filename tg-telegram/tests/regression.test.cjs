@@ -386,8 +386,9 @@ test('message filter stays channel-first, keeps private chats opt-in, and separa
     assert.match(ui, /T\('twd_hide_ads'\)/);
     assert.match(ui, /T\('twd_message_filter_enabled'\)/);
     assert.match(ui, /_twdExpandableFilterGroup/);
-    assert.match(ui, /_TWD_FILTER_SHORT_DOMAINS/);
-    assert.match(ui, /_TWD_FILTER_REF_DOMAINS/);
+    assert.match(ui, /_twdFilterDomains\('shortDomains'\)/);
+    assert.match(ui, /_twdFilterDomains\('refDomains'\)/);
+    assert.doesNotMatch(ui, /'bit\.ly'/, 'domain lists live only in the filter feature');
     assert.match(ui, /message_filter_custom/);
     assert.match(lang, /Скрывать рекламу внизу чатов/);
     assert.match(lang, /Скрывать рекламные сообщения в каналах/);
@@ -1585,6 +1586,16 @@ test('notification flag repair rewrites Telegram state only when a flag changed'
 test('a notification arriving during the last fade-out re-shows the popup', () => {
     const popup = read('electron/notification.cjs');
     assert.match(popup, /_win\.setShape\(\[\{ x: 0, y: STACK_HEIGHT - height, width: WIDTH, height \}\]\);[\s\S]{0,200}if \(!_win\.isVisible\(\) && process\.env\.TWD_SMOKE_HIDDEN !== '1'\) _win\.showInactive\(\);/);
+});
+
+test('injected UI keeps one copy of privacy rules and chat-type lookups', () => {
+    const bootstrap = read('electron/inject/ui/bootstrap.js');
+    const filter = read('electron/features/message_filter.js');
+    assert.doesNotMatch(bootstrap, /function effective\(|function patchRule\(/);
+    assert.match(bootstrap, /_twdPrivacyEffective\(privacyCfg,peerId,/);
+    assert.match(bootstrap, /window\.__twdChatCategory=resolveChatCategory;/);
+    assert.doesNotMatch(filter, /indexedDB|chatTypeById/);
+    assert.match(filter, /window\.__twdChatCategory\(pid\)/);
 });
 
 test('proxy mode never lets Telegram traffic leave directly', () => {
