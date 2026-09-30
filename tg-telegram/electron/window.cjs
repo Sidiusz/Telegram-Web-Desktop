@@ -8,7 +8,7 @@ const { loadAddonScripts } = require('./addons.cjs');
 const { loadFeatureScripts } = require('./features.cjs');
 const { saveDownloads, trackActive, untrackActive } = require('./downloads.cjs');
 const { loadSettings } = require('./settings.cjs');
-const { uniquePath } = require('./utils.cjs');
+const { uniquePath, reservePath } = require('./utils.cjs');
 const { installFlowsealWsRoute, noteTelegramLoadFailure, isWebFallbackEnabled } = require('./tg-flowseal-route.cjs');
 const { fetchTelegramWebAFallback } = require('./telegram-web-fallback.cjs');
 const { injectTelegramWorkerProxy } = require('./tg-flowseal-worker.cjs');
@@ -432,6 +432,7 @@ function createWindow(state, onTelegramLink, options = {}) {
             return;
         }
         item.setSavePath(uniquePath(path.join(downloadDir, originalFilename)));
+        const releasePath = reservePath(item.getSavePath());
 
         state.downloadCounter += 1;
         const id = state.downloadCounter;
@@ -481,6 +482,7 @@ function createWindow(state, onTelegramLink, options = {}) {
 
         item.once('done', (event, dlState) => {
             untrackActive(id);
+            releasePath();
             const status = dlState === 'completed' ? 'completed' : (dlState === 'cancelled' ? 'cancelled' : 'failed');
             // User-cancelled: drop the partial file.
             if (status === 'cancelled' && savePath) { try { fs.unlinkSync(savePath); } catch (e) {} }

@@ -1478,6 +1478,50 @@ test('desktop layouts keep Telegram composer wrap whenever a reply/edit/forward 
     assert.doesNotMatch(base, /\.Composer:not\(\.with-embedded\) \{/);
 });
 
+test('downloads never share a target path, never delete foreign files, and carry Mark-of-the-Web', () => {
+    const os = require('node:os');
+    const { uniquePath, reservePath, markFromInternet } = require('../electron/utils.cjs');
+    const { deleteDownload } = require('../electron/downloads.cjs');
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'twd-dl-test-'));
+    try {
+        const first = uniquePath(path.join(dir, 'x.pdf'));
+        const release = reservePath(first);
+        const second = uniquePath(path.join(dir, 'x.pdf'));
+        assert.notEqual(second, first, 'an in-flight download reserves its name');
+        release();
+        assert.equal(uniquePath(path.join(dir, 'x.pdf')), first);
+
+        assert.equal(sanitizeFilename('NUL.tar.gz'), '_NUL.tar.gz');
+        assert.equal(sanitizeFilename('com1.txt'), '_com1.txt');
+        assert.equal(sanitizeFilename('console.log'), 'console.log');
+
+        const newer = path.join(dir, 'report.pdf');
+        fs.writeFileSync(newer, 'B');
+        const list = [
+            { id: 1, path: newer, status: 'cancelled' },
+            { id: 2, path: newer, status: 'completed' },
+        ];
+        deleteDownload(list, 1);
+        assert.equal(fs.existsSync(newer), true, 'deleting a cancelled record keeps the newer file with the same name');
+        const own = path.join(dir, 'own.pdf');
+        fs.writeFileSync(own, 'C');
+        deleteDownload([{ id: 3, path: own, status: 'completed' }], 3);
+        assert.equal(fs.existsSync(own), false, 'a completed record still deletes its own file');
+
+        if (process.platform === 'win32') {
+            const saved = path.join(dir, 'doc.zip');
+            fs.writeFileSync(saved, 'Z');
+            if (markFromInternet(saved)) assert.match(fs.readFileSync(saved + ':Zone.Identifier', 'utf8'), /ZoneId=3/);
+        }
+    } finally {
+        fs.rmSync(dir, { recursive: true, force: true });
+    }
+    const ipc = read('electron/ipc.cjs');
+    assert.match(ipc, /const releasePath = reservePath\(dest\)/);
+    assert.match(ipc, /await fs\.promises\.rename\(item\.temp, item\.dest\);\s*markFromInternet\(item\.dest\);/);
+    assert.match(read('electron/window.cjs'), /const releasePath = reservePath\(item\.getSavePath\(\)\)/);
+});
+
 test('external link hook never bypasses Telegram link confirmation or double-opens', () => {
     const source = read('electron/inject/external.js');
     const opened = [];
