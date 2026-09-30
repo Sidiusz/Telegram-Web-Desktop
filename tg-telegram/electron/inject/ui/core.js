@@ -237,9 +237,11 @@ var tgRuntime=(function(){
         }
     }
     function ensure(){ if((_getA&&_getG)||_tries>25)return; _tries++; discover(); }
+    // Vite builds have no webpack registry; the patched notification chunk publishes the runtime instead.
+    function patched(){ var rt=window.__twdTelegramRuntime; return rt&&typeof rt.getGlobal==='function'?rt:null; }
     return {
-        getActions:function(){ ensure(); try{ return _getA?_getA():null; }catch(e){ return null; } },
-        getGlobal: function(){ ensure(); try{ return _getG?_getG():null; }catch(e){ return null; } },
+        getActions:function(){ var rt=patched(); if(rt){ try{ return rt.getActions(); }catch(e){ return null; } } ensure(); try{ return _getA?_getA():null; }catch(e){ return null; } },
+        getGlobal: function(){ var rt=patched(); if(rt){ try{ return rt.getGlobal(); }catch(e){ return null; } } ensure(); try{ return _getG?_getG():null; }catch(e){ return null; } },
     };
 })();
 try { window.__tgRuntime = tgRuntime; } catch(e) {}

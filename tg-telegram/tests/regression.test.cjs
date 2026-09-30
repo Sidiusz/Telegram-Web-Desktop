@@ -1395,7 +1395,7 @@ test('Telegram media cache patch evicts only unreferenced blob URLs and keeps di
 
     const win = read('electron/window.cjs');
     assert.match(win, /injectTelegramMediaCache/);
-    assert.match(win, /WEB_ASSET_PATCH_REVISION = 'media-notify-v5'/);
+    assert.match(win, /WEB_ASSET_PATCH_REVISION = 'runtime-v6'/);
     assert.match(win, /clearStorageData\(\{ origin: 'https:\/\/web\.telegram\.org', storages: \['cachestorage'\] \}\)/);
     assert.doesNotMatch(win, /storages: \[[^\]]*(?:cookies|indexdb|localstorage)/);
 });
@@ -1403,13 +1403,15 @@ test('Telegram media cache patch evicts only unreferenced blob URLs and keeps di
 test('Telegram notifications are not held hostage by avatar downloads or a missing SW controller', async () => {
     const { patchTelegramNotifications } = require('../electron/tg-notification-patch.cjs');
     const sample = 'async function gt(e){return globalThis.avatar(e)}function K(){return!0}' +
-        'async function yt({chat:e,message:t,isReaction:r=!1}){let i=1;if(!t)return;' +
+        'function G(){return globalThis.state}function A(){return globalThis.actions}function W(){return{hasWebNotifications:!0}}' +
+        'async function yt({chat:e,message:t,isReaction:r=!1}){let i=G(),{hasWebNotifications:a}=W(i);if(!t)return;' +
         'let d=await gt(e),{title:f,body:p}={title:`T`,body:`B`};if(K())navigator.serviceWorker?.controller&&' +
         'navigator.serviceWorker.controller.postMessage({type:`showMessageNotification`,payload:{title:f,body:p,icon:d,chatId:e.id}});' +
-        'else{new Notification(f,{})}}globalThis.notify=yt;export{yt as t};';
+        'else{let n=A(),o={body:p,icon:d};new Notification(f,o)}}globalThis.notify=yt;export{yt as t};';
     const patched = patchTelegramNotifications(sample);
     assert.equal(patched.iconPatched, true);
     assert.equal(patched.sinkPatched, true);
+    assert.equal(patched.runtimeExposed, true, 'Web A getGlobal/getActions are published for the desktop UI');
     assert.equal(patchTelegramNotifications(patched.body).body, patched.body, 'patch is idempotent');
 
     const delivered = [];
@@ -1423,8 +1425,15 @@ test('Telegram notifications are not held hostage by avatar downloads or a missi
     vm.createContext(context);
     vm.runInContext(patched.body.replace(/export\{[^}]*\};?/, ''), context);
     const startedAt = Date.now();
+    context.state = { chats: {} };
+    context.actions = { openChat() {} };
+    assert.equal(context.__twdTelegramRuntime.getGlobal(), context.state);
+    assert.equal(context.__twdTelegramRuntime.getActions(), context.actions);
     await context.notify({ chat: { id: '-100' }, message: { id: 7 } });
     assert.ok(Date.now() - startedAt < 3000, 'a hung avatar download is bounded');
+    const core = read('electron/inject/ui/core.js');
+    assert.match(core, /var rt=window\.__twdTelegramRuntime/);
+    assert.match(read('electron/inject/ui/bootstrap.js'), /if\(byId\[id\]&&byId\[id\]\.isForum\)\{/);
     assert.equal(delivered.length, 1, 'notification is delivered without a service-worker controller');
     assert.equal(delivered[0].type, 'showMessageNotification');
     assert.equal(delivered[0].payload.icon, undefined);

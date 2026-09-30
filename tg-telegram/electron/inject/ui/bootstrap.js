@@ -154,6 +154,11 @@ waitBody(()=>{
             var id=active[i], mc=g.messages.byChatId[id];
             var th=mc&&mc.threadsById&&mc.threadsById['-1'];
             var unread=th&&th.readState?(th.readState.unreadCount||0):0;
+            // Forum main-thread counters go stale; Telegram shows the per-topic unread instead.
+            if(byId[id]&&byId[id].isForum){
+                var ti=g.chats.topicsInfoById&&g.chats.topicsInfoById[id];unread=0;
+                if(ti&&ti.topicsById)for(var tk in ti.topicsById)unread+=ti.topicsById[tk].unreadCount||0;
+            }
             if(unread<=0)continue;
             var e=exc[id], muted;
             if(e&&typeof e.mutedUntil!=='undefined') muted=e.mutedUntil>now;

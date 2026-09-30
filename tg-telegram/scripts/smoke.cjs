@@ -149,7 +149,7 @@ async function telegramTarget(port) {
     await waitFor(() => /\[TWD-MEMORY\] Telegram media cache LRU installed/.test(events), 30000, 'Telegram media cache bundle patch');
     await waitFor(() => /\[TG-PROXY-BRIDGE\] \S+ control route returned MTProto data/.test(events), 45000, 'MTProto through embedded proxy bridge');
     const bundleHooks = await waitFor(
-      () => cdp.eval('typeof window.__twdMediaCacheStats==="function"&&typeof window.__twdConsumeSwNotification==="function"'),
+      () => cdp.eval('typeof window.__twdMediaCacheStats==="function"&&typeof window.__twdConsumeSwNotification==="function"&&!!window.__twdTelegramRuntime&&typeof window.__twdTelegramRuntime.getGlobal()==="object"'),
       20000,
       'patched Telegram modules in page'
     );
