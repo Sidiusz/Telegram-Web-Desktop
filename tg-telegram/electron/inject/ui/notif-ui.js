@@ -39,7 +39,6 @@ function showCornerNotif(data){
     const n=_makeNativeNotice({title:titleText,text:bodyText,avatarUrl:data&&data.icon||'',avatarText:(titleText||'?')[0].toUpperCase(),close:true});if(!n)return;
     const t=setTimeout(n.dismiss,5000);if(n.close)n.close.addEventListener('click',()=>clearTimeout(t),{once:true});
 }
-if(window.tgBridge){window.tgBridge.onNotification(function(data){showCornerNotif(data);});}
 
 // ── Обновления ────────────────────────────────────────────────────────────
 function _updPlainNotes(notes){

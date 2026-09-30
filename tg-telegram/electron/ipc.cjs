@@ -2,7 +2,7 @@
 const { ipcMain, shell, dialog, app, Menu, MenuItem } = require('electron');
 const { init: initNotifications, queueNotification } = require('./notification.cjs');
 const { loadSettings, saveSettings } = require('./settings.cjs');
-const { configureProxySettings, setProxyMode, resetAutoProxy, forceProxyReconnect, updateProxyOptions, getProxyStatus, getProxyBootstrap, refreshFlowsealDomains, testProxyConnectivity } = require('./tg-flowseal-route.cjs');
+const { configureProxySettings, setProxyMode, forceProxyReconnect, updateProxyOptions, getProxyStatus, getProxyBootstrap, refreshFlowsealDomains, testProxyConnectivity } = require('./tg-flowseal-route.cjs');
 const { getFallbackInfo } = require('./telegram-web-fallback.cjs');
 const { loadDownloads, saveDownloads, deleteDownload, cancelActive } = require('./downloads.cjs');
 const { getAddons, deleteAddon, openAddonsFolder, toggleAddon } = require('./addons.cjs');
@@ -126,9 +126,6 @@ function registerIpc(getWindow) {
     handle('set_proxy_mode', (e, { mode }) => {
         const status = setProxyMode(mode); state.settings = loadSettings(); return status;
     });
-    handle('reset_proxy_auto', () => {
-        const status = resetAutoProxy(); state.settings = loadSettings(); return status;
-    });
     handle('reconnect_proxy', () => {
         const status = forceProxyReconnect('renderer-network-stall');
         state.settings = loadSettings();
@@ -157,7 +154,6 @@ function registerIpc(getWindow) {
             peerId,
             btnOpen: ntr('open'),
             btnRead: ntr('read'),
-            playSound: settings.notif_sound !== false,
             duration: settings.notif_duration || 6,
         });
     });
@@ -191,7 +187,6 @@ function registerIpc(getWindow) {
             peerId,
             btnOpen: ntr('open'),
             btnRead: ntr('read'),
-            playSound: false,
             duration: settingsPreview
                 ? (explicit && Number.isFinite(Number(explicit.duration)) ? Number(explicit.duration) : (settings.notif_duration || 6))
                 : 12,

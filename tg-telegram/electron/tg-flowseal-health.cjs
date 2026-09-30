@@ -61,13 +61,6 @@ class UpstreamHealth {
         return healthy.length ? healthy : cooling.map(x => x.candidate);
     }
 
-    snapshot() {
-        this._prune();
-        return {
-            preferredDomain: this.preferredDomain,
-            cooldowns: Object.fromEntries(this.cooldowns),
-        };
-    }
 }
 
 // ws Receiver states: 0 = waiting for a new frame header, 6 = deferred event emit.
