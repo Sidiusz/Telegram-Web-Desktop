@@ -275,6 +275,19 @@ test('release hardening fuses stay enabled', () => {
     assert.match(workflow, /if \(Test-Path \$notes\)/);
     assert.match(workflow, /--generate-notes --verify-tag --latest/);
     assert.doesNotMatch(release, /WIN_CSC_LINK|CSC_LINK|forceCodeSigning|Authenticode|signingConfigured|Signed release|Unsigned release/i);
+    assert.match(workflow, /persist-credentials: false/);
+    assert.match(workflow, /if \(\$releaseId\) \{[\s\S]{0,200}gh release upload \$version \$installer --clobber/);
+    assert.match(workflow, /Smoke test packaged app[\s\S]{0,300}TWD_SMOKE_EXE[\s\S]{0,120}npm run test:smoke/);
+    assert.match(release, /process\.env\.TWD_SMOKE_EXE = artifacts\[0\]/);
+});
+
+test('every release note ships both English and Russian blocks', () => {
+    const dir = path.join(root, '..', '.github', 'release-notes');
+    for (const file of fs.readdirSync(dir).filter(f => f.endsWith('.md'))) {
+        const text = fs.readFileSync(path.join(dir, file), 'utf8');
+        assert.match(text, /<!-- lang:en -->/, `${file} lacks an English block`);
+        assert.match(text, /<!-- lang:ru -->/, `${file} lacks a Russian block`);
+    }
 });
 
 test('updater selects only our installer and never changes versions silently', () => {
@@ -1618,7 +1631,10 @@ test('update modal sanitizes release Markdown and changelog opens once per app v
     );
 });
 
-test('package version is bumped to 1.3.2', () => {
-    assert.equal(JSON.parse(read('package.json')).version, '1.3.2');
-    assert.equal(JSON.parse(read('package-lock.json')).version, '1.3.2');
+test('package and lockfile versions stay in sync', () => {
+    const pkg = JSON.parse(read('package.json'));
+    const lock = JSON.parse(read('package-lock.json'));
+    assert.match(pkg.version, /^\d+\.\d+\.\d+$/);
+    assert.equal(lock.version, pkg.version);
+    assert.equal(lock.packages[''].version, pkg.version);
 });

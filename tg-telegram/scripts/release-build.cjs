@@ -57,4 +57,8 @@ for (const file of artifacts) {
   }
 }
 
+// The packaged app (asar, fuses, file globs) must boot too, not only the source tree.
+process.env.TWD_SMOKE_EXE = artifacts[0];
+run(process.execPath, [npmCli, 'run', 'test:smoke'], 'Packaged smoke test');
+
 console.log(`Release ${pkg.version} built successfully.`);
