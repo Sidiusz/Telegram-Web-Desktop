@@ -94,11 +94,15 @@ async function telegramTarget(port) {
   fs.writeFileSync(path.join(profile, 'settings.json'), JSON.stringify({
     proxy_mode: 'always', popup_notifications: true, notif_sound: false,
     minimize_to_tray: true, proxy_web_fallback: true, save_path: smokeDownloads,
+    // TWD_SMOKE_FALLBACK=1 exercises the pinned Web A build used after a direct-load failure.
+    proxy_web_fallback_latched: process.env.TWD_SMOKE_FALLBACK === '1',
   }));
   const port = await freePort();
   const electron = require('electron');
   let log = '';
-  const child = spawn(electron, ['.'], {
+  // TWD_SMOKE_EXE runs the same checks against a packaged build (dist/win-unpacked).
+  const packagedExe = process.env.TWD_SMOKE_EXE || '';
+  const child = spawn(packagedExe || electron, packagedExe ? [] : ['.'], {
     cwd: root,
     env: {
       ...process.env,
@@ -110,7 +114,14 @@ async function telegramTarget(port) {
     stdio: ['ignore', 'pipe', 'pipe'],
     windowsHide: true,
   });
-  const collect = chunk => { log = (log + String(chunk)).slice(-30000); };
+  let events = '';
+  const collect = chunk => {
+    const text = String(chunk);
+    log = (log + text).slice(-30000);
+    for (const line of text.split(/\r?\n/)) {
+      if (/\[(?:TWD-NOTIF|TWD-MEMORY|TG-PROXY-BRIDGE)\]/.test(line)) events = (events + line + '\n').slice(-200000);
+    }
+  };
   child.stdout.on('data', collect);
   child.stderr.on('data', collect);
 
@@ -134,6 +145,16 @@ async function telegramTarget(port) {
     const proxyGlobals = await cdp.eval('({state:typeof window.__twdProxyState,router:typeof window.__twdProxyRouter,channel:typeof window.__twdProxyChannel})');
     assert.deepEqual(proxyGlobals, { state: 'undefined', router: 'undefined', channel: 'undefined' });
 
+    await waitFor(() => /\[TWD-NOTIF\] Telegram notification hooks installed/.test(events), 30000, 'Telegram notification bundle patch');
+    await waitFor(() => /\[TWD-MEMORY\] Telegram media cache LRU installed/.test(events), 30000, 'Telegram media cache bundle patch');
+    await waitFor(() => /\[TG-PROXY-BRIDGE\] \S+ control route returned MTProto data/.test(events), 45000, 'MTProto through embedded proxy bridge');
+    const bundleHooks = await waitFor(
+      () => cdp.eval('typeof window.__twdMediaCacheStats==="function"&&typeof window.__twdConsumeSwNotification==="function"'),
+      20000,
+      'patched Telegram modules in page'
+    );
+    assert.equal(bundleHooks, true);
+
     const blocked = await cdp.eval('window.tgBridge.invoke("__smoke_unknown__").then(()=>"allowed",e=>"blocked:"+e.message)');
     assert.match(blocked, /^blocked:/);
 
@@ -146,6 +167,50 @@ async function telegramTarget(port) {
       'default built-in desktop layout'
     );
     assert.equal(standardLayout, true);
+
+    // Real Web A stylesheets + a synthetic chat: the forward bar must not squeeze the input,
+    // and inline media load/cancel must not open a save-to-disk card.
+    await cdp.eval(`(async()=>{
+      const html=await (await fetch('/a/')).text();
+      const found=new Set([...html.matchAll(/assets\\/([\\w.-]+\\.css)/g)].map(m=>m[1]));
+      for(const m of html.matchAll(/assets\\/([\\w.-]+\\.js)/g)){
+        try{for(const c of (await (await fetch('/a/assets/'+m[1])).text()).matchAll(/(?:useConnectionStatus|main)-[\\w-]+\\.css/g))found.add(c[0]);}catch(_){}
+      }
+      for(const f of found){const l=document.createElement('link');l.rel='stylesheet';l.href='/a/assets/'+f;document.head.appendChild(l);await new Promise(r=>{l.onload=l.onerror=r;});}
+      const host=document.createElement('div');host.id='twd-smoke-chat';
+      host.style.cssText='position:fixed;left:0;top:0;width:1200px;height:700px;z-index:2147483600;';
+      host.innerHTML='<div id="MiddleColumn" style="position:relative;width:1200px;height:700px">'
+        +'<div class="Message" data-message-id="11"><div class="media-inner interactive" id="smoke-m11"><i class="icon icon-download"></i>'
+        +'<div class="media-loading"><div class="ProgressSpinner"><i class="icon icon-close"></i></div></div></div></div>'
+        +'<div class="middle-column-footer"><div class="Composer is-chat-composer shown mounted" id="smoke-composer">'
+        +'<div class="ComposerEmbeddedMessage open"><div class="ComposerEmbeddedMessage_inner"><div class="EmbeddedMessage"><div class="message-text">'
+        +'<p class="embedded-text-wrapper">Forwarded channel post preview text</p></div></div></div></div>'
+        +'<div class="composer-wrapper"><div class="message-input-wrapper">'
+        +'<button class="Button composer-action-button round" style="width:3rem;height:3rem;flex-shrink:0"></button>'
+        +'<div id="message-input-text" style="flex-grow:1;min-width:0"><div class="form-control" contenteditable="true">Message</div></div>'
+        +'<button class="Button composer-action-button round" style="width:3rem;height:3rem;flex-shrink:0"></button></div></div>'
+        +'<button class="Button main-button"></button></div></div></div>';
+      document.body.appendChild(host);
+    })()`);
+    const composerLayout = await cdp.eval(`(()=>{
+      const c=document.getElementById('smoke-composer'),w=c.querySelector('.composer-wrapper');
+      const withBar=w.getBoundingClientRect().width;
+      c.querySelector('.ComposerEmbeddedMessage').remove();
+      const plain=w.getBoundingClientRect().width;
+      return {withBar:Math.round(withBar),plain:Math.round(plain),composer:Math.round(c.getBoundingClientRect().width)};
+    })()`);
+    assert.ok(composerLayout.plain > composerLayout.composer * 0.8, `plain composer input is full width: ${JSON.stringify(composerLayout)}`);
+    assert.equal(composerLayout.withBar, composerLayout.plain, 'forward/reply bar must not shrink the input');
+    const inlineCards = await cdp.eval(`(async()=>{
+      const count=()=>document.querySelectorAll('#_cnw_ .dl_card').length,before=count();
+      for(const sel of ['#smoke-m11 .icon-download','#smoke-m11 .icon-close'])
+        document.querySelector(sel).dispatchEvent(new MouseEvent('click',{bubbles:true,cancelable:true,button:0}));
+      await new Promise(r=>setTimeout(r,150));
+      const after=count();
+      document.getElementById('twd-smoke-chat').remove();
+      return after-before;
+    })()`);
+    assert.equal(inlineCards, 0, 'inline media load/cancel only fills the media cache');
 
     const historyRuntime = await waitFor(
       () => cdp.eval('!!window.__twdMessageHistoryApi'),
@@ -220,6 +285,18 @@ async function telegramTarget(port) {
       assert.equal(Array.from(privacyPreview.avatar).length, 1);
     } finally { popupCdp.close(); }
     await cdp.eval('window.tgBridge.invoke("show_notification",{title:"TWD smoke",body:"notification pipeline",peerId:"1"}).then(()=>true)');
+    // Same entry point the patched Web A notifier uses when no service-worker controller exists.
+    await cdp.eval('window.__twdConsumeSwNotification({type:"showMessageNotification",payload:{title:"TWD sink",body:"no controller path",chatId:"1",messageId:"99"}})');
+    const sinkPopup = await waitFor(async () => {
+      const list = await jsonGet(port, '/json/list');
+      const target = list.find(x => x.type === 'page' && /^data:text\/html/.test(x.url));
+      if (!target) return null;
+      const c = new Cdp(target.webSocketDebuggerUrl);
+      await c.open();
+      try { return await c.eval('[...document.querySelectorAll(".card .title")].some(n=>n.textContent==="TWD sink")'); }
+      finally { c.close(); }
+    }, 10000, 'notification delivered through SW-less sink');
+    assert.equal(sinkPopup, true);
 
     // Force the Telegram renderer to crash. window.cjs must recover it in-place.
     try { await cdp.call('Page.crash'); } catch (_) {}
@@ -228,6 +305,7 @@ async function telegramTarget(port) {
     assert.match(recovered.url, /^https:\/\/web\.telegram\.org\/a/);
     assert.equal(child.exitCode, null, 'browser process must survive renderer crash');
 
+    if (process.env.TWD_SMOKE_VERBOSE === '1') console.log('--- Electron tail ---\n' + log);
     console.log('SMOKE PASS: launch, Telegram, proxy, IPC, addons, live history, downloads, notifications, crash recovery');
   } catch (e) {
     console.error('SMOKE FAIL:', e.stack || e.message || e);
@@ -240,7 +318,8 @@ async function telegramTarget(port) {
       else child.kill('SIGKILL');
     } catch (_) {}
     await sleep(300);
-    try { fs.rmSync(profile, { recursive: true, force: true }); } catch (_) {}
+    // Electron helpers can hold profile files briefly after taskkill.
+    try { fs.rmSync(profile, { recursive: true, force: true, maxRetries: 20, retryDelay: 250 }); } catch (_) {}
   }
 })().catch(e => {
   console.error(e.stack || e);
