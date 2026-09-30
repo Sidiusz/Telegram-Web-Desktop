@@ -21,7 +21,8 @@ function makeTrayPng(count){
         return c.toDataURL('image/png');
     }catch(e){return null;}
 }
-function waitBody(cb){if(document.body)cb();else{const t=setInterval(()=>{if(document.body){clearInterval(t);cb();}},50);}}
+// Runs synchronously when body exists: a throw here must not abort the rest of the UI script (notification receiver).
+function waitBody(cb){const run=()=>{try{cb();}catch(e){console.error('[TWD-UI] startup step failed',e);}};if(document.body)run();else{const t=setInterval(()=>{if(document.body){clearInterval(t);run();}},50);}}
 
 function installStartupThemeSync(){
     if(window.__twdStartupThemeSync)return;window.__twdStartupThemeSync=true;
