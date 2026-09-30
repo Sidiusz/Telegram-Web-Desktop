@@ -212,6 +212,23 @@ async function telegramTarget(port) {
     })()`);
     assert.equal(inlineCards, 0, 'inline media load/cancel only fills the media cache');
 
+    const hiddenLinks = await cdp.eval(`(()=>{
+      const api=window.__twdMessageFilterApi,a=(href,text)=>'<div class="text-content">Текст <a class="text-entity-link" href="'+href+'">'+text+'</a></div>';
+      return {
+        bot:api.testHtml(a('https://t.me/promo_bot?start=ref1','жми сюда')),
+        startParam:api.testHtml(a('https://t.me/shopname?start=abc','магазин')),
+        visibleMention:api.testHtml(a('https://t.me/promo_bot','@promo_bot')),
+        invite:api.testHtml(a('https://t.me/+AbCdEf123','канал')),
+        postLink:api.testHtml(a('https://t.me/somechannel/9358','подвижки')),
+        external:api.testHtml(a('https://store.steampowered.com/app/1','Стим')),
+        footer:api.testMessages([a('https://t.me/news_bot','предложить новость'),a('https://t.me/news_bot','предложить новость'),a('https://t.me/news_bot','предложить новость'),a('https://t.me/other_bot?start=x','бонус')]),
+      };
+    })()`);
+    assert.deepEqual(hiddenLinks, {
+      bot: true, startParam: true, visibleMention: false, invite: true, postLink: false, external: false,
+      footer: [false, false, false, true],
+    });
+
     const historyRuntime = await waitFor(
       () => cdp.eval('!!window.__twdMessageHistoryApi'),
       10000,

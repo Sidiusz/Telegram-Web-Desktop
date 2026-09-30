@@ -1456,6 +1456,26 @@ test('desktop layouts keep Telegram composer wrap whenever a reply/edit/forward 
     assert.doesNotMatch(base, /\.Composer:not\(\.with-embedded\) \{/);
 });
 
+test('message filter can hide hidden bot/invite hyperlinks without hiding channel footers', () => {
+    const filter = read('electron/features/message_filter.js');
+    const settings = read('electron/settings.cjs');
+    const features = read('electron/features.cjs');
+    const ui = read('electron/inject/ui/twd-settings-native.js');
+    const lang = read('electron/inject/ui/lang.js');
+    assert.match(filter, /\.text-content a\.text-entity-link\[href\]/);
+    assert.match(filter, /function signatureKeys\(messages\)/);
+    assert.match(filter, /hiddenDisabled:\['external'\]/);
+    assert.match(settings, /message_filter_hidden_links: true/);
+    assert.match(settings, /message_filter_hidden_disabled: \['external'\]/);
+    assert.match(settings, /MESSAGE_FILTER_HIDDEN_KINDS = new Set\(\['bots','invites','external'\]\)/);
+    assert.match(features, /hiddenLinks: s\.message_filter_hidden_links !== false/);
+    assert.match(ui, /message_filter_hidden_disabled:'hiddenDisabled'/);
+    assert.match(ui, /T\('twd_message_filter_hidden_'\+kind\)/);
+    for (const key of ['hidden', 'hidden_desc', 'hidden_bots', 'hidden_invites', 'hidden_external']) {
+        assert.match(lang, new RegExp(`twd_message_filter_${key}:\\{ru:`));
+    }
+});
+
 test('Telegram media cache never hands back a revoked blob for a fresh or on-screen entry', () => {
     const sample = 'var vt=new Map;function Ct(e){return vt.get(e)}' +
         'function Ot(e,n){if(!n)throw Error(`Failed to fetch media ${e}`);vt.set(e,n);return vt.set(e,n),n}' +
