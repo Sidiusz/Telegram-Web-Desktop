@@ -31,11 +31,13 @@ function loadFeatureScripts(settings) {
         hashtags: s.message_filter_hashtags !== false,
         shortLinks: s.message_filter_short_links !== false,
         refLinks: s.message_filter_ref_links !== false,
+        hiddenLinks: s.message_filter_hidden_links !== false,
         includePrivate: s.message_filter_private === true,
         markOnly: s.message_filter_mark_only === true,
         ignoreSymbols: s.message_filter_ignore_symbols === true,
         shortDisabled: Array.isArray(s.message_filter_short_disabled) ? s.message_filter_short_disabled : [],
         refDisabled: Array.isArray(s.message_filter_ref_disabled) ? s.message_filter_ref_disabled : [],
+        hiddenDisabled: Array.isArray(s.message_filter_hidden_disabled) ? s.message_filter_hidden_disabled : ['external'],
         custom: Array.isArray(s.message_filter_custom) ? s.message_filter_custom : [],
     });
     scripts.push('window.__twdMessageFilterConfig=' + messageFilterCfg + ';\n' + readFeature('message_filter.js'));
