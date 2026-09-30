@@ -437,8 +437,8 @@ function _twdRenderGeneral(content,ctx,s){
     },'link','blue'));
     ctx.section(T('sec_integration'),integ);
 }
-var _TWD_FILTER_SHORT_DOMAINS=['bit.ly','gg.gg','clck.ru','cutt.ly','kutt.it','rebrand.ly','tinyurl.com','t.co','is.gd','rb.gy','goo.su','vk.cc','tiny.cc','shorturl.at','lnkd.in'];
-var _TWD_FILTER_REF_DOMAINS=['ali.pub','alii.pub','lite.al','lite.bz','aliclick.link','aliclick.shop','dea.ls','alitems.co','s.click.aliexpress.com','ad.admitad.com','fas.st','epn.bz','redirect.appmetrica.yandex.com','go.redirectingat.com'];
+// The filter feature owns its domain lists; the settings page only renders them.
+function _twdFilterDomains(key){var api=window.__twdMessageFilterApi;return api&&Array.isArray(api[key])?api[key].slice():[];}
 function _twdExpandableFilterGroup(ctx,title,sub,checked,onChange,body){
     var r=document.createElement('div');r.className='_twd-filter-expand-row_';
     var cb=_genToggle(title,!!checked,onChange,sub||'');
@@ -547,7 +547,7 @@ function _twdRenderMessages(content,ctx,s){
         _twdConfigureMessageFilter({message_filter_hashtags:v});
     }));
 
-    var shortBody=_twdFilterDomainBody(ctx,_TWD_FILTER_SHORT_DOMAINS,s.message_filter_short_disabled||[],function(next){
+    var shortBody=_twdFilterDomainBody(ctx,_twdFilterDomains('shortDomains'),s.message_filter_short_disabled||[],function(next){
         _twdConfigureMessageFilter({message_filter_short_disabled:next});
     });
     filter.appendChild(_twdExpandableFilterGroup(ctx,T('twd_message_filter_short'),T('twd_message_filter_short_desc'),s.message_filter_short_links!==false,function(v){
@@ -555,7 +555,7 @@ function _twdRenderMessages(content,ctx,s){
     },shortBody));
     filter.appendChild(shortBody);
 
-    var refBody=_twdFilterDomainBody(ctx,_TWD_FILTER_REF_DOMAINS,s.message_filter_ref_disabled||[],function(next){
+    var refBody=_twdFilterDomainBody(ctx,_twdFilterDomains('refDomains'),s.message_filter_ref_disabled||[],function(next){
         _twdConfigureMessageFilter({message_filter_ref_disabled:next});
     });
     filter.appendChild(_twdExpandableFilterGroup(ctx,T('twd_message_filter_ref'),T('twd_message_filter_ref_desc'),s.message_filter_ref_links!==false,function(v){
@@ -563,7 +563,7 @@ function _twdRenderMessages(content,ctx,s){
     },refBody));
     filter.appendChild(refBody);
 
-    var hiddenBody=_twdFilterDomainBody(ctx,['bots','invites','external'],s.message_filter_hidden_disabled||['external'],function(next){
+    var hiddenBody=_twdFilterDomainBody(ctx,_twdFilterDomains('hiddenKinds'),s.message_filter_hidden_disabled||['external'],function(next){
         _twdConfigureMessageFilter({message_filter_hidden_disabled:next});
     },function(kind){return T('twd_message_filter_hidden_'+kind);});
     filter.appendChild(_twdExpandableFilterGroup(ctx,T('twd_message_filter_hidden'),T('twd_message_filter_hidden_desc'),s.message_filter_hidden_links!==false,function(v){

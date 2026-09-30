@@ -13,12 +13,9 @@
     style.textContent='._twd-filter-hidden_{display:none!important;}._twd-filter-marked_ .message-content{outline:2px dashed #ff9800!important;outline-offset:2px!important;box-shadow:0 0 0 1px rgba(255,152,0,.16)!important;}';
     if(document.head)document.head.appendChild(style);else document.addEventListener('DOMContentLoaded',function(){document.head.appendChild(style);},{once:true});
 
-    var chatTypeById=Object.create(null),chatTypeLoad=null,chatTypeLoadedAt=0;
-    function categoryFromType(type){if(type==='chatTypePrivate')return'private';if(type==='chatTypeChannel')return'channel';if(type==='chatTypeBasicGroup'||type==='chatTypeSuperGroup')return'group';return'';}
     function currentPeer(){var av=document.querySelector('#MiddleColumn .MiddleHeader .Avatar[data-peer-id]');return av?String(av.getAttribute('data-peer-id')||''):'';}
-    function loadChatTypes(force){var now=Date.now();if(chatTypeLoad)return chatTypeLoad;if(!force&&chatTypeLoadedAt)return Promise.resolve();if(force&&chatTypeLoadedAt&&now-chatTypeLoadedAt<5000)return Promise.resolve();
-        chatTypeLoad=new Promise(function(resolve){try{if(!window.indexedDB){resolve();return;}var req=indexedDB.open('tt-data');req.onerror=function(){resolve();};req.onsuccess=function(){var db=req.result,tx;try{tx=db.transaction('store','readonly');}catch(_){try{db.close();}catch(__){}resolve();return;}var cur=tx.objectStore('store').openCursor();cur.onsuccess=function(){var c=cur.result;if(!c)return;if(/^tt-global-state(?:_\d+)?$/.test(String(c.key||''))){var byId=c.value&&c.value.chats&&c.value.chats.byId;if(byId)Object.keys(byId).forEach(function(id){var type=byId[id]&&byId[id].type;if(type)chatTypeById[String(id)]=type;});}c.continue();};tx.oncomplete=tx.onerror=tx.onabort=function(){try{db.close();}catch(_){}resolve();};};}catch(_){resolve();}}).then(function(){chatTypeLoadedAt=Date.now();chatTypeLoad=null;});return chatTypeLoad;}
-    function resolveCategory(pid){pid=String(pid||'');if(!pid)return Promise.resolve('');var known=categoryFromType(chatTypeById[pid]);if(known)return Promise.resolve(known);if(pid.charAt(0)!=='-')return Promise.resolve('private');return loadChatTypes(true).then(function(){return categoryFromType(chatTypeById[pid])||'group';});}
+    // Chat types come from the UI script's shared tt-global-state cache.
+    function resolveCategory(pid){try{if(typeof window.__twdChatCategory==='function')return Promise.resolve(window.__twdChatCategory(pid));}catch(_){}return Promise.resolve('');}
     function lower(text){text=String(text||'');try{text=text.normalize('NFKC');}catch(_){}return text.replace(/[\u200B-\u200D\u2060\uFEFF]/g,'').toLowerCase();}
     function compact(text){return lower(text).replace(/[\p{P}\p{S}\s_]+/gu,'');}
     function phraseMatch(text,phrase){var a=lower(text),b=lower(phrase);if(a.indexOf(b)>=0)return true;return cfg.ignoreSymbols===true&&compact(a).indexOf(compact(b))>=0;}
@@ -130,6 +127,6 @@
         ['pushState','replaceState'].forEach(function(k){var orig=history[k];if(typeof orig!=='function'||orig.__twdFilterWrapped)return;function wrapped(){var result=orig.apply(this,arguments);onNav();return result;}wrapped.__twdFilterWrapped=true;history[k]=wrapped;});
         window.addEventListener('popstate',onNav);window.addEventListener('hashchange',onNav);
     }
-    function start(){var root=document.querySelector('#MiddleColumn');if(!root){setTimeout(start,250);return;}observer.observe(root,{childList:true,subtree:true,characterData:true});installNavHooks();loadChatTypes(false).then(function(){schedule(true);});}
+    function start(){var root=document.querySelector('#MiddleColumn');if(!root){setTimeout(start,250);return;}observer.observe(root,{childList:true,subtree:true,characterData:true});installNavHooks();schedule(true);}
     start();
 })();
