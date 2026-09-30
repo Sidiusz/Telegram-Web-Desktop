@@ -52,9 +52,9 @@ const DL = window.__tgdl = (function(){
         for(const mid in byMid){
             if(forgotten[mid]) continue;          // файл удалён — не восстанавливаем
             const r = byMid[mid];
-            if(!registry[mid] || registry[mid].status!=='completed'){
+            if(!registry[mid] || registry[mid].status!=='completed' || registry[mid].peer!==String(pid)){
                 registry[mid] = {
-                    mid:mid, id:r.id, filename:r.filename, status:'completed',
+                    mid:mid, peer:String(pid), id:r.id, filename:r.filename, status:'completed',
                     recv:Number(r.recv)||0, total:Number(r.total)||0
                 };
                 applyToMessage(mid);
@@ -68,8 +68,19 @@ const DL = window.__tgdl = (function(){
         if(!mid||!filename)return;
         (pending[filename] = pending[filename] || []).push(mid);
         // сразу покажем состояние «ожидание» на сообщении
-        registry[mid] = Object.assign(registry[mid]||{}, {mid, filename, status:'pending'});
+        const peer = currentPeer() || '';
+        const prev = registry[mid] && registry[mid].peer===peer ? registry[mid] : {};
+        const pendingAt = Date.now();
+        registry[mid] = Object.assign(prev, {mid, peer, filename, status:'pending', pendingAt});
         applyToMessage(mid);
+        // No will-download followed (text selection, preview): drop the spinner instead of blocking the file.
+        setTimeout(function(){
+            const r = registry[mid];
+            if(!r || r.status!=='pending' || r.pendingAt!==pendingAt) return;
+            delete registry[mid];
+            if(pending[filename]) pending[filename] = pending[filename].filter(function(x){ return x!==mid; });
+            unpaint(mid);
+        }, 15000);
     }
 
     // Main шлёт download-event. Связываем filename→mid.
@@ -115,14 +126,15 @@ const DL = window.__tgdl = (function(){
             if(registry[mid] && registry[mid].status==='completed') unpaint(mid);
             delete doneFn[mid];
             delete forgotten[mid];   // снова качают — забытый mid опять валиден
+            const ownerPeer = (registry[mid] && registry[mid].peer) || currentPeer() || '';
             registry[mid] = {
-                mid, id:data.id, filename:data.filename, origName:orig, status:'downloading',
+                mid, peer:ownerPeer, id:data.id, filename:data.filename, origName:orig, status:'downloading',
                 recv:0, total:Number(data.total)||0
             };
             byId[data.id] = mid;
             // привязка к сообщению/чату — чтобы статус пережил перезапуск (#3)
             if(mid.indexOf('__noid__')!==0){
-                INV('bind_download',{id:data.id, mid:mid, peerId:currentPeer()}).catch(function(){});
+                INV('bind_download',{id:data.id, mid:mid, peerId:ownerPeer}).catch(function(){});
             }
             applyToMessage(mid);
         } else if(data.type==='progress'){
@@ -149,7 +161,8 @@ const DL = window.__tgdl = (function(){
     function applyToMessage(mid){
         if(!mid || mid.indexOf('__noid__')===0) return;   // не привязано к сообщению
         const r = registry[mid]; if(!r)return;
-        const msg = document.querySelector('.Message[data-message-id="'+mid+'"]');
+        if(r.peer && r.peer!==String(currentPeer()||'')) return;   // message ids repeat across chats
+        const msg = document.querySelector('#MiddleColumn .Message[data-message-id="'+mid+'"]');
         if(!msg) return;                                   // виртуализировано — пропустим, интервал доберёт
         paintMessage(msg, r);
     }
@@ -241,7 +254,9 @@ const DL = window.__tgdl = (function(){
 
     // Переприменяем состояние ко всем сообщениям из реестра (идемпотентно).
     function scanMessages(){
-        for(const mid in registry){ applyToMessage(mid); }
+        if(window.__twdVisualActive===false) return;
+        const peer = String(currentPeer()||'');
+        for(const mid in registry){ const r=registry[mid]; if(!r.peer || r.peer===peer) applyToMessage(mid); }
         applyLongExt();
     }
 
@@ -467,10 +482,10 @@ const DL = window.__tgdl = (function(){
     function midDownload(mid){
         if(!mid || forgotten[mid]) return null;
         var r = registry[mid];
-        if(r && r.status==='completed' && r.id!=null) return {id:r.id};
+        if(r && r.status==='completed' && r.id!=null && (!r.peer || r.peer===String(currentPeer()||''))) return {id:r.id};
         for(var i=0;i<savedDl.length;i++){
             var s=savedDl[i];
-            if(s.status==='completed' && String(s.mid)===String(mid) && s.exists!==false) return {id:s.id};
+            if(s.status==='completed' && String(s.mid)===String(mid) && String(s.peerId)===String(currentPeer()||'') && s.exists!==false) return {id:s.id};
         }
         return null;
     }

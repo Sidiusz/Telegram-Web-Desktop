@@ -224,6 +224,23 @@ async function telegramTarget(port) {
         footer:api.testMessages([a('https://t.me/news_bot','предложить новость'),a('https://t.me/news_bot','предложить новость'),a('https://t.me/news_bot','предложить новость'),a('https://t.me/other_bot?start=x','бонус')]),
       };
     })()`);
+    const crossChat = await cdp.eval(`(async()=>{
+      const host=document.createElement('div');host.id='twd-smoke-dl';host.style.cssText='position:fixed;left:0;top:0;width:10px;height:10px;overflow:hidden;';
+      host.innerHTML='<div id="MiddleColumn"><div class="MiddleHeader"><div class="ChatInfo"><div class="Avatar" data-peer-id="-1002"></div></div></div>'
+        +'<div class="Message" data-message-id="57"><div class="File"><div class="file-icon-container"></div><div class="file-title" title="a.pdf">a.pdf</div></div></div></div>';
+      document.body.appendChild(host);
+      const visual=window.__twdVisualActive;window.__twdVisualActive=true;
+      window.__tgdl.registry['57']={mid:'57',peer:'-1001',id:777,filename:'a.pdf',status:'completed',recv:1,total:1};
+      await new Promise(r=>setTimeout(r,900));
+      const file=host.querySelector('.File'),otherChat=file.dataset.tgdlDone==='1';
+      host.querySelector('.Avatar').setAttribute('data-peer-id','-1001');
+      await new Promise(r=>setTimeout(r,900));
+      const ownChat=file.dataset.tgdlDone==='1';
+      delete window.__tgdl.registry['57'];host.remove();window.__twdVisualActive=visual;
+      return {otherChat,ownChat};
+    })()`);
+    assert.deepEqual(crossChat, { otherChat: false, ownChat: true }, 'a download mark belongs to its own chat only');
+
     const phraseChecks = await cdp.eval(`(()=>{
       const api=window.__twdMessageFilterApi;
       return {
