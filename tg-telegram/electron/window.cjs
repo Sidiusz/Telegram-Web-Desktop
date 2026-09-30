@@ -177,6 +177,31 @@ function createWindow(state, onTelegramLink, options = {}) {
         } catch (_) { return false; }
     });
 
+    const ASSET_TRANSFORMS = [injectTelegramWorkerProxy, injectTelegramExtendedPins, injectTelegramMediaCache, injectTelegramNotifications];
+    function makeTelegramHandler(protocol) {
+        return async (request) => {
+            const url = request.url;
+            if (isTelegramWebsyncUrl(url)) return telegramWebsyncNoopResponse();
+            if (!isWebAUrl(url, protocol)) {
+                if (shouldBlockDirectTelegram(url)) return blockedTransportResponse();
+                return net.fetch(request, { bypassCustomProtocolHandlers: true });
+            }
+            let resp = await fetchTelegramAsset(request, url);
+            for (const transform of ASSET_TRANSFORMS) resp = await transform(resp, url);
+            const ct = (resp.headers.get('content-type') || '').toLowerCase();
+            if (!ct.includes('text/html')) return resp;
+            const settings = loadSettings();
+            let body = await resp.text();
+            body = injectExtendedPinsPrelude(body, settings.messages_extended_pins === true);
+            body = body.replace(/<meta[^>]*http-equiv=["']content-security-policy["'][^>]*>/gi, '');
+            body = body.replace(/<meta[^>]*http-equiv=["']content-security-policy-report-only["'][^>]*>/gi, '');
+            body = injectStartupSurface(body, startupTheme(settings));
+            const headers = new Headers(resp.headers);
+            for (const name of ['content-security-policy', 'content-security-policy-report-only', 'x-frame-options', 'content-length']) headers.delete(name);
+            return new Response(body, { status: resp.status, statusText: resp.statusText, headers });
+        };
+    }
+
     // Telegram now delivers CSP via <meta http-equiv="Content-Security-Policy"> (see /a/ HTML)
     // – stripping response headers alone is no longer enough and the page stays white
     // (inline executeJavaScript / service-worker bootstraps are blocked). Intercept the
@@ -189,67 +214,11 @@ function createWindow(state, onTelegramLink, options = {}) {
         let already = false;
         try { already = ses.protocol.isProtocolHandled ? ses.protocol.isProtocolHandled('https') : false; } catch (_) {}
         if (canHandle && !already) {
-            ses.protocol.handle('https', async (request) => {
-                const url = request.url;
-                if (isTelegramWebsyncUrl(url)) return telegramWebsyncNoopResponse();
-                const isTgCandidate = isWebAUrl(url, 'https:');
-                if (!isTgCandidate) {
-                    if (shouldBlockDirectTelegram(url)) return blockedTransportResponse();
-                    return net.fetch(request, { bypassCustomProtocolHandlers: true });
-                }
-                let resp = await fetchTelegramAsset(request, url);
-                resp = await injectTelegramWorkerProxy(resp, url);
-                resp = await injectTelegramExtendedPins(resp, url);
-                resp = await injectTelegramMediaCache(resp, url);
-                resp = await injectTelegramNotifications(resp, url);
-                const ct = (resp.headers.get('content-type') || '').toLowerCase();
-                if (!ct.includes('text/html')) return resp;
-                let body = await resp.text();
-                body = injectExtendedPinsPrelude(body, loadSettings().messages_extended_pins === true);
-                body = body.replace(/<meta[^>]*http-equiv=["']content-security-policy["'][^>]*>/gi, '');
-                body = body.replace(/<meta[^>]*http-equiv=["']content-security-policy-report-only["'][^>]*>/gi, '');
-                body = injectStartupSurface(body, startupTheme(loadSettings()));
-                const headers = new Headers(resp.headers);
-                headers.delete('content-security-policy');
-                headers.delete('content-security-policy-report-only');
-                headers.delete('x-frame-options');
-                headers.delete('content-length');
-                headers.delete('Content-Length');
-                return new Response(body, { status: resp.status, statusText: resp.statusText, headers });
-            });
+            ses.protocol.handle('https', makeTelegramHandler('https:'));
             // Mirror for http (TG may redirect http→https, but cover it)
             try {
                 const httpAlready = ses.protocol.isProtocolHandled ? ses.protocol.isProtocolHandled('http') : false;
-                if (!httpAlready) {
-                    ses.protocol.handle('http', async (request) => {
-                        const url = request.url;
-                        if (isTelegramWebsyncUrl(url)) return telegramWebsyncNoopResponse();
-                        const isTgCandidate = isWebAUrl(url, 'http:');
-                        if (!isTgCandidate) {
-                            if (shouldBlockDirectTelegram(url)) return blockedTransportResponse();
-                            return net.fetch(request, { bypassCustomProtocolHandlers: true });
-                        }
-                        let resp = await fetchTelegramAsset(request, url);
-                        resp = await injectTelegramWorkerProxy(resp, url);
-                        resp = await injectTelegramExtendedPins(resp, url);
-                        resp = await injectTelegramMediaCache(resp, url);
-                        resp = await injectTelegramNotifications(resp, url);
-                        const ct = (resp.headers.get('content-type') || '').toLowerCase();
-                        if (!ct.includes('text/html')) return resp;
-                        let body = await resp.text();
-                        body = injectExtendedPinsPrelude(body, loadSettings().messages_extended_pins === true);
-                        body = body.replace(/<meta[^>]*http-equiv=["']content-security-policy["'][^>]*>/gi, '');
-                        body = body.replace(/<meta[^>]*http-equiv=["']content-security-policy-report-only["'][^>]*>/gi, '');
-                        body = injectStartupSurface(body, startupTheme(loadSettings()));
-                        const headers = new Headers(resp.headers);
-                        headers.delete('content-security-policy');
-                        headers.delete('content-security-policy-report-only');
-                        headers.delete('x-frame-options');
-                        headers.delete('content-length');
-                        headers.delete('Content-Length');
-                        return new Response(body, { status: resp.status, statusText: resp.statusText, headers });
-                    });
-                }
+                if (!httpAlready) ses.protocol.handle('http', makeTelegramHandler('http:'));
             } catch (_) {}
         }
     } catch (e) {

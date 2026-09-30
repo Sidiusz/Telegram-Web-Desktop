@@ -905,7 +905,7 @@ test('startup surface follows the persisted Telegram theme without a blocking ov
     assert.match(win, /function injectStartupSurface\(body, theme\)/);
     assert.doesNotMatch(win, /twd-startup-loader/);
     assert.match(win, /backgroundColor: startupBackground\(startupTheme\(initialSettings\)\)/);
-    assert.match(win, /injectStartupSurface\(body, startupTheme\(loadSettings\(\)\)\)/);
+    assert.match(win, /injectStartupSurface\(body, startupTheme\(settings\)\)/);
     assert.match(bootstrap, /function installStartupThemeSync\(\)/);
     assert.match(bootstrap, /classList\.contains\('theme-dark'\)/);
     assert.match(bootstrap, /appearance_startup_theme:theme/);
@@ -1463,7 +1463,8 @@ test('Telegram notifications are not held hostage by avatar downloads or a missi
     const bootstrap = read('electron/inject/ui/bootstrap.js');
     assert.match(bootstrap, /chatTypeLoad=new Promise\(function\(resolve\)\{\s*\/\/[^\n]*\n\s*setTimeout\(resolve,3000\);/);
     const win = read('electron/window.cjs');
-    assert.equal((win.match(/resp = await injectTelegramNotifications\(resp, url\);/g) || []).length, 2);
+    assert.match(win, /const ASSET_TRANSFORMS = \[[^\]]*injectTelegramNotifications\]/);
+    assert.match(win, /for \(const transform of ASSET_TRANSFORMS\) resp = await transform\(resp, url\);/);
 });
 
 test('inline media load/cancel buttons never open a save-to-disk download card', () => {
@@ -1614,7 +1615,8 @@ test('proxy mode never lets Telegram traffic leave directly', () => {
         delete require.cache[require.resolve('../electron/tg-flowseal-route.cjs')];
     }
     const win = read('electron/window.cjs');
-    assert.equal((win.match(/if \(shouldBlockDirectTelegram\(url\)\) return blockedTransportResponse\(\);/g) || []).length, 2);
+    assert.match(win, /if \(shouldBlockDirectTelegram\(url\)\) return blockedTransportResponse\(\);/);
+    assert.match(win, /protocol\.handle\('https', makeTelegramHandler\('https:'\)\)[\s\S]{0,300}protocol\.handle\('http', makeTelegramHandler\('http:'\)\)/);
     assert.match(read('electron/tg-flowseal-route.cjs'), /if \(shouldBlockDirectTelegram\(details\.url\)\) return callback\(\{ cancel: true \}\);/);
 });
 
