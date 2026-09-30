@@ -2020,3 +2020,25 @@ test('history scrub removes deleted ids like a full clone would, without cloning
     const untouched = state();
     assert.equal(make(new Map([['5', new Set(['100'])]]))(untouched), untouched, 'nothing to scrub returns the same object');
 });
+
+test('notification flags are repaired in memory through Web A, with the IndexedDB scan only as fallback', () => {
+    const src = read('electron/inject/notif-intercept.js');
+    const start = src.indexOf('function repairLiveNotificationFlags(){');
+    const body = src.slice(start, src.indexOf('\n    }\n', start) + 6);
+    const run = (runtime) => new Function('window', body + '\nreturn repairLiveNotificationFlags();')({ __twdTelegramRuntime: runtime });
+    const calls = [];
+    const rt = (byKey, currentUserId = '1', withAction = true) => ({
+        getGlobal: () => ({ currentUserId, settings: { byKey } }),
+        getActions: () => (withAction ? { updateWebNotificationSettings: p => calls.push(p) } : {}),
+    });
+    assert.equal(run(undefined), false);
+    assert.equal(run(rt({ hasWebNotifications: false }, '1', false)), false, 'missing action falls back to IndexedDB');
+    assert.equal(run(rt({ hasWebNotifications: true, hasPushNotifications: false })), true);
+    assert.equal(calls.length, 0, 'healthy flags trigger nothing');
+    assert.equal(run(rt({ hasWebNotifications: false, hasPushNotifications: false }, '')), true);
+    assert.equal(calls.length, 0, 'logged-out state is left alone');
+    assert.equal(run(rt({ hasWebNotifications: false, hasPushNotifications: true })), true);
+    assert.deepEqual(calls, [{ hasWebNotifications: true, hasPushNotifications: false }]);
+    assert.match(src, /if \(!repairLiveNotificationFlags\(\)\) repairTelegramNotificationFlags\(\);/);
+    assert.match(src, /try \{ repairLiveNotificationFlags\(\); \} catch \(_\) \{\}\s*\}, 30000\);/);
+});

@@ -101,6 +101,21 @@
     }
     repairTelegramNotificationFlags();
 
+    // In-session repair through Web A's own action: no IndexedDB read of the multi-MB state and no reload.
+    // Returns false when the patched runtime or the action is unavailable, so the IndexedDB scan takes over.
+    function repairLiveNotificationFlags(){
+        var rt=window.__twdTelegramRuntime;
+        if(!rt||typeof rt.getGlobal!=='function'||typeof rt.getActions!=='function')return false;
+        var actions=rt.getActions();
+        if(!actions||typeof actions.updateWebNotificationSettings!=='function')return false;
+        var g=rt.getGlobal(), byKey=g&&g.settings&&g.settings.byKey;
+        if(!byKey)return false;
+        if(g.currentUserId&&(byKey.hasWebNotifications!==true||byKey.hasPushNotifications!==false)){
+            actions.updateWebNotificationSettings({ hasWebNotifications: true, hasPushNotifications: false });
+        }
+        return true;
+    }
+
     // ── Мост в наш попап ────────────────────────────────────────────────────
     // Состояние TG больше НЕ достать через webpack (TG webZ переехал на Vite —
     // глобальный __webpack_require__ исчез), поэтому старый опрос getGlobal мёртв.
@@ -333,18 +348,19 @@
     // Long-lived desktop sessions are the important case here. Web A may replace its
     // service-worker controller or another script may restore browser globals hours
     // after startup. Keep the hooks self-healing without generating any network traffic.
-    // The slower IndexedDB check repairs Telegram's own persisted notification flags
-    // if a failed browser-push attempt flips them later in the session.
+    // A failed browser-push attempt can flip Telegram's notification flags later in the session;
+    // the 30s tick fixes them in memory, the IndexedDB scan is only the fallback.
     function ensureHealthTimers() {
         if (!window.__twdNotifHealthTimer) {
             window.__twdNotifHealthTimer = setInterval(function() {
                 try { hookServiceWorker(); } catch (_) {}
                 try { if (window.Notification !== NotificationShim) installNotificationShim(); } catch (_) {}
+                try { repairLiveNotificationFlags(); } catch (_) {}
             }, 30000);
         }
         if (!window.__twdNotifStateRepairTimer) {
             window.__twdNotifStateRepairTimer = setInterval(function() {
-                try { repairTelegramNotificationFlags(); } catch (_) {}
+                try { if (!repairLiveNotificationFlags()) repairTelegramNotificationFlags(); } catch (_) {}
             }, 5 * 60 * 1000);
         }
     }
