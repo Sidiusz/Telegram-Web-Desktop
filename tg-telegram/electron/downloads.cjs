@@ -76,7 +76,10 @@ function cancelActive(id) {
 
 function deleteDownload(downloads, id) {
     const item = downloads.find(d => d.id === id);
-    if (item && item.path) {
+    // Only a completed record owns its file; a cancelled/failed one may share the name with a newer download.
+    const key = item && item.path ? path.resolve(item.path).toLowerCase() : '';
+    const shared = key && downloads.some(d => d.id !== id && d.path && path.resolve(d.path).toLowerCase() === key);
+    if (item && item.path && item.status === 'completed' && !shared) {
         try { fs.unlinkSync(item.path); } catch (e) {}
     }
     const updated = downloads.filter(d => d.id !== id);

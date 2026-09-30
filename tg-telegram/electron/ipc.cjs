@@ -6,7 +6,7 @@ const { configureProxySettings, setProxyMode, resetAutoProxy, forceProxyReconnec
 const { getFallbackInfo } = require('./telegram-web-fallback.cjs');
 const { loadDownloads, saveDownloads, deleteDownload, cancelActive } = require('./downloads.cjs');
 const { getAddons, deleteAddon, openAddonsFolder, toggleAddon } = require('./addons.cjs');
-const { uniquePath, sanitizeFilename } = require('./utils.cjs');
+const { uniquePath, reservePath, sanitizeFilename, markFromInternet } = require('./utils.cjs');
 const path = require('path');
 const fs = require('fs');
 const { updateTrayBadge, setTrayLang, setTrayImageFromDataURL, getTrayBaseDataURL } = require('./tray.cjs');
@@ -587,6 +587,7 @@ function registerIpc(getWindow) {
         blobSaveByDownloadId.delete(item.id);
         try { await item.file.close(); } catch (_) {}
         try { await fs.promises.unlink(item.temp); } catch (_) {}
+        item.releasePath();
         const rec = state.downloads.find(d => d.id === item.id);
         if (rec) {
             rec.status = status;
@@ -624,11 +625,13 @@ function registerIpc(getWindow) {
         }
 
         const dest = uniquePath(path.join(dir, safeName));
+        const releasePath = reservePath(dest);
         const temp = dest + '.' + process.pid + '.' + Date.now() + '.twd-part';
         let file;
         try {
             file = await fs.promises.open(temp, 'wx');
         } catch (e) {
+            releasePath();
             return { error: e && e.message ? e.message : 'open-failed' };
         }
 
@@ -643,6 +646,7 @@ function registerIpc(getWindow) {
             file,
             temp,
             dest,
+            releasePath,
             safeName,
             savedName,
             expectedTotal,
@@ -718,12 +722,14 @@ function registerIpc(getWindow) {
         try {
             await item.file.close();
             await fs.promises.rename(item.temp, item.dest);
+            markFromInternet(item.dest);
         } catch (e) {
             await failBlobSave(item, 'failed');
             return { error: e && e.message ? e.message : 'finish-failed' };
         }
 
         item.finished = true;
+        item.releasePath();
         detachBlobSender(item);
         blobSaves.delete(item.streamId);
         blobSaveByDownloadId.delete(item.id);

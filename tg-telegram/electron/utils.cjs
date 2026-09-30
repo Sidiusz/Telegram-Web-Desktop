@@ -2,14 +2,24 @@
 const fs = require('fs');
 const path = require('path');
 
+// Paths of downloads still in flight: they do not exist on disk yet but must not be handed out twice.
+const reservedPaths = new Set();
+function pathKey(p) { return path.resolve(p).toLowerCase(); }
+function isTaken(p) { return reservedPaths.has(pathKey(p)) || fs.existsSync(p); }
+function reservePath(p) {
+    const key = pathKey(p);
+    reservedPaths.add(key);
+    return () => reservedPaths.delete(key);
+}
+
 function uniquePath(p) {
-    if (!fs.existsSync(p)) return p;
+    if (!isTaken(p)) return p;
     const dir = path.dirname(p);
     const ext = path.extname(p);
     const base = path.basename(p, ext);
     for (let i = 1; i < 10000; i++) {
         const cand = path.join(dir, `${base} (${i})${ext}`);
-        if (!fs.existsSync(cand)) return cand;
+        if (!isTaken(cand)) return cand;
     }
     // Never silently fall back to an existing path: callers use this helper for
     // downloads and update installers, where an overwrite is worse than a failure.
@@ -24,9 +34,8 @@ function sanitizeFilename(name) {
     // before joining with the downloads directory.
     s = s.replace(/^\.+/, '').replace(/[. ]+$/, '');
     if (!s) s = 'file';
-    const ext = path.extname(s);
-    const stem = path.basename(s, ext);
-    if (/^(?:con|prn|aux|nul|com[1-9]|lpt[1-9])$/i.test(stem)) s = '_' + s;
+    // Windows maps "NUL.tar.gz" to the device too: check the part before the first dot.
+    if (/^(?:con|prn|aux|nul|com[1-9]|lpt[1-9])$/i.test(s.split('.')[0].trim())) s = '_' + s;
     if (s.length > 180) {
         const finalExt = path.extname(s);
         const base = path.basename(s, finalExt);
@@ -41,4 +50,13 @@ function sanitizePathForDownloads(dir, filename) {
     return uniquePath(path.join(dir, safe));
 }
 
-module.exports = { uniquePath, sanitizeFilename, sanitizePathForDownloads };
+// Mark-of-the-Web so SmartScreen and Office Protected View treat saved Telegram files as downloaded.
+function markFromInternet(file, hostUrl = 'https://web.telegram.org/') {
+    if (process.platform !== 'win32') return false;
+    try {
+        fs.writeFileSync(file + ':Zone.Identifier', `[ZoneTransfer]\r\nZoneId=3\r\nHostUrl=${hostUrl}\r\n`);
+        return true;
+    } catch (_) { return false; }
+}
+
+module.exports = { uniquePath, reservePath, sanitizeFilename, sanitizePathForDownloads, markFromInternet };
