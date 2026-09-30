@@ -1551,6 +1551,26 @@ test('settings saves keep main-owned state and do not re-arm update prompts', ()
     assert.match(updater, /if \(!_downloadInFlight\) \{\s*_downloadInFlight = downloadPendingUpdateOnce\(onProgress\)\.finally/);
 });
 
+test('patched MTProto worker is never stored in the service-worker cache', async () => {
+    const { injectTelegramWorkerProxy } = require('../electron/tg-flowseal-worker.cjs');
+    const url = 'https://web.telegram.org/a/worker-abc.js?__twd_proxy=1&__twd_proxy_channel=__twd_proxy_' + 'a'.repeat(32);
+    const Module = require('node:module');
+    const origLoad = Module._load;
+    Module._load = function (request, ...rest) {
+        if (request === 'electron') return { webContents: { getAllWebContents: () => [] }, net: {} };
+        if (request.endsWith('settings.cjs')) return { loadSettings: () => ({}), saveSettings: () => {} };
+        return origLoad.call(this, request, ...rest);
+    };
+    try {
+        const res = await injectTelegramWorkerProxy(new Response('self.x=1;', { headers: { 'content-type': 'text/javascript' } }), url);
+        assert.equal(res.headers.get('vary'), '*');
+        assert.match(await res.text(), /self\.x=1;/);
+    } finally {
+        Module._load = origLoad;
+    }
+    assert.match(read('electron/inject/ui/bootstrap.js'), /if\(\/__twd_proxy_channel=\/\.test\(k\.url\)\)c\.delete\(k\);/);
+});
+
 test('external link hook never bypasses Telegram link confirmation or double-opens', () => {
     const source = read('electron/inject/external.js');
     const opened = [];

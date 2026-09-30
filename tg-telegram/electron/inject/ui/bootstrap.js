@@ -92,6 +92,13 @@ function installAtomicQrReveal(){
     new MutationObserver(bind).observe(document.documentElement,{childList:true,subtree:true}); bind();
 }
 
+// Older builds let the service worker cache a patched worker copy per launch; drop them.
+try{
+    if(window.caches)caches.open('tt-assets').then(function(c){return c.keys().then(function(keys){
+        keys.forEach(function(k){if(/__twd_proxy_channel=/.test(k.url))c.delete(k);});
+    });}).catch(function(){});
+}catch(_){}
+
 waitBody(()=>{
     installVisualStateSync();
     installAtomicQrReveal();
