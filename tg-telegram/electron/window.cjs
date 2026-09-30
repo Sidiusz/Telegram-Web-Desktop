@@ -9,7 +9,7 @@ const { loadFeatureScripts } = require('./features.cjs');
 const { saveDownloads, trackActive, untrackActive } = require('./downloads.cjs');
 const { loadSettings } = require('./settings.cjs');
 const { uniquePath, reservePath } = require('./utils.cjs');
-const { installFlowsealWsRoute, noteTelegramLoadFailure, isWebFallbackEnabled } = require('./tg-flowseal-route.cjs');
+const { installFlowsealWsRoute, noteTelegramLoadFailure, isWebFallbackEnabled, clearWebFallbackLatch } = require('./tg-flowseal-route.cjs');
 const { fetchTelegramWebAFallback } = require('./telegram-web-fallback.cjs');
 const { injectTelegramWorkerProxy } = require('./tg-flowseal-worker.cjs');
 const { injectTelegramExtendedPins, injectExtendedPinsPrelude } = require('./tg-extended-pins.cjs');
@@ -74,7 +74,19 @@ function createWindow(state, onTelegramLink, options = {}) {
     installFlowsealWsRoute(session.defaultSession, initialSettings);
     let webAMode = initialSettings.proxy_web_fallback !== false && initialSettings.proxy_web_fallback_latched === true
         ? 'fallback' : 'auto';
-    if (webAMode === 'fallback') console.log('[TG-PROXY] Web A fallback pre-armed from previous direct failure');
+    if (webAMode === 'fallback') {
+        console.log('[TG-PROXY] Web A fallback pre-armed from previous direct failure');
+        // A single past failure must not pin the old build forever: re-test the direct route
+        // in the background and let the next launch use it again when it works.
+        setTimeout(async () => {
+            try {
+                const r = await net.fetch(TG_URL, { bypassCustomProtocolHandlers: true, signal: AbortSignal.timeout(10000) });
+                if (r.ok && (r.headers.get('content-type') || '').includes('text/html') && clearWebFallbackLatch()) {
+                    console.log('[TG-PROXY] direct Web A reachable again; next launch will use it');
+                }
+            } catch (_) {}
+        }, 15000).unref?.();
+    }
     let fallbackReloadScheduled = false;
     function isWebAUrl(url, protocol) {
         try {
@@ -110,6 +122,8 @@ function createWindow(state, onTelegramLink, options = {}) {
             if (entry && webAMode === 'auto') webAMode = 'direct';
             return response;
         } catch (e) {
+            // Being offline (boot before Wi-Fi, sleep/wake) says nothing about web.telegram.org being blocked.
+            if (!net.isOnline()) throw e;
             noteTelegramLoadFailure(e && e.message ? e.message : e);
             if (!isWebFallbackEnabled()) throw e;
             webAMode = 'fallback';
@@ -577,6 +591,19 @@ function createWindow(state, onTelegramLink, options = {}) {
             if (!forceQuit && mainWindow && !mainWindow.isDestroyed()) mainWindow.loadURL(TG_URL).catch(() => {});
         }, 300);
     });
+
+    // A failed main-frame load (offline at logon, DNS hiccup) otherwise stays an error page until restart.
+    let loadRetryDelay = 0, loadRetryTimer = null;
+    mainWindow.webContents.on('did-fail-load', (_event, code, description, _url, isMainFrame) => {
+        if (!isMainFrame || code === -3 || forceQuit || !mainWindow || mainWindow.isDestroyed()) return;
+        loadRetryDelay = Math.min(60000, loadRetryDelay ? loadRetryDelay * 2 : 5000);
+        clearTimeout(loadRetryTimer);
+        console.warn(`[WINDOW] Telegram load failed (${code} ${description}); retrying in ${loadRetryDelay / 1000}s`);
+        loadRetryTimer = setTimeout(() => {
+            if (!forceQuit && mainWindow && !mainWindow.isDestroyed()) mainWindow.loadURL(TG_URL).catch(() => {});
+        }, loadRetryDelay);
+    });
+    mainWindow.webContents.on('did-finish-load', () => { loadRetryDelay = 0; });
 
     const emitWindowState = () => {
         if (!mainWindow || mainWindow.isDestroyed()) return;
