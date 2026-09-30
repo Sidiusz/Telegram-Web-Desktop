@@ -322,7 +322,8 @@ function testWs(url, timeoutMs = 6000) {
             if (done) return;
             done = true;
             clearTimeout(timer);
-            try { if (ws.readyState === WebSocket.OPEN) ws.close(1000, 'test'); } catch (_) {}
+            // A still-connecting socket must be aborted too, or it opens later and stays open.
+            try { ws.close(1000, 'test'); } catch (_) {}
             resolve({ ok, error });
         };
         let ws;

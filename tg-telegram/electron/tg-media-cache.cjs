@@ -26,7 +26,7 @@ function patchTelegramMediaCache(body) {
 
     const getterFn = getter[1];
     const cacheVar = getter[2];
-    const setPattern = new RegExp(`${escapeRegex(cacheVar)}\\.set\\(`, 'g');
+    const setPattern = new RegExp(`(?<![\\w$.])${escapeRegex(cacheVar)}\\.set\\(`, 'g');
     const setterCount = (source.match(setPattern) || []).length;
     if (setterCount < 2) return { body: source, patched: false };
 
