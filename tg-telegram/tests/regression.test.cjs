@@ -412,6 +412,79 @@ test('proxy cooldown suppresses failed domains while healthy routes exist', () =
     assert.equal(DEFAULT_COOLDOWN_MS, 45_000);
 });
 
+test('proxy stall watchdog fires only for a frame frozen mid-transfer', async () => {
+    const { WebSocketServer, WebSocket } = require('ws');
+    const { watchFrameStall } = require('../electron/tg-flowseal-health.cjs');
+    const server = new WebSocketServer({ port: 0, host: '127.0.0.1' });
+    await new Promise(r => server.once('listening', r));
+    const peers = [];
+    server.on('connection', ws => peers.push(ws));
+    const url = `ws://127.0.0.1:${server.address().port}`;
+    const connect = async () => {
+        const ws = new WebSocket(url);
+        await new Promise((r, j) => { ws.once('open', r); ws.once('error', j); });
+        await new Promise(r => setTimeout(r, 30));
+        return { ws, peer: peers[peers.length - 1] };
+    };
+    try {
+        const idle = await connect();
+        let idleStalled = false;
+        const stopIdle = watchFrameStall(idle.ws, { stallMs: 150, checkMs: 30, onStall: () => { idleStalled = true; } });
+        idle.peer.send(Buffer.alloc(64 * 1024));
+        await new Promise(r => setTimeout(r, 400));
+        assert.equal(idleStalled, false, 'a quiet socket between frames is healthy');
+        stopIdle();
+
+        const frozen = await connect();
+        let stalledAfter = 0;
+        watchFrameStall(frozen.ws, { stallMs: 150, checkMs: 30, onStall: ms => { stalledAfter = ms; } });
+        const header = Buffer.from([0x82, 127, 0, 0, 0, 0, 0, 0x10, 0, 0]);
+        frozen.peer._socket.write(Buffer.concat([header, Buffer.alloc(16 * 1024)]));
+        await new Promise(r => setTimeout(r, 450));
+        assert.ok(stalledAfter >= 150, 'a frame that stops arriving must be reported');
+        idle.ws.terminate(); frozen.ws.terminate();
+    } finally {
+        await new Promise(r => server.close(r));
+    }
+});
+
+test('proxy upstream opening is hedged instead of racing every domain', async () => {
+    const { EventEmitter } = require('node:events');
+    const { hedgedOpen, rotateCandidates } = require('../electron/tg-flowseal-health.cjs');
+    assert.deepEqual(rotateCandidates(['a', 'b', 'c', 'd', 'e'], 1, 4), ['b', 'c', 'd', 'a', 'e']);
+    assert.deepEqual(rotateCandidates(['a', 'b', 'c', 'd', 'e'], 4, 4), ['a', 'b', 'c', 'd', 'e']);
+    assert.deepEqual(rotateCandidates(['a'], 3, 4), ['a']);
+
+    const started = [];
+    const fake = behavior => candidate => {
+        const s = new EventEmitter();
+        s.terminate = () => { s.terminated = true; };
+        started.push({ domain: candidate.domain, at: Date.now(), s });
+        behavior(candidate, s);
+        return s;
+    };
+    const t0 = Date.now();
+    const opened = await hedgedOpen(
+        ['slow', 'dead', 'good', 'unused'].map(domain => ({ domain })),
+        fake((c, s) => {
+            if (c.domain === 'dead') setTimeout(() => s.emit('error', new Error('refused')), 10);
+            if (c.domain === 'good') setTimeout(() => s.emit('open'), 20);
+        }),
+        { hedgeMs: 120, maxInFlight: 2, timeoutMs: 2000 }
+    );
+    assert.equal(opened.candidate.domain, 'good');
+    assert.deepEqual(started.map(x => x.domain), ['slow', 'dead', 'good']);
+    assert.ok(started[1].at - t0 >= 100, 'second route waits for the hedge delay');
+    assert.ok(started[2].at - started[1].at < 80, 'a failed route immediately hands over to the next one');
+    assert.equal(started[0].s.terminated, true, 'losing sockets are closed');
+
+    started.length = 0;
+    await assert.rejects(
+        hedgedOpen([{ domain: 'x' }, { domain: 'y' }], fake((c, s) => setTimeout(() => s.emit('error', new Error('nope')), 5)), { hedgeMs: 1000 }),
+        /x: nope; y: nope/
+    );
+});
+
 test('proxy health does not add heartbeat traffic and validates routes by MTProto response', () => {
     const bridge = read('electron/tg-flowseal-bridge.cjs');
     assert.doesNotMatch(bridge, /\.ping\s*\(/);
@@ -425,17 +498,18 @@ test('proxy health does not add heartbeat traffic and validates routes by MTProt
     assert.match(bridge, /reportBridgePreferredDomain\(upstreamCandidate\.domain, true\)/);
     assert.match(bridge, /clearBridgePreferredDomain\(domain, media\)/);
     assert.match(bridge, /MEDIA_SLOW_RESPONSE_MS = 3_000/);
-    assert.match(bridge, /MEDIA_RESPONSE_TIMEOUT_MS = 6_000/);
-    assert.match(bridge, /MEDIA_THROUGHPUT_SAMPLE_BYTES = 128 \* 1024/);
-    assert.match(bridge, /MEDIA_MIN_THROUGHPUT_BPS = 96 \* 1024/);
-    assert.match(bridge, /MEDIA_THROUGHPUT_WINDOW_MS = 4_000/);
+    assert.match(bridge, /MEDIA_RESPONSE_TIMEOUT_MS = 10_000/);
+    assert.match(bridge, /FRAME_STALL_MS = 12_000/);
+    // Idle media sockets (acks without replies) must never be treated as slow routes.
+    assert.doesNotMatch(bridge, /THROUGHPUT|startMediaSample|slow media throughput/);
+    assert.match(bridge, /watchFrameStall\(upstream,/);
+    assert.match(bridge, /hedgedOpen\(candidates,/);
+    assert.doesNotMatch(bridge, /index \* 75/);
+    assert.match(bridge, /rotateCandidates\(candidates, mediaSpreadCursor\+\+, MEDIA_SPREAD_WIDTH\)/);
     assert.match(bridge, /finishControlProbe\(\)/);
     assert.match(bridge, /control first response timeout/);
     assert.match(bridge, /cfg\.avoidControlDomain/);
-    assert.match(bridge, /finishMediaProbe\(raw\.length\)/);
-    assert.match(bridge, /finishMediaSample\('window'\)/);
-    assert.match(bridge, /else if \(!mediaSampleActive\) startMediaSample\(0\)/);
-    assert.match(bridge, /slow media throughput/);
+    assert.match(bridge, /finishMediaProbe\(\)/);
     assert.match(bridge, /mediaUpstreamHealth\.markSuccess\(upstreamCandidate\.domain\)/);
     assert.match(bridge, /slow media first response/);
     assert.match(bridge, /media first response timeout/);
@@ -448,6 +522,9 @@ test('proxy health does not add heartbeat traffic and validates routes by MTProt
     assert.match(route, /preferredMediaDomain/);
     assert.match(route, /reportBridgePreferredDomain/);
     assert.match(route, /clearBridgePreferredDomain/);
+    // electron-store rewrites the file per key; proxy bookkeeping must save only changed keys.
+    assert.doesNotMatch(route, /saveSettings\(Object\.assign\(\{\}, (?:s|loadSettings\(\))/);
+    assert.match(bridge, /if \(!getProxyBootstrap\(\)\.preferredMediaDomain\) reportBridgePreferredDomain/);
     assert.match(ipc, /proxyConfigChanged/);
     assert.match(ipc, /if \(proxyConfigChanged\) configureProxySettings/);
 });

@@ -100,8 +100,7 @@ function reportBridgePreferredDomain(domain, media = false) {
     const key = media ? 'proxy_last_good_media_domain' : 'proxy_last_good_control_domain';
     if (state[field] === d) return;
     state[field] = d;
-    const s = loadSettings();
-    saveSettings(Object.assign({}, s, { [key]: d }));
+    saveSettings({ [key]: d });
 }
 function clearBridgePreferredDomain(domain, media = false) {
     const d = String(domain || '').trim().toLowerCase();
@@ -109,8 +108,7 @@ function clearBridgePreferredDomain(domain, media = false) {
     const key = media ? 'proxy_last_good_media_domain' : 'proxy_last_good_control_domain';
     if (!d || state[field] !== d) return;
     state[field] = '';
-    const s = loadSettings();
-    saveSettings(Object.assign({}, s, { [key]: '' }));
+    saveSettings({ [key]: '' });
 }
 function reportBridgeError(dc, error) {
     state.lastDc = Number(dc) || state.lastDc;
@@ -200,8 +198,8 @@ function configureProxySettings(settings) {
     return getProxyStatus();
 }
 function persist(patch) {
-    const s = Object.assign({}, loadSettings(), patch);
-    saveSettings(s);
+    saveSettings(patch);
+    const s = loadSettings();
     applySettings(s);
     state.cursor.clear();
     broadcastProxyState();
@@ -277,8 +275,7 @@ function updateProxyOptions(options) {
     state.autoLatched = true;
     state.autoReason = reason || 'direct-ws-failed';
     state.lastRoute = 'cf';
-    const s = loadSettings();
-    saveSettings(Object.assign({}, s, { proxy_mode: 'auto', proxy_auto_latched: true }));
+    saveSettings({ proxy_mode: 'auto', proxy_auto_latched: true });
     console.warn(`[TG-PROXY] auto switched to embedded proxy (${state.autoReason})`);
     broadcastProxyState();
     if (state.domainSource === 'flowseal') refreshFlowsealDomains().catch(() => {});
@@ -411,8 +408,7 @@ function noteTelegramLoadFailure(error) {
     state.lastError = error ? String(error) : 'Telegram page load failed';
     if (state.webFallback && !state.webFallbackLatched) {
         state.webFallbackLatched = true;
-        const s = loadSettings();
-        saveSettings(Object.assign({}, s, { proxy_web_fallback_latched: true }));
+        saveSettings({ proxy_web_fallback_latched: true });
         console.warn('[TG-PROXY] Web A direct path marked unavailable; fallback will be used on next start');
     }
     const justActivated = state.mode === 'auto' && !state.autoLatched
