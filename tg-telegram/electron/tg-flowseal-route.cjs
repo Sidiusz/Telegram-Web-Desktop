@@ -308,6 +308,22 @@ function getProxyStatus() {
     };
 }
 function isWebFallbackEnabled() { return state.webFallback; }
+// Proxy mode is fail-closed: MTProto must never leave directly (WebSocket or Web A's HTTP /apiw1 fallback).
+let lastBlockLogAt = 0;
+function shouldBlockDirectTelegram(urlString) {
+    if (!isProxyActive()) return false;
+    let blocked = false;
+    try {
+        const u = new URL(urlString);
+        blocked = !!dcFromTelegramWsHost(u.hostname) &&
+            (u.protocol === 'wss:' || u.protocol === 'ws:' || u.pathname.startsWith('/apiw'));
+    } catch (_) {}
+    if (blocked && Date.now() - lastBlockLogAt > 30000) {
+        lastBlockLogAt = Date.now();
+        console.warn(`[TG-PROXY] blocked direct Telegram connection in proxy mode: ${String(urlString).split('?')[0]}`);
+    }
+    return blocked;
+}
 function clearWebFallbackLatch() {
     if (!state.webFallbackLatched) return false;
     state.webFallbackLatched = false;
@@ -362,6 +378,7 @@ function installFlowsealWsRoute(ses, initialSettings) {
     applySettings(initialSettings || loadSettings());
     const wr = ses.webRequest;
     wr.onBeforeRequest({ urls: ['wss://*/*', 'ws://*/*'] }, (details, callback) => {
+        if (shouldBlockDirectTelegram(details.url)) return callback({ cancel: true });
         try {
             const u = new URL(details.url);
             const directDc = dcFromTelegramWsHost(u.hostname);
@@ -426,7 +443,7 @@ function noteTelegramLoadFailure(error) {
 module.exports = {
     installFlowsealWsRoute, configureProxySettings, setProxyMode, resetAutoProxy, forceProxyReconnect,
     updateProxyOptions, getProxyStatus, getProxyBootstrap, noteTelegramLoadFailure,
-    refreshFlowsealDomains, testProxyConnectivity, isWebFallbackEnabled, clearWebFallbackLatch,
+    refreshFlowsealDomains, testProxyConnectivity, isWebFallbackEnabled, clearWebFallbackLatch, shouldBlockDirectTelegram,
     dcFromTelegramWsHost, DEFAULT_CF_BASE_DOMAINS, DC_IPS,
     setBridgeEndpoint, reportBridgeRoute, reportBridgeError,
     reportBridgePreferredDomain, clearBridgePreferredDomain,
