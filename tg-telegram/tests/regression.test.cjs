@@ -1582,6 +1582,17 @@ test('a notification arriving during the last fade-out re-shows the popup', () =
     assert.match(popup, /_win\.setShape\(\[\{ x: 0, y: STACK_HEIGHT - height, width: WIDTH, height \}\]\);[\s\S]{0,200}if \(!_win\.isVisible\(\) && process\.env\.TWD_SMOKE_HIDDEN !== '1'\) _win\.showInactive\(\);/);
 });
 
+test('main process survives late download events and cleans interrupted blob saves', () => {
+    const win = read('electron/window.cjs');
+    const ipc = read('electron/ipc.cjs');
+    assert.doesNotMatch(win, /mainWindow\.webContents\.send\('download-event'/);
+    assert.match(win, /function sendDownloadEvent\(payload\) \{\s*const win = getWindow\(\);/);
+    assert.match(win, /webContents\.on\('console-message', \(event\) => \{\s*const message = String\(event\.message \|\| ''\);/);
+    assert.match(ipc, /event\.sender\.once\('render-process-gone', item\.senderDestroyedHandler\);/);
+    assert.match(ipc, /event\.sender\.on\('did-start-navigation', item\.senderNavigationHandler\);/);
+    assert.match(ipc, /item\.sender\.removeListener\('did-start-navigation', item\.senderNavigationHandler\)/);
+});
+
 test('every injected script compiles exactly as it is shipped', () => {
     const Module = require('node:module');
     const origLoad = Module._load;
