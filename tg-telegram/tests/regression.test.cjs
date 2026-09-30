@@ -1965,3 +1965,58 @@ test('package and lockfile versions stay in sync', () => {
     assert.equal(lock.version, pkg.version);
     assert.equal(lock.packages[''].version, pkg.version);
 });
+
+test('history scrub removes deleted ids like a full clone would, without cloning or mutating the saved state', () => {
+    const src = read('electron/preload.js');
+    const body = src.slice(src.indexOf('function historyScrubState(value) {'), src.indexOf('function historyScrubPersisted() {'));
+    assert.doesNotMatch(body, /structuredClone/);
+    const make = new Function('historyDeletedByChat', body + '\nreturn historyScrubState;');
+    const reference = (deleted, value) => {
+        const copy = structuredClone(value);
+        let changed = false;
+        deleted.forEach((ids, chatId) => {
+            const bucket = copy.messages.byChatId[chatId];
+            if (!bucket) return;
+            ids.forEach((mid) => {
+                for (const field of ['byId', 'ephemeralById']) {
+                    if (bucket[field] && Object.prototype.hasOwnProperty.call(bucket[field], mid)) { delete bucket[field][mid]; changed = true; }
+                }
+            });
+            Object.values(bucket.threadsById || {}).forEach((thread) => {
+                if (!thread) return;
+                const local = thread.localState || {};
+                ['listedIds', 'lastViewportIds', 'pinnedIds'].forEach((name) => {
+                    if (!Array.isArray(local[name])) return;
+                    const next = local[name].filter(id => !ids.has(String(id)));
+                    if (next.length !== local[name].length) { local[name] = next; changed = true; }
+                });
+                if (thread.threadInfo && ids.has(String(thread.threadInfo.lastMessageId))) { thread.threadInfo.lastMessageId = undefined; changed = true; }
+            });
+        });
+        return changed ? copy : value;
+    };
+    const state = () => ({
+        settings: { byKey: { a: 1 } },
+        messages: { byChatId: {
+            '5': { byId: { 1: { id: 1 }, 2: { id: 2 }, 3: { id: 3 } }, ephemeralById: { 3: { id: 3 } },
+                threadsById: { '-1': { localState: { listedIds: [1, 2, 3], lastViewportIds: [2, 3], pinnedIds: [9] }, threadInfo: { lastMessageId: 3 } }, '7': null } },
+            '6': { byId: { 4: { id: 4 } }, threadsById: { '-1': { threadInfo: { lastMessageId: 4 } } } },
+        } },
+    });
+    const cases = [
+        new Map([['5', new Set(['3'])]]),
+        new Map([['5', new Set(['2', '9'])], ['6', new Set(['4'])]]),
+        new Map([['5', new Set(['100'])]]),
+        new Map([['404', new Set(['1'])]]),
+        new Map(),
+    ];
+    for (const deleted of cases) {
+        const input = state();
+        const snapshot = structuredClone(input);
+        const out = make(deleted)(input);
+        assert.deepEqual(input, snapshot, 'the live state passed to put is never mutated');
+        assert.deepEqual(out, reference(deleted, state()));
+    }
+    const untouched = state();
+    assert.equal(make(new Map([['5', new Set(['100'])]]))(untouched), untouched, 'nothing to scrub returns the same object');
+});

@@ -169,42 +169,54 @@ try {
                     timestamp: current.timestamp
                 });
             }
+            // Copy-on-write along changed paths only: tt-global-state is megabytes and is saved often.
             function historyScrubState(value) {
                 if (!value || !value.messages || !value.messages.byChatId || !historyDeletedByChat.size) return value;
-                let copy;
-                try { copy = structuredClone(value); } catch (_) { return value; }
-                let changed = false;
+                const has = (obj, key) => !!obj && Object.prototype.hasOwnProperty.call(obj, key);
+                let byChatId = null;
                 historyDeletedByChat.forEach((ids, chatId) => {
-                    const bucket = copy.messages && copy.messages.byChatId && copy.messages.byChatId[chatId];
+                    const bucket = value.messages.byChatId[chatId];
                     if (!bucket) return;
-                    ids.forEach((mid) => {
-                        if (bucket.byId && Object.prototype.hasOwnProperty.call(bucket.byId, mid)) {
-                            delete bucket.byId[mid];
-                            changed = true;
-                        }
-                        if (bucket.ephemeralById && Object.prototype.hasOwnProperty.call(bucket.ephemeralById, mid)) {
-                            delete bucket.ephemeralById[mid];
-                            changed = true;
-                        }
+                    let nextBucket = null;
+                    const editBucket = () => nextBucket || (nextBucket = Object.assign({}, bucket));
+                    ['byId', 'ephemeralById'].forEach((field) => {
+                        let out = null;
+                        ids.forEach((mid) => {
+                            if (!has(bucket[field], mid)) return;
+                            if (!out) out = Object.assign({}, bucket[field]);
+                            delete out[mid];
+                        });
+                        if (out) editBucket()[field] = out;
                     });
-                    Object.values(bucket.threadsById || {}).forEach((thread) => {
+                    let threads = null;
+                    Object.keys(bucket.threadsById || {}).forEach((threadId) => {
+                        const thread = bucket.threadsById[threadId];
                         if (!thread) return;
                         const local = thread.localState || {};
+                        let nextThread = null, nextLocal = null;
                         ['listedIds','lastViewportIds','pinnedIds'].forEach((name) => {
                             if (!Array.isArray(local[name])) return;
-                            const next = local[name].filter((id) => !ids.has(String(id)));
-                            if (next.length !== local[name].length) {
-                                local[name] = next;
-                                changed = true;
-                            }
+                            const kept = local[name].filter((id) => !ids.has(String(id)));
+                            if (kept.length === local[name].length) return;
+                            if (!nextLocal) nextLocal = Object.assign({}, local);
+                            nextLocal[name] = kept;
                         });
+                        if (nextLocal) nextThread = Object.assign({}, thread, { localState: nextLocal });
                         if (thread.threadInfo && ids.has(String(thread.threadInfo.lastMessageId))) {
-                            thread.threadInfo.lastMessageId = undefined;
-                            changed = true;
+                            nextThread = nextThread || Object.assign({}, thread);
+                            nextThread.threadInfo = Object.assign({}, thread.threadInfo, { lastMessageId: undefined });
                         }
+                        if (!nextThread) return;
+                        if (!threads) threads = Object.assign({}, bucket.threadsById);
+                        threads[threadId] = nextThread;
                     });
+                    if (threads) editBucket().threadsById = threads;
+                    if (!nextBucket) return;
+                    if (!byChatId) byChatId = Object.assign({}, value.messages.byChatId);
+                    byChatId[chatId] = nextBucket;
                 });
-                return changed ? copy : value;
+                if (!byChatId) return value;
+                return Object.assign({}, value, { messages: Object.assign({}, value.messages, { byChatId }) });
             }
             function historyScrubPersisted() {
                 if (!historyConfig || (!historyConfig.showDeleted && !historyConfig.showDisappearing) || !historyDeletedByChat.size) return;
