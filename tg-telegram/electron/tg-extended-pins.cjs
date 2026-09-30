@@ -1,15 +1,5 @@
 'use strict';
-
-function transformedJsResponse(response, body) {
-    const headers = new Headers(response.headers);
-    headers.set('content-type', 'text/javascript; charset=utf-8');
-    headers.set('cache-control', 'no-store, no-cache, must-revalidate');
-    headers.set('pragma', 'no-cache');
-    headers.delete('content-length');
-    headers.delete('content-encoding');
-    headers.delete('content-security-policy');
-    return new Response(body, { status: response.status, statusText: response.statusText, headers });
-}
+const { transformedJsResponse } = require('./tg-bundle-patch.cjs');
 
 function patchToggleAction(body) {
     const marker = '`toggleChatPinned`';

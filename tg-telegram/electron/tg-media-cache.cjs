@@ -1,16 +1,6 @@
+const { transformedJsResponse } = require('./tg-bundle-patch.cjs');
 const MEDIA_CHUNK_RE = /\/assets\/Checkbox-[^/]+\.js$/i;
 const MEDIA_MARKER = 'Failed to fetch media';
-
-function transformedJsResponse(response, body) {
-    const headers = new Headers(response.headers);
-    headers.set('content-type', 'text/javascript; charset=utf-8');
-    headers.set('cache-control', 'no-store, no-cache, must-revalidate');
-    headers.set('pragma', 'no-cache');
-    headers.delete('content-length');
-    headers.delete('content-encoding');
-    headers.delete('content-security-policy');
-    return new Response(body, { status: response.status, statusText: response.statusText, headers });
-}
 
 function escapeRegex(value) {
     return String(value).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');

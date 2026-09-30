@@ -1,4 +1,5 @@
 'use strict';
+const { transformedJsResponse } = require('./tg-bundle-patch.cjs');
 const fs = require('fs');
 const path = require('path');
 
@@ -22,19 +23,6 @@ function patchTelegramPrivacy(body) {
         body: body.slice(0, match.index) + guarded + body.slice(match.index + original.length),
         patched: true,
     };
-}
-
-function transformedJsResponse(response, body) {
-    const headers = new Headers(response.headers);
-    headers.set('content-type', 'text/javascript; charset=utf-8');
-    headers.set('cache-control', 'no-store, no-cache, must-revalidate');
-    headers.set('pragma', 'no-cache');
-    headers.delete('content-length');
-    headers.delete('content-encoding');
-    headers.delete('content-security-policy');
-    // The per-launch channel makes every URL unique; Vary:* stops the SW caching a copy (with its token) per launch.
-    headers.set('vary', '*');
-    return new Response(body, { status: response.status, statusText: response.statusText, headers });
 }
 
 function workerProxyChannel(urlString) {
@@ -79,7 +67,8 @@ async function injectTelegramWorkerProxy(response, urlString) {
     // The transformed worker contains our current routing/privacy runtime. Never persist it
     // across app versions; Telegram's original worker may still be cached normally.
     console.log('[TG-PROXY] wrapped Telegram MTProto WebSocket transport');
-    return transformedJsResponse(response, runtime + '\n' + body);
+    // The per-launch channel makes every URL unique; Vary:* stops the SW caching a copy (with its token) per launch.
+    return transformedJsResponse(response, runtime + '\n' + body, { vary: '*' });
 }
 
 module.exports = {

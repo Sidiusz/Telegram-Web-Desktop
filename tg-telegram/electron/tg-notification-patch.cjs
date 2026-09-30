@@ -1,19 +1,8 @@
 'use strict';
-
+const { transformedJsResponse } = require('./tg-bundle-patch.cjs');
 const NOTIFY_CHUNK_RE = /\/assets\/lock-[^/]+\.js$/i;
 const NOTIFY_MARKER = 'showMessageNotification';
 const ICON_WAIT_MS = 1500;
-
-function transformedJsResponse(response, body) {
-    const headers = new Headers(response.headers);
-    headers.set('content-type', 'text/javascript; charset=utf-8');
-    headers.set('cache-control', 'no-store, no-cache, must-revalidate');
-    headers.set('pragma', 'no-cache');
-    headers.delete('content-length');
-    headers.delete('content-encoding');
-    headers.delete('content-security-policy');
-    return new Response(body, { status: response.status, statusText: response.statusText, headers });
-}
 
 // Web A downloads the chat avatar before it emits a message notification. A stalled
 // media route or an evicted avatar would otherwise hold every later notification forever.
