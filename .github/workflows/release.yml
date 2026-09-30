@@ -1,0 +1,83 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - '[0-9]+.[0-9]+.[0-9]+'
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: tg-telegram/package-lock.json
+
+      - name: Install dependencies
+        working-directory: tg-telegram
+        run: npm ci
+      - name: Verify version
+        shell: powershell
+        run: |
+          $version = $env:GITHUB_REF_NAME
+          $packageVersion = (Get-Content "tg-telegram/package.json" -Raw | ConvertFrom-Json).version
+          if ($packageVersion -ne $version) {
+            throw "Tag $version does not match package version $packageVersion"
+          }
+
+      - name: Run regression tests
+        working-directory: tg-telegram
+        run: npm test
+
+      - name: Build release installer
+        working-directory: tg-telegram
+        run: npx electron-builder --publish never
+
+      - name: Publish GitHub release
+        shell: powershell
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $version = $env:GITHUB_REF_NAME
+          $source = "tg-telegram/dist/Telegram Web Desktop Setup $version.exe"
+          $installer = "tg-telegram/dist/Telegram.Web.Desktop.Setup.$version.exe"
+          $notes = ".github/release-notes/$version.md"
+          $headers = @{
+            Authorization = "Bearer $env:GH_TOKEN"
+            Accept = 'application/vnd.github+json'
+            'X-GitHub-Api-Version' = '2022-11-28'
+          }
+          $releaseId = $null
+          try {
+            $existing = Invoke-RestMethod -Headers $headers -Uri "https://api.github.com/repos/$env:GITHUB_REPOSITORY/releases/tags/$version"
+            $releaseId = $existing.id
+          } catch {
+            $status = $_.Exception.Response.StatusCode.value__
+            if ($status -ne 404) { throw }
+          }
+          if ($releaseId) {
+            if (Test-Path $notes) {
+              $payloadPath = Join-Path $env:RUNNER_TEMP 'release-notes.json'
+              $notesText = [IO.File]::ReadAllText((Resolve-Path $notes), [Text.Encoding]::UTF8)
+              $payload = @{ name = $version; body = $notesText; draft = $false; prerelease = $false } | ConvertTo-Json -Compress
+              [IO.File]::WriteAllText($payloadPath, $payload, [Text.UTF8Encoding]::new($false))
+              gh api --method PATCH "repos/$env:GITHUB_REPOSITORY/releases/$releaseId" --input $payloadPath | Out-Null
+              if ($LASTEXITCODE -ne 0) { throw "Failed to update release $version notes" }
+            }
+          } else {
+            Copy-Item $source $installer -Force
+            if (Test-Path $notes) {
+              gh release create $version $installer --title $version --notes-file $notes --verify-tag --latest
+            } else {
+              gh release create $version $installer --title $version --generate-notes --verify-tag --latest
+            }
+          }

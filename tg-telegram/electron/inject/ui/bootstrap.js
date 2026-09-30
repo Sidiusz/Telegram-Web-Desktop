@@ -1,0 +1,991 @@
+function tryInject(){ensureCSS();ensureToast();ensureCornerWrap();ensurePanels();}
+
+// Иконка трея с числом непрочитанных: базовый логотип + небольшой красный бейдж
+// в правом-нижнем углу (≈половина размера иконки). SVG→nativeImage в main не
+// растеризуется — рисуем PNG на canvas. Базовый логотип берём из main один раз.
+var _trayBaseImg=null;
+try{ INV('get_tray_base').then(function(d){ if(d){ var im=new Image(); im.onload=function(){_trayBaseImg=im;}; im.src=d; } }).catch(function(){}); }catch(e){}
+function makeTrayPng(count){
+    try{
+        var label=count>99?'99+':String(count);
+        var S=64, c=document.createElement('canvas'); c.width=S; c.height=S;
+        var x=c.getContext('2d');
+        if(_trayBaseImg) x.drawImage(_trayBaseImg,0,0,S,S);     // логотип на всю площадь
+        // Бейдж: круг радиусом ~30% иконки, прижат к правому-нижнему углу.
+        var r=Math.round(S*0.30), cx=S-r-1, cy=S-r-1;
+        x.beginPath(); x.arc(cx,cy,r+2,0,Math.PI*2); x.fillStyle='rgba(0,0,0,.55)'; x.fill();  // тонкая тёмная окантовка
+        x.beginPath(); x.arc(cx,cy,r,0,Math.PI*2); x.fillStyle='#6B6B6B'; x.fill();   // серый, как нативный бейдж Electron
+        x.fillStyle='#fff'; x.textAlign='center'; x.textBaseline='middle';
+        x.font='900 '+(label.length>=3?16:24)+'px "Arial Black",Arial,sans-serif';
+        x.fillText(label,cx,cy+1);
+        return c.toDataURL('image/png');
+    }catch(e){return null;}
+}
+function waitBody(cb){if(document.body)cb();else{const t=setInterval(()=>{if(document.body){clearInterval(t);cb();}},50);}}
+
+function installStartupThemeSync(){
+    if(window.__twdStartupThemeSync)return;window.__twdStartupThemeSync=true;
+    let last='';
+    const sync=()=>{
+        const root=document.documentElement;
+        const theme=root.classList.contains('theme-dark')?'dark':(root.classList.contains('theme-light')?'light':'');
+        if(!theme||theme===last)return;
+        last=theme;
+        INV('save_settings',{settings:{appearance_startup_theme:theme}}).catch(()=>{});
+    };
+    new MutationObserver(sync).observe(document.documentElement,{attributes:true,attributeFilter:['class']});
+    sync();
+}
+
+function installVisualStateSync(){
+    if(window.__twdVisualStateSync)return;window.__twdVisualStateSync=true;
+    window.__twdVisualActive=true;
+    const apply=(state)=>{
+        const active=!!(state&&state.visible&&!state.minimized);
+        if(window.__twdVisualActive===active)return;
+        window.__twdVisualActive=active;
+        window.dispatchEvent(new CustomEvent('__twd_window_state',{detail:{active}}));
+    };
+    try{ INV('get_window_state').then(apply).catch(()=>{}); }catch(_){}
+    try{ if(window.tgBridge&&typeof window.tgBridge.onWindowStateChanged==='function')window.tgBridge.onWindowStateChanged(apply); }catch(_){}
+}
+
+function installProxyStallRecovery(){
+    if(window.__twdProxyStallRecovery)return;window.__twdProxyStallRecovery=true;
+    let waitingSince=0,lastKick=0;
+    setInterval(async()=>{
+        const status=document.querySelector('.MiddleHeader .info .status, .MiddleHeader .status');
+        const text=(status&&status.textContent||'').trim();
+        const waiting=/ожидание сети|waiting for network/i.test(text);
+        if(!waiting||navigator.onLine===false){waitingSince=0;return;}
+        const now=Date.now();if(!waitingSince){waitingSince=now;return;}
+        if(now-waitingSince<12000||now-lastKick<60000)return;
+        try{
+            const ps=await INV('get_proxy_status');
+            if(ps&&ps.active){lastKick=now;waitingSince=now;await INV('reconnect_proxy');}
+        }catch(e){}
+    },1000);
+}
+
+function installAtomicQrReveal(){
+    if(document.getElementById('_twd_qr_atomic_css_')) return;
+    const style=document.createElement('style'); style.id='_twd_qr_atomic_css_';
+    style.textContent='#auth-qr-form .qr-inner._twd_qr_wait_{visibility:hidden!important;}';
+    (document.head||document.documentElement).appendChild(style);
+    let bound=null, boundObserver=null, seq=0;
+    const bind=()=>{
+        const inner=document.querySelector('#auth-qr-form .qr-inner');
+        const qr=inner&&inner.querySelector('.qr-container');
+        if(!inner||!qr||qr===bound) return;
+        if(boundObserver){boundObserver.disconnect();boundObserver=null;}
+        bound=qr; inner.classList.add('_twd_qr_wait_');
+        const sync=()=>{
+            const n=++seq, svg=qr.querySelector('svg');
+            const ready=!!svg && svg.querySelectorAll('*').length>100;
+            if(!ready){inner.classList.add('_twd_qr_wait_');return;}
+            requestAnimationFrame(()=>requestAnimationFrame(()=>{
+                if(n===seq && qr.querySelector('svg')?.querySelectorAll('*').length>100) inner.classList.remove('_twd_qr_wait_');
+            }));
+        };
+        boundObserver=new MutationObserver(sync);boundObserver.observe(qr,{childList:true,subtree:true}); sync();
+    };
+    new MutationObserver(bind).observe(document.documentElement,{childList:true,subtree:true}); bind();
+}
+
+waitBody(()=>{
+    installVisualStateSync();
+    installAtomicQrReveal();
+    installStartupThemeSync();
+    installProxyStallRecovery();
+    tryInject();
+    new MutationObserver(tryInject).observe(document.body,{childList:true,subtree:false});
+    
+    // Reactively inject only when Telegram mounts menu/settings-related nodes.
+    // A slow repair pass remains as a safety net, but normal chat mutations no longer
+    // wake the settings injectors every 40ms or every 500ms.
+    let _injT=null;
+    const _injectionNodeRelevant=(node)=>{
+        if(!node||node.nodeType!==1)return false;
+        const sel='.bubble.menu-container,#Settings,.settings-main-scroll,.icon-saved-messages,.icon-settings-filled';
+        try{return node.matches(sel)||!!node.querySelector(sel);}catch(_){return false;}
+    };
+    const _runUiInject=()=>{
+        if(window.__twdVisualActive===false)return;
+        injectMenu();injectSettingsRows();
+    };
+    const _stObs=new MutationObserver((mutations)=>{
+        if(window.__twdVisualActive===false||_injT)return;
+        let relevant=false;
+        for(const m of mutations){
+            for(const node of m.addedNodes){if(_injectionNodeRelevant(node)){relevant=true;break;}}
+            if(relevant)break;
+        }
+        if(!relevant)return;
+        _injT=setTimeout(()=>{_injT=null;_runUiInject();},40);
+    });
+    const _startObs=()=>{ if(document.body) _stObs.observe(document.body,{childList:true,subtree:true}); else setTimeout(_startObs,80); };
+    _startObs();
+    setInterval(()=>{
+        if(window.__twdVisualActive===false)return;
+        if(document.querySelector('.bubble.menu-container .icon-saved-messages,#Settings .settings-main-scroll'))_runUiInject();
+    },15000);
+    window.addEventListener('__twd_window_state',(e)=>{if(e.detail&&e.detail.active){tryInject();_runUiInject();}});
+
+    setupNativeWidgetCapture();
+
+    // «Что нового» — один раз на новую версию (ждём, пока UI прогрузится).
+    setTimeout(()=>{ try{ showWhatsNewIfNeeded(); }catch(e){} },2500);
+
+    // Счётчик для трея/таскбара: СУММА непрочитанных сообщений по НЕприглушённым
+    // неархивным чатам. ОСНОВНОЙ источник — состояние TG (getGlobal): unreadCount из
+    // messages.byChatId[id].threadsById['-1'].readState, архив отсекаем по
+    // chats.listIds.active, mute — по notifyExceptionById (иначе notifyDefaults по
+    // типу чата). Состояние точное и без «кадров-мерцаний», в отличие от DOM
+    // (при blur TG перерисовывает чат-лист → бейдж на кадр пустой → счётчик мигал).
+    // Сверено вживую: совпадает 1-в-1 с подсчётом по DOM. Фолбэк — старый DOM-путь
+    // с подтверждением снижения (_pendingDrop), если рантайм недоступен.
+    function nativeUnreadCount(){
+        var g=tgRuntime.getGlobal();
+        if(!g||!g.chats||!g.chats.listIds||!g.chats.listIds.active||!g.messages||!g.messages.byChatId)return null;
+        var now=Math.floor(Date.now()/1000);
+        var active=g.chats.listIds.active, exc=g.chats.notifyExceptionById||{};
+        var defs=(g.settings&&g.settings.notifyDefaults)||{}, byId=g.chats.byId||{}, count=0;
+        for(var i=0;i<active.length;i++){
+            var id=active[i], mc=g.messages.byChatId[id];
+            var th=mc&&mc.threadsById&&mc.threadsById['-1'];
+            var unread=th&&th.readState?(th.readState.unreadCount||0):0;
+            if(unread<=0)continue;
+            var e=exc[id], muted;
+            if(e&&typeof e.mutedUntil!=='undefined') muted=e.mutedUntil>now;
+            else{ var c=byId[id], type=c&&c.type;
+                var dkey=(type==='chatTypePrivate')?'users':(type==='chatTypeChannel')?'channels':'groups';
+                var d=defs[dkey]; muted=d?(d.mutedUntil>now):false; }
+            if(muted)continue;
+            count+=unread;                               // сумма непрочитанных сообщений (не чатов)
+        }
+        return count;
+    }
+    function domUnreadCount(){
+        // Дедуп по peerId: при переключении папок TG держит в DOM несколько .chat-list
+        // (Transition-слайды), один чат попадает в строку дважды → бейдж двоился.
+        // Считаем каждый peerId один раз (max непрочитанных по его строкам).
+        var byPid={}, count=0;
+        document.querySelectorAll('.chat-list .ListItem.Chat').forEach(function(it){
+            if(it.className.indexOf('chat-item-archive')>=0)return;
+            if(it.querySelector('.icon-muted'))return;
+            var max=0;
+            it.querySelectorAll('.chat-badge-transition').forEach(function(b){
+                var n=parseInt((b.textContent||'').replace(/[^0-9]/g,''),10);
+                if(!isNaN(n)&&n>max)max=n;
+            });
+            if(max<=0)return;
+            var av=it.querySelector('.Avatar[data-peer-id]');
+            var pid=av?av.getAttribute('data-peer-id'):null;
+            if(pid){ if(max>(byPid[pid]||0))byPid[pid]=max; }
+            else count+=max;                             // без peerId — дедуп невозможен
+        });
+        for(var k in byPid)count+=byPid[k];              // сумма непрочитанных (раз на чат)
+        return count;
+    }
+    let _lastBadgeCount_=-1, _pendingChange=null;
+    setInterval(()=>{
+        var nat=nativeUnreadCount(), fromState=(nat!==null);
+        var count = fromState ? nat : domUnreadCount();
+        if(count===_lastBadgeCount_){ _pendingChange=null; return; }
+        // Стейт (getGlobal) точный → применяем сразу. DOM-фолбэк мерцает при
+        // перерисовке чат-листа (иконки .icon-muted на кадр пропадают → мьюченные
+        // чаты влетают в счёт → всплеск 99+). Любое изменение подтверждаем одним
+        // повтором: разовый кадр-выброс не доживает до второго тика и не показывается.
+        if(!fromState && _lastBadgeCount_>=0 && _pendingChange!==count){ _pendingChange=count; return; }
+        _pendingChange=null;
+        _lastBadgeCount_=count;
+        INV('set_notifications_count',{count}).catch(()=>{});
+        INV('set_tray_image',{dataURL:count>0?makeTrayPng(count):null}).catch(()=>{});
+    },2000);
+});
+
+// ── Drag-n-drop: блокируем переключение чатов при перетаскивании файла ───────
+// TG открывает чат под курсором при dragover по списку. Глушим pointer-events
+// у .chat-list пока тащим файл. Не считаем dragenter/dragleave (счётчик
+// рассинхронивается на границах детей) — держим по таймстампу dragover:
+// dragover сыпется постоянно пока курсор в окне; пропал >200мс → снимаем блок.
+// Текущий чат не страдает: дроп ловит средняя колонка/композер, не список.
+// Блокируем на ЛЮБОЕ перетаскивание (не проверяем types: при внешнем drag над
+// фоновым окном dataTransfer.types может не содержать 'Files'). Держим по
+// таймстампу с запасом 700мс — в фоне dragover приходит редко, и узкий порог
+// давал мерцание блока (чат «прыгал»). attach на dragenter и dragover.
+(function(){
+    var _s=null,_last=0,_timer=null;
+    function styleEl(){
+        if(_s)return _s;
+        _s=document.createElement('style');_s.id='_drag_bl_';
+        _s.textContent='.chat-list,.chat-list *{pointer-events:none!important}';
+        return _s;
+    }
+    function tick(){if(Date.now()-_last>700)detach();}
+    function attach(){
+        if(!_s||!_s.parentNode)(document.head||document.documentElement).appendChild(styleEl());
+        _last=Date.now();
+        if(!_timer)_timer=setInterval(tick,150);
+    }
+    function detach(){
+        if(_s&&_s.parentNode)_s.parentNode.removeChild(_s);
+        if(_timer){clearInterval(_timer);_timer=null;}
+    }
+    document.addEventListener('dragenter',attach,true);
+    document.addEventListener('dragover',attach,true);
+    document.addEventListener('drop',detach,true);
+    document.addEventListener('dragend',detach,true);
+
+    // Block the drag events themselves over the chat list — TG's drop handlers must not fire there.
+    function overChatList(e){
+        try{
+            var p=e.composedPath?e.composedPath():[];
+            for(var i=0;i<p.length;i++){ var n=p[i]; if(n&&n.nodeType===1&&n.classList&&n.classList.contains('chat-list')) return true; }
+            var t=e.target; return !!(t&&t.closest&&t.closest('.chat-list'));
+        }catch(_){ return false; }
+    }
+    function isFileDrag(e){
+        try{
+            var t=e.dataTransfer&&e.dataTransfer.types;
+            if(!t||!t.length) return true;               // types unavailable on external drags — assume files
+            return [].indexOf.call(t,'Files')>=0;
+        }catch(_){ return true; }
+    }
+    function blockDrag(e){
+        if(!overChatList(e)||!isFileDrag(e)) return;
+        e.stopImmediatePropagation();
+        if(e.type==='drop') e.preventDefault();        // dragover stays non-default so dropping here is forbidden
+    }
+    ['dragenter','dragover','drop'].forEach(function(ty){ document.addEventListener(ty,blockDrag,true); });
+})();
+// Fast path for large/multiple files: avoid 10-60s freeze while generating previews.
+// Telegram reads each dropped file via FileReader to make thumbnails; for >10MB files
+// that blocks the UI. Stub readAsDataURL for large blobs so the send dialog appears instantly.
+(function(){
+    let _origRS = null, _timer = null;
+    function unpatch(){ if(_origRS){ try{ FileReader.prototype.readAsDataURL = _origRS; }catch(_){} _origRS=null; } if(_timer){ clearTimeout(_timer); _timer=null; } }
+    function patch(){
+        if(_origRS) return;
+        _origRS = FileReader.prototype.readAsDataURL;
+        FileReader.prototype.readAsDataURL = function(blob){
+            if(blob && blob.size>10*1024*1024){
+                setTimeout(()=>{ try{ this.result=''; if(this.onload) this.onload({target:this}); if(this.onloadend) this.onloadend({target:this}); }catch(_){} },0);
+                return;
+            }
+            return _origRS.call(this, blob);
+        };
+        _timer = setTimeout(unpatch, 1500);
+    }
+    document.addEventListener('drop', function(e){
+        try{
+            const dt = e.dataTransfer;
+            if(!dt || !dt.files || dt.files.length===0) return;
+            const files = Array.from(dt.files);
+            const total = files.reduce((s,f)=>s+f.size,0);
+            if(files.length>5 || total>30*1024*1024){
+                patch();
+            }
+        }catch(_){}
+    }, true);
+    // safety: restore on next unrelated drop
+    document.addEventListener('dragend', function(){ unpatch(); }, true);
+})();
+// ─────────────────────────────────────────────────────────────────────────────
+
+// Kill the pull-down stories reveal: wheel-up at the top of the chat list never reaches TG,
+// so its (broken/phantom) stories strip can't expand and swallow the first scroll-downs.
+(function(){
+    document.addEventListener('wheel',function(e){
+        if(e.deltaY>=0)return;
+        var t=e.target; if(!t||!t.closest)return;
+        var cl=t.closest('.chat-list'); if(!cl||cl.scrollTop>0)return;
+        e.stopImmediatePropagation();
+        e.preventDefault();
+    },true);
+})();
+// ─────────────────────────────────────────────────────────────────────────────
+
+// ── ПКМ на изображении в MediaViewer ──────────────────────────────────────
+document.addEventListener('contextmenu', function(e) {
+    const viewer = document.getElementById('MediaViewer');
+    if (!viewer || !viewer.contains(e.target)) return;
+
+    const activeSlide = viewer.querySelector('.MediaViewerSlide--active');
+    if (!activeSlide) return;
+
+    const img = activeSlide.querySelector(
+        'img:not([class*="sticker"]):not(.Avatar__media):not(.a8dMNkh3)'
+    );
+    const hasVideo = !!activeSlide.querySelector('video');
+    const dlId = (window.__tgdl && window.__tgdl.viewerDownloadId) ? window.__tgdl.viewerDownloadId() : null;
+    // Меню нужно, если есть картинка (сохранить/копировать) ИЛИ медиа уже скачано
+    // (пункт «Открыть папку» для видео/фото — как в обычных файлах).
+    if ((!img || !img.src) && dlId == null) return;
+
+    e.preventDefault();
+    e.stopImmediatePropagation();
+
+    INV('show_image_context_menu', {
+        srcURL: (img && img.src) ? img.src : '',
+        x: e.clientX,
+        y: e.clientY,
+        downloadId: dlId,
+    }).catch(() => {});
+}, true);
+// ──────────────────────────────────────────────────────────────────────────
+
+// ── Скачивание медиа из просмотрщика (blob:) ───────────────────────────────
+// blob: живёт в renderer и недоступен из main. Передаём URL preload'у: он читает
+// ReadableStream и шлёт в main по MessagePort только один chunk за раз с ACK после
+// записи на диск. Полный файл и base64-копия больше не создаются в памяти.
+document.addEventListener('click', function(e){
+    var a = (e.target && e.target.closest) ? e.target.closest('a[download]') : null;
+    if(!a) return;
+    var href = a.href || a.getAttribute('href') || '';
+    if(href.indexOf('blob:')!==0) return;            // только blob; обычные ссылки не трогаем
+    e.preventDefault();                              // отменяем сломанное нативное скачивание
+    e.stopImmediatePropagation();                    // и глушим external.js для blob:
+    var name = a.getAttribute('download') || a.download || 'file';
+    if(window.tgBridge && typeof window.tgBridge.saveBlob==='function'){
+        window.tgBridge.saveBlob(href,name).catch(function(){});
+    }
+}, true);
+// ──────────────────────────────────────────────────────────────────────────
+
+// ── #4: мгновенная карточка загрузки по клику на кнопку скачивания ──────────
+// TG у видео/медиа сначала тянет файл по MTProto и только потом отдаёт blob в
+// will-download — карточка иначе всплывала бы «после» скачивания. Ловим клик по
+// любой кнопке скачивания (док/аудио/просмотрщик/контекст-меню) и показываем
+// карточку сразу; пришедший позже will-download её «усыновляет» (см. notif-ui).
+(function(){
+    function origNameFor(t){
+        var f=t.closest && t.closest('.File'); if(f){ var ft=f.querySelector('.file-title'); if(ft) return (ft.getAttribute('title')||ft.textContent||'').trim(); }
+        var a=t.closest && t.closest('.Audio'); if(a){ var at=a.querySelector('.title'); if(at) return (at.textContent||'').trim(); }
+        return '';
+    }
+    function curPeer(){
+        var el=document.querySelector('#MiddleColumn .ChatInfo .Avatar[data-peer-id], .MiddleHeader .ChatInfo .Avatar[data-peer-id]');
+        return el?el.getAttribute('data-peer-id'):'';
+    }
+    // Клик — это старт скачивания? Ловим: иконку/кнопку скачивания (действие в
+    // сообщении, кнопка «Загрузка» в просмотрщике по aria-label) И пункт «Скачать»
+    // в контекст-меню (клик по тексту пункта не попадает в саму иконку, поэтому
+    // проверяем весь .MenuItem/кнопку на наличие icon-download).
+    function isDownloadTrigger(t){
+        // Не путать наши элементы интерфейса с настоящим скачиванием Telegram.
+        // В частности пункт меню «Загрузки» сам содержит icon-download и раньше
+        // создавал ложную карточку «Файл / Скачивание…» при открытии панели.
+        if(t.closest('#Settings,._tgpanel_,._mo_,[id^="_tgmi_"]')) return false;
+        var el=t.closest('.icon-download,.download-button,[aria-label="Download"],[aria-label="Загрузка"],[title="Download"],[title="Загрузка"],.MenuItem,button');
+        if(!el) return false;
+        if(el.classList&&(el.classList.contains('icon-download')||el.classList.contains('download-button'))) return true;
+        var al=(el.getAttribute&&el.getAttribute('aria-label'))||'', ti=(el.getAttribute&&el.getAttribute('title'))||'';
+        if(/^(download|Загрузка|Скачать)$/i.test(al)||/^(download|Загрузка|Скачать)$/i.test(ti)) return true;
+        return !!(el.querySelector&&el.querySelector('.icon-download'));   // пункт меню/кнопка с иконкой скачивания
+    }
+    document.addEventListener('click', function(e){
+        if(e.button!==undefined && e.button!==0) return;
+        var t=e.target; if(!t||!t.closest) return;
+        if(!isDownloadTrigger(t)) return;
+        // У уже скачанного .File иконку прячем и открываем файл — там своя логика
+        // (downloads-registry), карточку не плодим.
+        if(t.closest('.File._tgdl_done_ok_')) return;
+        if(typeof startImmediateDownloadCard==='function'){
+            try{ startImmediateDownloadCard(origNameFor(t), curPeer()); }catch(_){}
+        }
+    }, true);
+    // Смена чата → пересчитать визуал карточек без постоянного 500ms polling.
+    var _lastP=curPeer();
+    function reflowOnPeerChange(){
+        var p=curPeer();if(p===_lastP)return;_lastP=p;
+        if(window.__tgdlReflowCards)try{window.__tgdlReflowCards();}catch(_){}
+    }
+    ['pushState','replaceState'].forEach(function(k){
+        var orig=history[k];if(typeof orig!=='function'||orig.__twdDownloadNavWrapped)return;
+        function wrapped(){var result=orig.apply(this,arguments);reflowOnPeerChange();return result;}
+        wrapped.__twdDownloadNavWrapped=true;history[k]=wrapped;
+    });
+    window.addEventListener('popstate',reflowOnPeerChange);
+    window.addEventListener('hashchange',reflowOnPeerChange);
+})();
+// ──────────────────────────────────────────────────────────────────────────
+
+// ── Навигация из уведомлений: открыть чат / пометить прочитанным ───────────
+// Hash-навигация (location.hash='#peerId') в уже загруженной SPA Telegram Web A
+// НЕ работает — роутер игнорирует изменение hash после инициализации (проверено
+// на живой странице: и hash=, и location.assign сбрасываются в ''). Единственный
+// надёжный путь без перезагрузки — кликнуть по строке чат-листа.
+window.__tgNotif=(function(){
+    // Нативный вызов экшена Telegram через общий tgRuntime (core.js): берём actions
+    // и зовём actions[name](payload). false → откат на DOM-эмуляцию.
+    function _callAction(name,payload){
+        try{
+            var acts=tgRuntime.getActions();
+            if(!acts||typeof acts[name]!=='function')return false;
+            acts[name](payload); return true;
+        }catch(e){ return false; }
+    }
+    // Скрытие контекст-меню на время «прочитать всё» (ref-counted: вызовы markRead
+    // идут со сдвигом и перекрываются, снимаем класс только когда все завершились).
+    var _menuHide=0;
+    function hideMenus(){ _menuHide++; try{ document.documentElement.classList.add('_tgreading_'); }catch(e){} }
+    function showMenus(){ _menuHide=Math.max(0,_menuHide-1); if(_menuHide===0){ try{ document.documentElement.classList.remove('_tgreading_'); }catch(e){} } }
+    function findRow(pid){
+        var rows=document.querySelectorAll('.chat-list .ListItem.Chat');
+        for(var i=0;i<rows.length;i++){
+            var a=rows[i].querySelector('.Avatar[data-peer-id]');
+            if(a&&a.getAttribute('data-peer-id')===String(pid))return rows[i];
+        }
+        return null;
+    }
+    // Полный путь: при загрузке с нуля hash работает (как в браузере), в живой
+    // странице — нет. Поэтому пробуем клик; если строки нет в DOM (виртуализация),
+    // фолбэк на полную перезагрузку с hash — медленно, но рабочий.
+    function clickRow(row){
+        var btn=row.querySelector('.ListItem-button')||row;
+        try{
+            var r=btn.getBoundingClientRect();
+            var opt={bubbles:true,cancelable:true,view:window,button:0,
+                clientX:r.left+r.width/2,clientY:r.top+r.height/2};
+            btn.dispatchEvent(new MouseEvent('mousedown',opt));
+            btn.dispatchEvent(new MouseEvent('mouseup',opt));
+            btn.dispatchEvent(new MouseEvent('click',opt));
+        }catch(e){ try{btn.click();}catch(e2){} }
+    }
+    function focusComposer(){
+        setTimeout(function(){
+            var i=document.getElementById('editable-message-text');
+            if(i)i.focus();
+        },450);
+    }
+    function openChat(pid){
+        try{ pid=String(pid); }catch(e){ return; }
+        // ОСНОВНОЙ путь — нативный экшен TG openChat({id}) (проверено по исходнику
+        // обработчика: payload {id,...} → processOpenChatOrThread). Надёжнее клика
+        // по строке: не зависит от виртуализации чат-листа.
+        if(_callAction('openChat', { id: pid })){ focusComposer(); return; }
+        // Фолбэк 1: клик по строке чат-листа (если рантайм недоступен).
+        try{
+            var row=findRow(pid);
+            if(row){ clickRow(row); focusComposer(); return; }
+        }catch(e){}
+        // Фолбэк 2: строка вне видимой области (виртуализация) → перезагрузка с hash.
+        try{ location.assign(location.origin+location.pathname+'#'+pid); }catch(e){}
+    }
+    // Прочитать чат. ОСНОВНОЙ путь — прямой вызов экшена TG: не зависит ни от меню,
+    // ни от кликов пользователя (клик в пустоту больше не отменяет «прочитать»).
+    // Фолбэк — эмуляция через контекст-меню, если рантайм TG недоступен.
+    function markRead(pid){
+        try{ pid=String(pid); }catch(e){ return; }
+        try{if(window.__twdAllowUnreadRemoval)window.__twdAllowUnreadRemoval(pid);}catch(_){}
+        INV('privacy_allow_read_once',{peerId:pid}).catch(function(){}).then(function(){
+            if(_callAction('markChatMessagesRead', { id: pid })) return;
+            markReadViaMenu(pid);
+        });
+    }
+    // Фолбэк: ПКМ по строке → нативное меню TG → «Отметить как прочитанное».
+    // Чат НЕ открывается, текущий активный чат не меняется.
+    function markReadViaMenu(pid){
+        try{ pid=String(pid); }catch(e){ return; }
+        var row=findRow(pid);
+        if(!row)return;
+        var btn=row.querySelector('.ListItem-button')||row;
+        var r=btn.getBoundingClientRect();
+        // Прячем контекст-меню ДО его появления, чтобы юзер не видел вспышку.
+        hideMenus();
+        var settled=false;
+        function finish(){ if(settled)return; settled=true; setTimeout(showMenus,180); }   // даём меню закрыться невидимо
+        var opt={bubbles:true,cancelable:true,view:window,button:2,
+            clientX:r.left+r.width/2,clientY:r.top+r.height/2};
+        btn.dispatchEvent(new MouseEvent('contextmenu',opt));
+        // Ждём появления видимого меню TG (только .shown.open — в DOM висят
+        // скрытые устаревшие меню, их не трогаем), ищем пункт, кликаем.
+        var tries=0,maxTries=30;   // ~1.5с при 50мс
+        (function poll(){
+            var menu=document.querySelector('.bubble.menu-container.shown.open, .Menu.context-menu .bubble.shown.open');
+            if(menu){
+                var items=menu.querySelectorAll('.MenuItem, [role="menuitem"], button');
+                for(var i=0;i<items.length;i++){
+                    var t=(items[i].textContent||'').trim();
+                    // Матчим по ИКОНКЕ (icon-readchats) — она не зависит от языка.
+                    // Текст как фолбэк, если разметка иконок изменится.
+                    var byIcon=!!items[i].querySelector('i.icon-readchats, .icon-readchats');
+                    if(byIcon || /пометить прочитанн|отметить как прочитанн|mark as read/i.test(t)){
+                        try{
+                            var er=items[i].getBoundingClientRect();
+                            items[i].dispatchEvent(new MouseEvent('mousedown',{bubbles:true,cancelable:true,view:window,clientX:er.left+1,clientY:er.top+1}));
+                            items[i].dispatchEvent(new MouseEvent('mouseup',{bubbles:true,cancelable:true,view:window,clientX:er.left+1,clientY:er.top+1}));
+                            items[i].dispatchEvent(new MouseEvent('click',{bubbles:true,cancelable:true,view:window,clientX:er.left+1,clientY:er.top+1}));
+                        }catch(e){ try{items[i].click();}catch(e2){} }
+                        dismissMenu(); finish();
+                        return;
+                    }
+                }
+                // Меню всплыло, но пункта нет (возможно уже прочитано) — закрываем.
+                dismissMenu(); finish();
+                return;
+            }
+            if(++tries<maxTries)setTimeout(poll,50); else finish();
+        })();
+        function dismissMenu(){
+            try{ document.dispatchEvent(new KeyboardEvent('keydown',{key:'Escape',keyCode:27,which:27,bubbles:true})); }catch(e){}
+        }
+    }
+    return {openChat:openChat, markRead:markRead};
+})();
+// При активной нечиталке Web A оптимистично снимает unread-badge ещё до RPC.
+// Сохраняем точную нативную копию badge. MutationObserver отрабатывает до paint,
+// поэтому визуального провала нет; при явном прочтении копия удаляется заранее.
+(function(){
+    var lastCtx={peerId:'',ts:0},replaying=new WeakSet();
+    var privacyCfg=null,unreadKeep=new Map(),badgeAllowRemovalUntil=new Map(),badgeObserver=null;
+
+    function setPrivacyCfg(s){
+        if(!s)return;
+        privacyCfg=s;
+        restoreUnreadBadges();
+    }
+    function refreshPrivacyCfg(){
+        try{INV('get_settings').then(setPrivacyCfg).catch(function(){});}catch(_){}
+    }
+    window.addEventListener('__twd_privacy_config',function(e){
+        var d=e&&e.detail||{},s=privacyCfg||{};
+        s=Object.assign({},s,{
+            privacy_no_read_receipts:d.noReadReceipts===true,
+            privacy_no_typing:d.noTyping===true,
+            privacy_no_read_force_on:d.noReadForceOn||[],
+            privacy_no_read_force_off:d.noReadForceOff||[],
+            privacy_no_typing_force_on:d.noTypingForceOn||[],
+            privacy_no_typing_force_off:d.noTypingForceOff||[]
+        });
+        setPrivacyCfg(s);
+    });
+
+    function peerIdFromRow(row){
+        var a=row&&row.querySelector&&row.querySelector('.Avatar[data-peer-id],[data-peer-id]');
+        return a&&a.getAttribute('data-peer-id')||'';
+    }
+    function effective(s,peerId,baseKey,onKey,offKey){
+        var on=(s[onKey]||[]).map(String),off=(s[offKey]||[]).map(String);
+        if(off.indexOf(peerId)>=0)return false;
+        if(on.indexOf(peerId)>=0)return true;
+        return s[baseKey]===true;
+    }
+    function patchRule(s,peerId,baseKey,onKey,offKey,next){
+        var on=(s[onKey]||[]).map(String).filter(function(x){return x!==peerId;});
+        var off=(s[offKey]||[]).map(String).filter(function(x){return x!==peerId;});
+        var base=s[baseKey]===true;
+        if(next!==base)(next?on:off).push(peerId);
+        var p={};p[onKey]=on;p[offKey]=off;return p;
+    }
+    function readEnabled(peerId){
+        return !!privacyCfg&&effective(privacyCfg,peerId,'privacy_no_read_receipts','privacy_no_read_force_on','privacy_no_read_force_off');
+    }
+    function clearUnreadKeep(peerId){
+        peerId=String(peerId||'');if(!peerId)return;
+        unreadKeep.delete(peerId);
+        var row=null,rows=document.querySelectorAll('#LeftColumn .ListItem.Chat');
+        for(var i=0;i<rows.length;i++){
+            if(String(peerIdFromRow(rows[i])||'')===peerId){row=rows[i];break;}
+        }
+        if(row)row.querySelectorAll('._twd-unread-keep_').forEach(function(x){x.remove();});
+    }
+    window.__twdClearUnreadKeep=clearUnreadKeep;
+    function allowUnreadRemoval(peerId){
+        peerId=String(peerId||'');if(!peerId)return;
+        badgeAllowRemovalUntil.set(peerId,Date.now()+3000);
+        clearUnreadKeep(peerId);
+    }
+    window.__twdAllowUnreadRemoval=allowUnreadRemoval;
+
+    function restoreUnreadBadges(){
+        if(!privacyCfg)return;
+        var now=Date.now();
+        document.querySelectorAll('#LeftColumn .ListItem.Chat').forEach(function(row){
+            var peerId=String(peerIdFromRow(row)||'');if(!peerId)return;
+            var enabled=readEnabled(peerId);
+            if((badgeAllowRemovalUntil.get(peerId)||0)>now){
+                row.querySelectorAll('._twd-unread-keep_').forEach(function(x){x.remove();});
+                unreadKeep.delete(peerId);
+                return;
+            }
+            var all=[].slice.call(row.querySelectorAll('.chat-badge-transition,.Badge'));
+            var fake=all.find(function(x){return x.classList.contains('_twd-unread-keep_');});
+            var real=all.find(function(x){
+                return !x.classList.contains('_twd-unread-keep_')&&/^\d+$/.test((x.textContent||'').trim());
+            });
+            if(!enabled){
+                if(fake)fake.remove();
+                unreadKeep.delete(peerId);
+                return;
+            }
+            if(real){
+                if(fake)fake.remove();
+                var currentCount=parseInt((real.textContent||'').trim(),10)||0;
+                var previous=unreadKeep.get(peerId);
+                if(previous&&now-previous.ts<=30000&&currentCount<previous.count){
+                    var value=String(previous.count);
+                    var textNode=real.querySelector('span')||real;
+                    if((textNode.textContent||'').trim()!==value)textNode.textContent=value;
+                    return;
+                }
+                var clone=real.cloneNode(true);clone.classList.remove('_twd-unread-keep_');
+                unreadKeep.set(peerId,{node:clone,ts:now,count:currentCount});
+                return;
+            }
+            var snap=unreadKeep.get(peerId);
+            if(!snap||now-snap.ts>30000){
+                if(fake)fake.remove();
+                unreadKeep.delete(peerId);
+                return;
+            }
+            if(fake)return;
+            var host=row.querySelector('.subtitle');
+            if(!host)return;
+            var node=snap.node.cloneNode(true);
+            node.classList.add('_twd-unread-keep_');
+            host.appendChild(node);
+        });
+    }
+    function bindBadgeObserver(){
+        var list=document.querySelector('#LeftColumn .chat-list,#LeftColumn');
+        if(!list){setTimeout(bindBadgeObserver,250);return;}
+        if(badgeObserver)return;
+        badgeObserver=new MutationObserver(restoreUnreadBadges);
+        badgeObserver.observe(list,{childList:true,subtree:true,characterData:true});
+        restoreUnreadBadges();
+    }
+    refreshPrivacyCfg();
+    bindBadgeObserver();
+    window.__twdExtendedPinsLimit=function(limit){try{toast(String(T('twd_extended_pins_limit')).replace('{limit}',String(limit||'')),'icon-close');}catch(_){}};
+
+    function closeMenu(){
+        try{document.dispatchEvent(new KeyboardEvent('keydown',{key:'Escape',keyCode:27,which:27,bubbles:true}));}catch(_){}
+    }
+    function makeItem(cls,icon,label,onClick){
+        var el=document.createElement('div');
+        el.className='MenuItem compact '+cls;el.setAttribute('role','menuitem');el.tabIndex=0;
+        el.innerHTML='<i class="icon '+icon+'" aria-hidden="true"></i><span></span>';
+        var sp=el.querySelector('span');if(sp)sp.textContent=label;
+        el.addEventListener('click',function(e){e.preventDefault();e.stopPropagation();onClick();});
+        return el;
+    }
+    function injectPrivacyItems(peerId){
+        INV('get_settings').then(function(s){
+            if(!s||!peerId||Date.now()-lastCtx.ts>2500)return;
+            var menu=document.querySelector('.bubble.menu-container.shown.open,.Menu.context-menu .bubble.shown.open');
+            if(!menu||menu.querySelector('._twd-chat-privacy-read_'))return;
+            var host=menu.querySelector('.MenuItem')&&menu.querySelector('.MenuItem').parentElement||menu;
+            var nativeRead=[].slice.call(host.querySelectorAll('.MenuItem,[role="menuitem"]')).find(function(x){
+                return !!x.querySelector('.icon-readchats,.icon-unread') ||
+                    /пометить (?:не)?прочитанн|отметить как (?:не)?прочитанн|mark as (?:un)?read/i.test((x.textContent||'').trim());
+            });
+            var typingOn=effective(s,peerId,'privacy_no_typing','privacy_no_typing_force_on','privacy_no_typing_force_off');
+            var readOn=effective(s,peerId,'privacy_no_read_receipts','privacy_no_read_force_on','privacy_no_read_force_off');
+            var typing=makeItem('_twd-chat-privacy-typing_',typingOn?'icon-edit':'icon-edit _twd-crossed-pencil_',T(typingOn?'ctx_no_typing_off':'ctx_no_typing_on'),function(){
+                var patch=patchRule(s,peerId,'privacy_no_typing','privacy_no_typing_force_on','privacy_no_typing_force_off',!typingOn);
+                INV('save_settings',{settings:patch}).catch(function(){});closeMenu();
+            });
+            var read=makeItem('_twd-chat-privacy-read_',readOn?'icon-eye':'icon-eye-crossed',T(readOn?'ctx_no_read_off':'ctx_no_read_on'),function(){
+                var patch=patchRule(s,peerId,'privacy_no_read_receipts','privacy_no_read_force_on','privacy_no_read_force_off',!readOn);
+                if(readOn)clearUnreadKeep(peerId);
+                INV('save_settings',{settings:patch}).then(refreshPrivacyCfg).catch(function(){});closeMenu();
+            });
+            var sepTop=_twdNativeMenuSeparator(host);
+            var sepBottom=_twdNativeMenuSeparator(host);
+            if(nativeRead){host.insertBefore(sepTop,nativeRead);host.insertBefore(typing,nativeRead);host.insertBefore(read,nativeRead);host.insertBefore(sepBottom,nativeRead);}
+            else{host.appendChild(sepTop);host.appendChild(typing);host.appendChild(read);host.appendChild(sepBottom);}
+            try{
+                _twdFitMenuViewport(host);
+                [0,60,140,260].forEach(function(ms){setTimeout(function(){try{_twdFitMenuViewport(host);}catch(_){}},ms);});
+            }catch(_){}
+        }).catch(function(){});
+    }
+
+    document.addEventListener('contextmenu',function(e){
+        var row=e.target&&e.target.closest&&e.target.closest('#LeftColumn .ListItem.Chat');
+        if(!row||row.classList.contains('chat-item-archive'))return;
+        var peerId=peerIdFromRow(row);if(!peerId)return;
+        lastCtx={peerId:String(peerId),ts:Date.now()};
+        setTimeout(function(){injectPrivacyItems(lastCtx.peerId);},0);
+        setTimeout(function(){injectPrivacyItems(lastCtx.peerId);},70);
+        setTimeout(function(){injectPrivacyItems(lastCtx.peerId);},160);
+    },true);
+
+    // Явное «Пометить прочитанным» обходит нечиталку ровно для следующего read-RPC.
+    document.addEventListener('click',function(e){
+        if(!lastCtx.peerId||Date.now()-lastCtx.ts>2500)return;
+        var item=e.target&&e.target.closest&&e.target.closest('.MenuItem,[role="menuitem"],button');
+        if(!item||item.classList.contains('_twd-chat-privacy-read_'))return;
+        if(replaying.has(item)){replaying.delete(item);return;}
+        var text=(item.textContent||'').trim();
+        var explicitRead=!!item.querySelector('i.icon-readchats,.icon-readchats') ||
+            /пометить прочитанн|отметить как прочитанн|mark as read/i.test(text);
+        if(!explicitRead)return;
+        allowUnreadRemoval(lastCtx.peerId);
+        e.preventDefault();e.stopPropagation();
+        if(e.stopImmediatePropagation)e.stopImmediatePropagation();
+        INV('privacy_allow_read_once',{peerId:lastCtx.peerId}).catch(function(){}).then(function(){
+            replaying.add(item);try{item.click();}catch(_){}
+        });
+    },true);
+})();
+
+// ──────────────────────────────────────────────────────────────────────────
+
+// Сообщаем main язык интерфейса TG (для локализации меню трея). Шлём при смене.
+(function(){var last='';function send(){try{var l=curLang();if(l!==last){last=l;INV('report_lang',{lang:l}).catch(function(){});}}catch(e){}}send();setInterval(send,5000);})();
+
+// ── Хуки для меню трея ──────────────────────────────────────────────────────
+// «Настройки» из трея — открыть нашу панель настроек приложения.
+window.__tgOpenAppSettings=function(){ try{ openTwdNative('root'); }catch(e){} };
+// «Прочитать всё» — по очереди (со сдвигом, чтобы меню TG не наслаивались)
+// помечаем прочитанными все непрочитанные чаты вне архива.
+window.__tgMarkAllRead=function(){
+    try{
+        var pids=[];
+        document.querySelectorAll('.chat-list .ListItem.Chat').forEach(function(it){
+            if(it.className.indexOf('chat-item-archive')>=0)return;
+            if(it.querySelector('.icon-muted'))return;
+            var b=it.querySelector('.chat-badge-transition, .Badge');
+            var n=b?parseInt((b.textContent||'').replace(/[^0-9]/g,''),10):0;
+            if(!n)return;
+            var a=it.querySelector('.Avatar[data-peer-id]');
+            if(a)pids.push(a.getAttribute('data-peer-id'));
+        });
+        pids.forEach(function(pid,i){
+            setTimeout(function(){ if(window.__tgNotif&&window.__tgNotif.markRead)window.__tgNotif.markRead(pid); }, i*450);
+        });
+    }catch(e){}
+};
+// ──────────────────────────────────────────────────────────────────────────
+
+// ── Входящие сообщения → попап-уведомление + фирменный звук ─────────────────
+// После миграции Web A с webpack на Vite прямого доступа к getGlobal больше нет.
+// Поэтому источник здесь — собственный notification pipeline Telegram, который
+// notif-intercept.js перехватывает ДО нативного системного уведомления. Payload из
+// service worker содержит chatId/messageId/title/body/icon и уже учитывает mute,
+// silent, preview/privacy и прочие правила Telegram. DOM используется только как
+// best-effort fallback для аватара/peerId и для определения активного чата.
+// Когда Web A считает web-уведомления включёнными, он отдаёт сообщение в свой
+// notification pipeline и не играет обычный in-app звук. Мы перехватываем этот
+// pipeline и играем /a/notification.mp3 сами; если TG всё же успел сыграть свой —
+// не дублируем (lastTgSound).
+(function setupIncomingNotifications(){
+    var seen={}, seeded=false, lastTgSound=0;
+    // Кэш настроек (звук/громкость/категории). Загружаем один раз, затем main
+    // пушит изменения сразу после save_settings — без постоянного IPC polling.
+    var cfg={notif_sound:true,notif_volume:0.8,notif_cat_private:true,notif_cat_group:true,notif_cat_channel:true};
+    function refreshCfg(){
+        try{return INV('get_settings').then(function(s){if(s)cfg=s;return cfg;}).catch(function(){return cfg;});}
+        catch(e){return Promise.resolve(cfg);}
+    }
+    refreshCfg();
+    try{
+        if(window.tgBridge&&typeof window.tgBridge.onSettingsChanged==='function'){
+            window.tgBridge.onSettingsChanged(function(s){if(s)cfg=Object.assign({},cfg,s);});
+        }
+    }catch(_){}
+
+    // Ловим момент, когда сам Telegram играет notification.mp3 — для де-дупа.
+    var _nativeMediaPlay=null;
+    try{
+        _nativeMediaPlay=HTMLMediaElement.prototype.play;
+        HTMLMediaElement.prototype.play=function(){
+            try{ if((((this.src||this.currentSrc)||'')+'').indexOf('notification')>=0) lastTgSound=Date.now(); }catch(e){}
+            return _nativeMediaPlay.apply(this,arguments);
+        };
+    }catch(e){}
+
+    var SND=location.origin+'/a/notification.mp3';
+    function playSound(force){
+        if(!cfg.notif_sound)return;                  // звук выключен в настройках
+        if(!force&&Date.now()-lastTgSound<1500)return; // TG уже сыграл свой — не дублируем обычное уведомление
+        try{
+            var a=new Audio(SND);
+            var v=parseFloat(cfg.notif_volume);
+            if(!isNaN(v))a.volume=Math.max(0,Math.min(1,v));
+            var p=force&&typeof _nativeMediaPlay==='function'?_nativeMediaPlay.call(a):a.play();
+            if(p&&typeof p.catch==='function')p.catch(function(){});
+        }catch(e){}
+    }
+
+    // Окно: открытый чат и фокус — для пропуска активного чата (нет состояния «фокус»).
+    window.addEventListener('__twd_preview_notification_sound',function(){
+        refreshCfg().then(function(){playSound(true);});
+    });
+
+    function currentPeer(){
+        var m=(location.hash||'').match(/#(-?\d+)/);if(m)return m[1];
+        var el=document.querySelector('.MiddleHeader .ChatInfo .Avatar[data-peer-id]');return el?el.getAttribute('data-peer-id'):'';
+    }
+    // Аватар best-effort: ищем строку чат-листа по peerId и берём уже отрисованный src.
+    // Нет строки (виртуализация) → без иконки (main подставит первую букву).
+    function domAvatar(pid){
+        var rows=document.querySelectorAll('.chat-list .ListItem.Chat'),want=String(pid||'');
+        for(var i=0;i<rows.length;i++){
+            var av=rows[i].querySelector('.Avatar[data-peer-id]');
+            var link=rows[i].querySelector('a[href^="#"]');
+            var chatId=link&&String(link.getAttribute('href')||'').replace(/^#/, '');
+            if((chatId&&chatId===want)||(av&&av.getAttribute('data-peer-id')===want)){
+                var img=av&&av.querySelector('img.Avatar__media, img');
+                return img&&img.src?img.src:'';
+            }
+        }
+        return '';
+    }
+    function toDataUrl(src){
+        return new Promise(function(res){
+            var done=false,timer=null;
+            function finish(value){
+                if(done)return;
+                done=true;
+                if(timer)clearTimeout(timer);
+                res(value||'');
+            }
+            if(!src||src.indexOf('blob:')!==0)return finish(src||'');
+            // Avatar loading is cosmetic. A stale blob: URL must never block the
+            // actual popup: sound and popup are one notification event, not two
+            // independently reliable paths.
+            timer=setTimeout(function(){finish('');},250);
+            try{
+                fetch(src).then(function(r){return r.blob();}).then(function(b){
+                    if(done)return;
+                    var fr=new FileReader();
+                    fr.onload=function(){finish(typeof fr.result==='string'?fr.result:'');};
+                    fr.onerror=function(){finish('');};
+                    fr.onabort=function(){finish('');};
+                    try{fr.readAsDataURL(b);}catch(e){finish('');}
+                }).catch(function(){finish('');});
+            }catch(e){finish('');}
+        });
+    }
+
+    // Реальный тип чата нужен для отдельных переключателей
+    // private/group/channel. По одному знаку peerId канал от супергруппы не отличить:
+    // оба отрицательные. Берём type из собственного IndexedDB Web A (tt-global-state*).
+    // Кэш прогреваем один раз; повторно читаем БД только при cache miss и не чаще 5с.
+    var chatTypeById=Object.create(null), chatTypeLoad=null, chatTypeLoadedAt=0;
+    function categoryFromType(type){
+        if(type==='chatTypePrivate')return 'private';
+        if(type==='chatTypeChannel')return 'channel';
+        if(type==='chatTypeBasicGroup'||type==='chatTypeSuperGroup')return 'group';
+        return '';
+    }
+    function loadChatTypes(force){
+        var now=Date.now();
+        if(chatTypeLoad)return chatTypeLoad;
+        if(!force&&chatTypeLoadedAt)return Promise.resolve();
+        if(force&&chatTypeLoadedAt&&now-chatTypeLoadedAt<5000)return Promise.resolve();
+        chatTypeLoad=new Promise(function(resolve){
+            try{
+                if(!window.indexedDB){resolve();return;}
+                var req=indexedDB.open('tt-data');
+                req.onerror=function(){resolve();};
+                req.onsuccess=function(){
+                    var db=req.result, tx;
+                    try{tx=db.transaction('store','readonly');}catch(e){try{db.close();}catch(_){} resolve();return;}
+                    var cur=tx.objectStore('store').openCursor();
+                    cur.onerror=function(){};
+                    cur.onsuccess=function(){
+                        var c=cur.result;
+                        if(!c)return;
+                        var key=String(c.key||'');
+                        if(/^tt-global-state(?:_\d+)?$/.test(key)){
+                            var byId=c.value&&c.value.chats&&c.value.chats.byId;
+                            if(byId)Object.keys(byId).forEach(function(id){
+                                var chat=byId[id], type=chat&&chat.type;
+                                if(type)chatTypeById[String(id)]=type;
+                            });
+                        }
+                        c.continue();
+                    };
+                    tx.oncomplete=function(){try{db.close();}catch(_){} resolve();};
+                    tx.onerror=function(){try{db.close();}catch(_){} resolve();};
+                    tx.onabort=function(){try{db.close();}catch(_){} resolve();};
+                };
+            }catch(e){resolve();}
+        }).then(function(){chatTypeLoadedAt=Date.now();chatTypeLoad=null;});
+        return chatTypeLoad;
+    }
+    function resolveChatCategory(pid){
+        pid=String(pid||'');
+        if(!pid)return Promise.resolve('');
+        var known=categoryFromType(chatTypeById[pid]);
+        if(known)return Promise.resolve(known);
+        if(pid.charAt(0)!=='-')return Promise.resolve('private');
+        return loadChatTypes(true).then(function(){
+            return categoryFromType(chatTypeById[pid])||'group'; // preserve old fallback if state is not persisted yet
+        });
+    }
+    loadChatTypes(false);
+
+    // Источник уведомлений — перехват notify-пайплайна Telegram (см. notif-intercept.js).
+    // На desktop Web A сначала сам решает, нужно ли уведомлять (обычно только когда
+    // document.hasFocus() === false). При доступном Push API он шлёт
+    // 'showMessageNotification' через ServiceWorker.postMessage; локальный
+    // window.Notification остаётся fallback-путём. Оба варианта приводятся к одному
+    // payload {title,body,icon,chatId,messageId,isSilent}.
+    function handleTgNotif(p){
+        if(!p)return;
+        var pid = p.chatId!=null ? String(p.chatId) : '';
+        if(pid && String(pid)===String(currentPeer()) && document.hasFocus())return; // открытый чат в фокусе
+        var title=(p.title||'').trim()||'Telegram';
+        var text=(p.body||'').replace(/\s+/g,' ').trim();
+
+        resolveChatCategory(pid).then(function(cat){
+            if(cat && cfg['notif_cat_'+cat]===false)return;             // private/group/channel независимо
+            // Иконку (blob:/data:) конвертим: main не достанет blob из рендерера. Нет иконки
+            // в payload — берём аватар из строки чат-листа по peerId.
+            toDataUrl(p.icon||domAvatar(pid)).then(function(icon){
+                INV('show_notification',{title:title,body:text,icon:icon,sender:title,peerId:pid,playSound:false}).catch(function(){});
+            });
+            if(!p.isSilent)playSound();                                 // звук только для разрешённой категории
+        }).catch(function(){
+            // Если IndexedDB временно недоступен, не теряем уведомление.
+            toDataUrl(p.icon||domAvatar(pid)).then(function(icon){
+                INV('show_notification',{title:title,body:text,icon:icon,sender:title,peerId:pid,playSound:false}).catch(function(){});
+            });
+            if(!p.isSilent)playSound();
+        });
+    }
+    // Регистрируем приёмник и забираем то, что накопилось до старта UI_JS.
+    window.__tgOnNotif = handleTgNotif;
+    try{ (window.__tgNotifQueue||[]).splice(0).forEach(handleTgNotif); }catch(e){}
+})();
+// ──────────────────────────────────────────────────────────────────────────
+
+// ── Фикс прыжка прокрутки при смене монитора ───────────────────────────────
+// TG webZ кэширует высоту вьюпорта для «прокрутки к низу» и НЕ обновляет её после
+// переноса окна на монитор другой высоты → на новое сообщение целится мимо низа
+// ровно на разницу clientHeight (список «улетает» на пару сообщений вверх).
+// Сверено по логам: на 877px-вьюпорте докрут к низу верный, на 697px промах ≈180px
+// (877−697). Чиним так: если список был У НИЗА и пришло новое сообщение — пиннимся
+// к реальному низу несколько кадров, перебивая ошибочный докрут TG. Если юзер
+// листал историю (gap большой) — не трогаем.
+(function stickBottomOnNewMessage(){
+    var BOTTOM_EPS=80, lastGap=0, pinUntil=0, pinning=false;
+    function scroller(){ return document.querySelector('#MiddleColumn .MessageList'); }
+    // gap до низа держим по событию скролла (capture — scroll не всплывает)
+    document.addEventListener('scroll', function(e){
+        var sc=e.target; if(!sc||!sc.classList||!sc.classList.contains('MessageList'))return;
+        lastGap=sc.scrollHeight - sc.scrollTop - sc.clientHeight;
+    }, true);
+    function pin(){
+        var sc=scroller();
+        if(sc){ var max=sc.scrollHeight - sc.clientHeight; if(sc.scrollTop<max) sc.scrollTop=max; }
+        if(Date.now()<pinUntil) requestAnimationFrame(pin); else pinning=false;
+    }
+    var mo=new MutationObserver(function(muts){
+        var added=false;
+        for(var i=0;i<muts.length && !added;i++){ var ns=muts[i].addedNodes;
+            for(var j=0;j<ns.length;j++){ var n=ns[j]; if(n.nodeType===1&&n.classList&&n.classList.contains('Message')){ added=true; break; } } }
+        if(!added)return;
+        if(lastGap>BOTTOM_EPS)return;                    // юзер листал историю — не дёргаем
+        pinUntil=Date.now()+600; if(!pinning){ pinning=true; requestAnimationFrame(pin); }
+    });
+    function arm(){ var mc=document.getElementById('MiddleColumn')||document.body; if(mc) mo.observe(mc,{childList:true,subtree:true}); else setTimeout(arm,200); }
+    arm();
+})();
+// ──────────────────────────────────────────────────────────────────────────
