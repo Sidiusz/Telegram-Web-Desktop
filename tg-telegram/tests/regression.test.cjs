@@ -1436,6 +1436,12 @@ test('inline media load/cancel buttons never open a save-to-disk download card',
     assert.ok(exclusion > 0 && exclusion < trigger.indexOf('.icon-download'), 'media exclusion runs before icon matching');
 });
 
+test('desktop layouts keep Telegram composer wrap whenever a reply/edit/forward bar exists', () => {
+    const base = read('electron/features/desktop_like_base.js');
+    assert.match(base, /\.Composer:not\(\.with-embedded\):not\(:has\(\.ComposerEmbeddedMessage\)\) \{\s*flex-wrap: nowrap !important;/);
+    assert.doesNotMatch(base, /\.Composer:not\(\.with-embedded\) \{/);
+});
+
 test('Telegram media cache never hands back a revoked blob for a fresh or on-screen entry', () => {
     const sample = 'var vt=new Map;function Ct(e){return vt.get(e)}' +
         'function Ot(e,n){if(!n)throw Error(`Failed to fetch media ${e}`);vt.set(e,n);return vt.set(e,n),n}' +
