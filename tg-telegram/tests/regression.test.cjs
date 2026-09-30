@@ -1381,9 +1381,51 @@ test('Telegram media cache patch evicts only unreferenced blob URLs and keeps di
 
     const win = read('electron/window.cjs');
     assert.match(win, /injectTelegramMediaCache/);
-    assert.match(win, /WEB_ASSET_PATCH_REVISION = 'memory-v4'/);
+    assert.match(win, /WEB_ASSET_PATCH_REVISION = 'media-notify-v5'/);
     assert.match(win, /clearStorageData\(\{ origin: 'https:\/\/web\.telegram\.org', storages: \['cachestorage'\] \}\)/);
     assert.doesNotMatch(win, /storages: \[[^\]]*(?:cookies|indexdb|localstorage)/);
+});
+
+test('Telegram media cache never hands back a revoked blob for a fresh or on-screen entry', () => {
+    const sample = 'var vt=new Map;function Ct(e){return vt.get(e)}' +
+        'function Ot(e,n){if(!n)throw Error(`Failed to fetch media ${e}`);vt.set(e,n);return vt.set(e,n),n}' +
+        'async function kt(e){vt.delete(e);await Promise.resolve()}globalThis.api={Ct,Ot,kt,vt};';
+    const patched = patchTelegramMediaCache(sample);
+    assert.equal(patched.patched, true);
+    let clock = 1_000_000;
+    const onScreen = new Set();
+    const revoked = new Set();
+    const context = {
+        Date: { now: () => clock },
+        URL: { revokeObjectURL: v => revoked.add(v) },
+        setTimeout: () => 0,
+        document: {
+            querySelectorAll: sel => sel.startsWith('img[src^="blob:"]')
+                ? [...onScreen].map(src => ({ src, currentSrc: src })) : [],
+        },
+    };
+    context.globalThis = context;
+    vm.createContext(context);
+    vm.runInContext(patched.body, context);
+    const { Ct, Ot, vt } = context.api;
+
+    for (let i = 0; i < 70; i++) { Ot(`r${i}`, `blob:r${i}`); onScreen.add(`blob:r${i}`); }
+    for (let i = 0; i < 30; i++) Ot(`u${i}`, `blob:u${i}`);
+    clock += 120_000;
+    const fresh = Ot('new', 'blob:new');
+    assert.equal(fresh, 'blob:new');
+    assert.equal(revoked.has('blob:new'), false, 'the entry being stored must never be revoked');
+    assert.equal(Ct('new'), 'blob:new');
+    assert.equal([...revoked].every(v => v.startsWith('blob:u')), true, 'only idle off-screen entries are revoked');
+    assert.equal(revoked.size, 30);
+
+    for (let i = 0; i < 40; i++) Ot(`p${i}`, `blob:p${i}`);
+    clock += 5_000;
+    Ct('p0');
+    for (let i = 0; i < 10; i++) Ot(`q${i}`, `blob:q${i}`);
+    assert.equal([...revoked].some(v => /^blob:[pq]/.test(v)), false, 'recently used entries stay alive');
+    assert.ok(vt.size > 96);
+    assert.equal(context.__twdMediaCacheStats().protectMs, 60000);
 });
 
 test('proxy stall recovery activates auto proxy and rotates away from a stalled domain', () => {
