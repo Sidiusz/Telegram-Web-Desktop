@@ -762,6 +762,8 @@ test('extended chat pins add five local slots on top of the account pin limit', 
     vm.createContext(context);
     vm.runInContext(prelude, context);
     const api = context.__twdExtendedPins;
+    assert.equal(api.toggle({}, {}, { id: '1' }, null), false, 'without patched reducers Telegram keeps native pinning');
+    context.__twdExtendedPinsReducersReady = true;
     const chats = Object.fromEntries(['1','2','3','4','5','6','7'].map(id => [id, { id, folderId: 0 }]));
     const state = {
         currentUserId: '99',
@@ -1408,7 +1410,7 @@ test('Telegram media cache patch evicts only unreferenced blob URLs and keeps di
 
     const win = read('electron/window.cjs');
     assert.match(win, /injectTelegramMediaCache/);
-    assert.match(win, /WEB_ASSET_PATCH_REVISION = 'runtime-v6'/);
+    assert.match(win, /WEB_ASSET_PATCH_REVISION = 'pins-v7'/);
     assert.match(win, /clearStorageData\(\{ origin: 'https:\/\/web\.telegram\.org', storages: \['cachestorage'\] \}\)/);
     assert.doesNotMatch(win, /storages: \[[^\]]*(?:cookies|indexdb|localstorage)/);
 });
@@ -1580,6 +1582,19 @@ test('notification flag repair rewrites Telegram state only when a flag changed'
 test('a notification arriving during the last fade-out re-shows the popup', () => {
     const popup = read('electron/notification.cjs');
     assert.match(popup, /_win\.setShape\(\[\{ x: 0, y: STACK_HEIGHT - height, width: WIDTH, height \}\]\);[\s\S]{0,200}if \(!_win\.isVisible\(\) && process\.env\.TWD_SMOKE_HIDDEN !== '1'\) _win\.showInactive\(\);/);
+});
+
+test('bundle patches fail safe: pins need every reducer, cache patch keeps identifier boundaries', () => {
+    const { patchTelegramExtendedPins, extendedPinsPrelude } = require('../electron/tg-extended-pins.cjs');
+    const partial = patchTelegramExtendedPins('case`updatePinnedChatIds`:let{ids:a,folderId:b}=c,d=b===1?`archived`:`active`;return x;case`updatePinnedSavedDialogIds`:');
+    assert.equal(partial.body.includes('__twdExtendedPinsReducersReady'), false, 'a half-patched reducer set must not enable local pin takeover');
+    assert.match(extendedPinsPrelude(true), /toggle\(s,a,p,rpc\)\{if\(!this\.enabled\|\|!globalThis\.__twdExtendedPinsReducersReady\)return false;/);
+    const sample = 'var vt=new Map,o={vt:new Map};function Ct(e){return vt.get(e)}function Ot(e,n){o.vt.set(e,n);Xvt.set(e,n);vt.set(e,n);if(!n)throw Error(`Failed to fetch media ${e}`);return vt.set(e,n),n}' +
+        'async function kt(e){vt.delete(e);await 0}var Xvt=new Map;';
+    const patched = patchTelegramMediaCache(sample);
+    assert.equal(patched.patched, true);
+    assert.match(patched.body, /o\.vt\.set\(e,n\);Xvt\.set\(e,n\);__twdMediaCacheSet\(e,n\)/);
+    assert.match(read('electron/tg-flowseal-route.cjs'), /try \{ ws\.close\(1000, 'test'\); \} catch \(_\) \{\}/);
 });
 
 test('main process survives late download events and cleans interrupted blob saves', () => {
