@@ -39,6 +39,8 @@
 !macroend
 
 !macro customUnInstall
+  ; electron-builder also runs the old uninstaller during updates; keep tg:// registered then.
+  ${ifNot} ${isUpdated}
   ; Only remove the generic tg:// owner if it still points at this installation.
   ReadRegStr $0 HKCU "Software\Classes\tg\shell\open\command" ""
   StrCmp $0 '"$INSTDIR\${APP_EXECUTABLE_FILENAME}" "%1"' 0 +2
@@ -56,10 +58,12 @@
   StrCmp $0 "Software\Telegram Web Desktop\Capabilities" 0 +2
   DeleteRegValue HKCU "Software\RegisteredApplications" "Telegram Web Desktop"
   DeleteRegKey HKCU "Software\Telegram Web Desktop\Capabilities"
+  DeleteRegKey /ifempty HKCU "Software\Telegram Web Desktop"
 
   ReadRegStr $0 HKCU "Software\Microsoft\Windows\CurrentVersion\App Paths\${APP_EXECUTABLE_FILENAME}" ""
   StrCmp $0 "$INSTDIR\${APP_EXECUTABLE_FILENAME}" 0 +2
   DeleteRegKey HKCU "Software\Microsoft\Windows\CurrentVersion\App Paths\${APP_EXECUTABLE_FILENAME}"
 
   System::Call 'shell32::SHChangeNotify(i 0x08000000, i 0x0000, i 0, i 0)'
+  ${endIf}
 !macroend
