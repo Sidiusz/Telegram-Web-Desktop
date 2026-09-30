@@ -1522,6 +1522,16 @@ test('downloads never share a target path, never delete foreign files, and carry
     assert.match(read('electron/window.cjs'), /const releasePath = reservePath\(item\.getSavePath\(\)\)/);
 });
 
+test('message history never removes Telegram-owned nodes, stays under a storage budget, and keeps savePublic', () => {
+    const history = read('electron/features/message_history.js');
+    assert.doesNotMatch(history, /else node\.remove\(\);|else \{ msg\.remove\(\); return; \}/);
+    assert.match(history, /function hideDeletedNode\(node\) \{\s*if \(node\.classList\.contains\('_twd-deleted-clone_'\)\) node\.remove\(\);/);
+    assert.match(history, /'\._twd-deleted-hidden_\{display:none!important;\}'/);
+    assert.match(history, /var MAX_PERSIST_CHARS = 1500000;/);
+    assert.match(history, /size \+ parts\[start - 1\]\.length \+ 1 <= MAX_PERSIST_CHARS/);
+    assert.match(read('electron/features.cjs'), /savePublic: s\.messages_save_public === true/);
+});
+
 test('external link hook never bypasses Telegram link confirmation or double-opens', () => {
     const source = read('electron/inject/external.js');
     const opened = [];

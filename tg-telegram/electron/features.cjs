@@ -48,6 +48,7 @@ function loadFeatureScripts(settings) {
         saveDeleted: s.messages_save_deleted === true,
         saveDisappearing: s.messages_save_disappearing === true,
         editHistory: s.messages_edit_history === true,
+        savePublic: s.messages_save_public === true,
         scope: s.messages_history_scope || 'client',
     });
     scripts.push('window.__twdMessageHistoryConfig=' + cfg + ';\n' + readFeature('message_history.js'));
