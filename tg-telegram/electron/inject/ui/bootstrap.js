@@ -328,7 +328,7 @@ document.addEventListener('contextmenu', function(e) {
     if (!activeSlide) return;
 
     const img = activeSlide.querySelector(
-        'img:not([class*="sticker"]):not(.Avatar__media):not(.a8dMNkh3)'
+        'img:not([class*="sticker"]):not(.Avatar__media)'
     );
     const hasVideo = !!activeSlide.querySelector('video');
     const dlId = (window.__tgdl && window.__tgdl.viewerDownloadId) ? window.__tgdl.viewerDownloadId() : null;
@@ -612,7 +612,7 @@ window.__tgNotif=(function(){
                 unreadKeep.delete(peerId);
                 return;
             }
-            var all=[].slice.call(row.querySelectorAll('.chat-badge-transition,.Badge'));
+            var all=[].slice.call(row.querySelectorAll('.chat-badge-transition'));
             var fake=all.find(function(x){return x.classList.contains('_twd-unread-keep_');});
             var real=all.find(function(x){
                 return !x.classList.contains('_twd-unread-keep_')&&/^\d+$/.test((x.textContent||'').trim());
@@ -750,7 +750,7 @@ window.__tgMarkAllRead=function(){
         document.querySelectorAll('.chat-list .ListItem.Chat').forEach(function(it){
             if(it.className.indexOf('chat-item-archive')>=0)return;
             if(it.querySelector('.icon-muted'))return;
-            var b=it.querySelector('.chat-badge-transition, .Badge');
+            var b=it.querySelector('.chat-badge-transition');
             var n=b?parseInt((b.textContent||'').replace(/[^0-9]/g,''),10):0;
             if(!n)return;
             var a=it.querySelector('.Avatar[data-peer-id]');

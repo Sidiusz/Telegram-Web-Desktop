@@ -18,7 +18,11 @@
     }
     function findMyPeerId() {
         if (_myPeerId) return _myPeerId;
-        var pa = document.querySelector('.settings-content .ProfileInfo .Avatar[data-peer-id]');
+        try {
+            var g = window.__twdTelegramRuntime && window.__twdTelegramRuntime.getGlobal();
+            if (g && g.currentUserId) { _myPeerId = String(g.currentUserId); return _myPeerId; }
+        } catch (_) {}
+        var pa = document.querySelector('#Settings .ProfileInfo .Avatar[data-peer-id]');
         if (pa) { _myPeerId = pa.getAttribute('data-peer-id'); return _myPeerId; }
         return '';
     }
@@ -26,7 +30,7 @@
         var now = Date.now();
         if (_myAvatar.src && _myAvatar.expires > now) return _myAvatar.src;
         if (_myAvatar.expires && _myAvatar.expires <= now) { _myAvatar.src = ''; _myAvatar.expires = 0; _mySrcMenu = ''; }
-        var profileImg = document.querySelector('.settings-content .ProfileInfo .Avatar[data-peer-id] img.Avatar__media');
+        var profileImg = document.querySelector('#Settings .ProfileInfo .Avatar[data-peer-id] img.Avatar__media');
         if (profileImg && profileImg.src && profileImg.src.startsWith('blob:')) { _myAvatar.src = profileImg.src; _myAvatar.expires = now + MY_TTL_MS; return _myAvatar.src; }
         var pid = findMyPeerId();
         if (pid) {

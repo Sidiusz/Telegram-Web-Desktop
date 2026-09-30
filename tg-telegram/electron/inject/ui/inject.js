@@ -9,7 +9,7 @@ function _twdNativeMenuSeparator(preferredRoot){
         });
         if(hit)return hit.cloneNode(false);
     }
-    var fallback=document.createElement('div');fallback.className='h039vb1K NGKaFgra';return fallback;
+    var fallback=document.createElement('div');fallback.style.cssText='height:.0625rem;margin:.25rem 0;border-radius:.0625rem;background-color:var(--color-background-menu-separator);';return fallback;
 }
 function injectMenu(){
     // Ищем иконку "Избранное" — она всегда есть в главном меню

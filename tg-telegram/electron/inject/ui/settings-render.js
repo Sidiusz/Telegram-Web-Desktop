@@ -181,8 +181,12 @@ function _nativeDecoratedTemplate(tone,multiline){
     var single={red:'support-filled',blue:'help-filled',green:'privacy-policy-filled',orange:'gift-filled',purple:'premium-filled',gray:'lock-filled'};
     var multi={red:'notifications-filled',blue:'account-filled',green:'piechart-filled',orange:'settings-filled',purple:'animations-filled',gray:'lock-filled'};
     var name=(multiline?multi:single)[tone]||(multiline?'account-filled':'help-filled');
-    var hit=st.querySelector('.ListItem.narrow .icon-'+name),row=hit&&hit.closest('.ListItem.narrow');
-    if(row&&!row.closest('[data-tgabout],[data-tggen],._tgpanel_')&&!/^_tg/.test(row.id||''))return row;
+    // A tone missing in one layout (current builds have no single-line purple) borrows the other layout's tile.
+    var names=[name,(multiline?single:multi)[tone]];
+    for(var n=0;n<names.length;n++){
+        var hit=names[n]&&st.querySelector('.ListItem.narrow .icon-'+names[n]),row=hit&&hit.closest('.ListItem.narrow');
+        if(row&&!row.closest('[data-tgabout],[data-tggen],._tgpanel_')&&!/^_tg/.test(row.id||''))return row;
+    }
     return Array.from(st.querySelectorAll('.ListItem.narrow')).find(function(r){
         if(r.closest('[data-tgabout],[data-tggen],._tgpanel_')||/^_tg/.test(r.id||''))return false;
         var w=r.querySelector('.ListItem-main-icon'),i=w&&w.querySelector('i.icon');if(!w||!i)return false;
@@ -237,7 +241,7 @@ function _genDecoratedRow(icon,title,value,onClick,tone,sub,danger){
     icon=String(icon||'info').replace(/^icon-/,'');tone=tone||_toneForIcon(icon,danger);
     var tpl=_nativeDecoratedTemplate(tone,!!sub);
     if(!tpl){var li=document.querySelector('#Settings .ListItem.narrow')||document.querySelector('#Settings .ListItem');var plain=_genNativeSettingRow(li,title,sub||'',value||'',onClick);plain._v=plain._value;return plain;}
-    var r=tpl.cloneNode(true);r.removeAttribute('id');r.removeAttribute('style');var btn=r.querySelector('.ListItem-button');
+    var r=tpl.cloneNode(true);r.removeAttribute('id');r.removeAttribute('style');r.classList.toggle('multiline',!!sub);var btn=r.querySelector('.ListItem-button');
     var wrap=btn&&btn.querySelector('.ListItem-main-icon'),ripple=btn&&btn.querySelector('.ripple-container');
     _setDecoratedGlyph(wrap,icon);
     var multiTpl=btn&&btn.querySelector('.multiline-item');multiTpl=multiTpl&&multiTpl.cloneNode(false);
