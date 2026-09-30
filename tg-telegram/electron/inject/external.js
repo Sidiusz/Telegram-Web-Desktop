@@ -8,6 +8,8 @@
     // «выберите приложение для blob». Скачивание blob ловит bootstrap.js → save_blob.
     function external(p){return p==="http:"||p==="https:";}
     document.addEventListener("click",e=>{
+        // Telegram's own links preventDefault and either confirm ("Open this link?") or call window.open.
+        if(e.defaultPrevented)return;
         let a=e.target.closest("a");
         if(a&&a.href){try{let u=new URL(a.href);if(external(u.protocol)&&!allowed(u.host)){e.preventDefault();e.stopImmediatePropagation();window.tgBridge.invoke("open_url",{url:a.href});}}catch(e){}}
     },{capture:false});

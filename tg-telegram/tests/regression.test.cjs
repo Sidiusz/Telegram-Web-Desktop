@@ -1478,6 +1478,28 @@ test('desktop layouts keep Telegram composer wrap whenever a reply/edit/forward 
     assert.doesNotMatch(base, /\.Composer:not\(\.with-embedded\) \{/);
 });
 
+test('external link hook never bypasses Telegram link confirmation or double-opens', () => {
+    const source = read('electron/inject/external.js');
+    const opened = [];
+    let clickHandler = null;
+    const anchor = { href: 'https://example.com/secret' };
+    const context = {
+        URL,
+        document: { addEventListener: (type, fn) => { if (type === 'click') clickHandler = fn; } },
+        window: { open: () => 'native', tgBridge: { invoke: (cmd, args) => { opened.push([cmd, args.url]); return Promise.resolve(); } } },
+    };
+    vm.createContext(context);
+    vm.runInContext(source, context);
+    const click = defaultPrevented => ({
+        defaultPrevented, target: { closest: () => anchor },
+        preventDefault() {}, stopImmediatePropagation() {},
+    });
+    clickHandler(click(true));
+    assert.deepEqual(opened, [], 'a click Telegram already handled (confirmation modal) must not open the browser');
+    clickHandler(click(false));
+    assert.deepEqual(opened, [['open_url', 'https://example.com/secret']], 'unhandled external anchors still open externally');
+});
+
 test('message filter can hide hidden bot/invite hyperlinks without hiding channel footers', () => {
     const filter = read('electron/features/message_filter.js');
     const settings = read('electron/settings.cjs');
