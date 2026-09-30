@@ -14,6 +14,7 @@ const { fetchTelegramWebAFallback } = require('./telegram-web-fallback.cjs');
 const { injectTelegramWorkerProxy } = require('./tg-flowseal-worker.cjs');
 const { injectTelegramExtendedPins, injectExtendedPinsPrelude } = require('./tg-extended-pins.cjs');
 const { injectTelegramMediaCache } = require('./tg-media-cache.cjs');
+const { injectTelegramNotifications } = require('./tg-notification-patch.cjs');
 
 const TG_URL = 'https://web.telegram.org/a/';
 const WEBSYNC_HOSTS = new Set(['t.me', 'telegram.me', 'telegram.dog']);
@@ -176,6 +177,7 @@ function createWindow(state, onTelegramLink, options = {}) {
                 resp = await injectTelegramWorkerProxy(resp, url);
                 resp = await injectTelegramExtendedPins(resp, url);
                 resp = await injectTelegramMediaCache(resp, url);
+                resp = await injectTelegramNotifications(resp, url);
                 const ct = (resp.headers.get('content-type') || '').toLowerCase();
                 if (!ct.includes('text/html')) return resp;
                 let body = await resp.text();
@@ -204,6 +206,7 @@ function createWindow(state, onTelegramLink, options = {}) {
                         resp = await injectTelegramWorkerProxy(resp, url);
                         resp = await injectTelegramExtendedPins(resp, url);
                         resp = await injectTelegramMediaCache(resp, url);
+                        resp = await injectTelegramNotifications(resp, url);
                         const ct = (resp.headers.get('content-type') || '').toLowerCase();
                         if (!ct.includes('text/html')) return resp;
                         let body = await resp.text();

@@ -164,7 +164,8 @@ function buildHtml() {
             {transform:'translate3d(0,'+fromY+'px,0)',opacity:String(fromOpacity)},
             {transform:'translate3d(0,'+toY+'px,0)',opacity:String(toOpacity)}
         ],{duration:duration,easing:MOVE_EASE,fill:'forwards'});
-        return a.finished.catch(function(){}).then(function(){
+        // An occluded/hidden popup may never advance its animation timeline; never block the queue on it.
+        return Promise.race([a.finished.catch(function(){}),wait(duration+250)]).then(function(){
             a.cancel();
             if(c.el.isConnected)setPose(c,toY,toOpacity);
         });
@@ -326,8 +327,19 @@ function positionWin(win) {
     const wa = primaryWorkArea();
     try { win.setPosition(wa.x + wa.width - WIDTH - MARGIN, wa.y + wa.height - STACK_HEIGHT - MARGIN, false); } catch (_) {}
 }
+const READY_TIMEOUT_MS = 10000;
+let _createdAt = 0;
+
+function dropWin(win) {
+    try { if (win && !win.isDestroyed()) win.destroy(); } catch (e) {}
+    if (_win === win) { _win = null; _ready = false; }
+}
+
 function ensureWin() {
+    // A popup whose page never finished loading would hold the queue forever.
+    if (_win && !_win.isDestroyed() && !_ready && Date.now() - _createdAt > READY_TIMEOUT_MS) dropWin(_win);
     if (_win && !_win.isDestroyed()) { positionWin(_win); return _win; }
+    _createdAt = Date.now();
     const wa = primaryWorkArea();
     const win = _win = new BrowserWindow({
         width: WIDTH,
@@ -375,12 +387,10 @@ function ensureWin() {
     });
     // Renderer crash/hang leaves the BrowserWindow alive but blank. Destroy exactly
     // the failed instance; the next queueNotification will build a fresh one.
-    const drop = () => {
-        try { if (!win.isDestroyed()) win.destroy(); } catch (e) {}
-        if (_win === win) { _win = null; _ready = false; }
-    };
+    const drop = () => dropWin(win);
     win.webContents.on('render-process-gone', drop);
     win.webContents.on('unresponsive', drop);
+    win.webContents.on('did-fail-load', drop);
     return win;
 }
 

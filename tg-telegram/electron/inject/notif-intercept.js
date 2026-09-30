@@ -120,8 +120,31 @@
             seen[key] = now;
             for (var k in seen) { if (now - seen[k] > 8000) delete seen[k]; }
             if (typeof window.__tgOnNotif === 'function') window.__tgOnNotif(p);
-            else window.__tgNotifQueue.push(p);
+            else {
+                window.__tgNotifQueue.push(p);
+                if (window.__tgNotifQueue.length > 32) window.__tgNotifQueue.splice(0, window.__tgNotifQueue.length - 32);
+                scheduleOrphanDrain();
+            }
         } catch (e) {}
+    }
+    // If the UI script never registered its receiver, still show a plain popup.
+    var orphanTimer = null;
+    function scheduleOrphanDrain() {
+        if (orphanTimer) return;
+        orphanTimer = setTimeout(function() {
+            orphanTimer = null;
+            if (typeof window.__tgOnNotif === 'function') return;
+            var bridge = window.tgBridge;
+            if (!bridge || typeof bridge.invoke !== 'function') return;
+            window.__tgNotifQueue.splice(0).forEach(function(p) {
+                try {
+                    bridge.invoke('show_notification', {
+                        title: p.title || 'Telegram', body: String(p.body || '').replace(/\s+/g, ' ').trim(),
+                        icon: '', sender: p.title || 'Telegram', peerId: p.chatId || '', playSound: false,
+                    }).catch(function() {});
+                } catch (_) {}
+            });
+        }, 8000);
     }
     // peerId для попапа (для кнопок «Открыть»/«Прочитано»). В опциях window.Notification
     // chatId нет (только tag=messageId) — ищем строку чат-листа по совпадению заголовка.
@@ -327,7 +350,10 @@
             }, 5 * 60 * 1000);
         }
     }
+    // Patched Web A calls this directly, so notifications survive a missing SW controller.
+    window.__twdConsumeSwNotification = consumeServiceWorkerNotification;
     function repairNotificationInterception() {
+        window.__twdConsumeSwNotification = consumeServiceWorkerNotification;
         try { ensureNotificationPermission(); } catch (_) {}
         try { hookServiceWorker(); } catch (_) {}
         try { if (window.Notification !== NotificationShim) installNotificationShim(); } catch (_) {}
