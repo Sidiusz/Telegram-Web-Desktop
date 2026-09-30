@@ -43,6 +43,8 @@ function init(getMainWindow) {
             }
             const height = CARD_HEIGHT * n + CARD_GAP * (n - 1);
             _win.setShape([{ x: 0, y: STACK_HEIGHT - height, width: WIDTH, height }]);
+            // A card queued behind the previous fade-out lands after notif-empty already hid the window.
+            if (!_win.isVisible() && process.env.TWD_SMOKE_HIDDEN !== '1') _win.showInactive();
         } catch (_) {}
     });
 
