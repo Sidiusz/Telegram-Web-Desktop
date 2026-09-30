@@ -1386,6 +1386,48 @@ test('Telegram media cache patch evicts only unreferenced blob URLs and keeps di
     assert.doesNotMatch(win, /storages: \[[^\]]*(?:cookies|indexdb|localstorage)/);
 });
 
+test('Telegram notifications are not held hostage by avatar downloads or a missing SW controller', async () => {
+    const { patchTelegramNotifications } = require('../electron/tg-notification-patch.cjs');
+    const sample = 'async function gt(e){return globalThis.avatar(e)}function K(){return!0}' +
+        'async function yt({chat:e,message:t,isReaction:r=!1}){let i=1;if(!t)return;' +
+        'let d=await gt(e),{title:f,body:p}={title:`T`,body:`B`};if(K())navigator.serviceWorker?.controller&&' +
+        'navigator.serviceWorker.controller.postMessage({type:`showMessageNotification`,payload:{title:f,body:p,icon:d,chatId:e.id}});' +
+        'else{new Notification(f,{})}}globalThis.notify=yt;export{yt as t};';
+    const patched = patchTelegramNotifications(sample);
+    assert.equal(patched.iconPatched, true);
+    assert.equal(patched.sinkPatched, true);
+    assert.equal(patchTelegramNotifications(patched.body).body, patched.body, 'patch is idempotent');
+
+    const delivered = [];
+    const context = {
+        setTimeout, Promise,
+        navigator: { serviceWorker: { controller: null } },
+        avatar: () => new Promise(() => {}),
+        __twdConsumeSwNotification: m => { delivered.push(m); return true; },
+    };
+    context.globalThis = context;
+    vm.createContext(context);
+    vm.runInContext(patched.body.replace(/export\{[^}]*\};?/, ''), context);
+    const startedAt = Date.now();
+    await context.notify({ chat: { id: '-100' }, message: { id: 7 } });
+    assert.ok(Date.now() - startedAt < 3000, 'a hung avatar download is bounded');
+    assert.equal(delivered.length, 1, 'notification is delivered without a service-worker controller');
+    assert.equal(delivered[0].type, 'showMessageNotification');
+    assert.equal(delivered[0].payload.icon, undefined);
+
+    const intercept = read('electron/inject/notif-intercept.js');
+    assert.match(intercept, /window\.__twdConsumeSwNotification = consumeServiceWorkerNotification/);
+    assert.match(intercept, /function scheduleOrphanDrain\(\)/);
+    const popup = read('electron/notification.cjs');
+    assert.match(popup, /Promise\.race\(\[a\.finished\.catch\(function\(\)\{\}\),wait\(duration\+250\)\]\)/);
+    assert.match(popup, /win\.webContents\.on\('did-fail-load', drop\)/);
+    assert.match(popup, /!_ready && Date\.now\(\) - _createdAt > READY_TIMEOUT_MS/);
+    const bootstrap = read('electron/inject/ui/bootstrap.js');
+    assert.match(bootstrap, /chatTypeLoad=new Promise\(function\(resolve\)\{\s*\/\/[^\n]*\n\s*setTimeout\(resolve,3000\);/);
+    const win = read('electron/window.cjs');
+    assert.equal((win.match(/resp = await injectTelegramNotifications\(resp, url\);/g) || []).length, 2);
+});
+
 test('Telegram media cache never hands back a revoked blob for a fresh or on-screen entry', () => {
     const sample = 'var vt=new Map;function Ct(e){return vt.get(e)}' +
         'function Ot(e,n){if(!n)throw Error(`Failed to fetch media ${e}`);vt.set(e,n);return vt.set(e,n),n}' +

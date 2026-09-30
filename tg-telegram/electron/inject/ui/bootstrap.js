@@ -879,6 +879,8 @@ window.__tgMarkAllRead=function(){
         if(!force&&chatTypeLoadedAt)return Promise.resolve();
         if(force&&chatTypeLoadedAt&&now-chatTypeLoadedAt<5000)return Promise.resolve();
         chatTypeLoad=new Promise(function(resolve){
+            // A stuck IndexedDB request must not hold every later group/channel notification.
+            setTimeout(resolve,3000);
             try{
                 if(!window.indexedDB){resolve();return;}
                 var req=indexedDB.open('tt-data');
