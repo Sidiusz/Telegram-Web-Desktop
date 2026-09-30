@@ -1542,6 +1542,15 @@ test('Web A fallback latch recovers and offline failures never latch it', () => 
     assert.match(route, /function clearWebFallbackLatch\(\) \{[\s\S]{0,160}saveSettings\(\{ proxy_web_fallback_latched: false \}\)/);
 });
 
+test('settings saves keep main-owned state and do not re-arm update prompts', () => {
+    const ipc = read('electron/ipc.cjs');
+    const updater = read('electron/updater.cjs');
+    assert.match(ipc, /const MAIN_OWNED_SETTINGS = \['proxy_auto_latched', 'proxy_web_fallback_latched', 'proxy_last_good_control_domain', 'proxy_last_good_media_domain', 'skipped_version'\]/);
+    assert.match(ipc, /for \(const k of MAIN_OWNED_SETTINGS\) delete next\[k\];/);
+    assert.match(ipc, /if \(current\.update_check_interval !== state\.settings\.update_check_interval\) scheduleChecks\(\);/);
+    assert.match(updater, /if \(!_downloadInFlight\) \{\s*_downloadInFlight = downloadPendingUpdateOnce\(onProgress\)\.finally/);
+});
+
 test('external link hook never bypasses Telegram link confirmation or double-opens', () => {
     const source = read('electron/inject/external.js');
     const opened = [];

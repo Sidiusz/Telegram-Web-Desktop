@@ -497,7 +497,15 @@ async function downloadUpdate(url, filename, onProgress, releaseDigest) {
     throw lastErr || new Error('Download failed');
 }
 
-async function downloadPendingUpdate(onProgress) {
+// Two prompts/clicks must not run two downloads into the same .part file.
+let _downloadInFlight = null;
+function downloadPendingUpdate(onProgress) {
+    if (!_downloadInFlight) {
+        _downloadInFlight = downloadPendingUpdateOnce(onProgress).finally(() => { _downloadInFlight = null; });
+    }
+    return _downloadInFlight;
+}
+async function downloadPendingUpdateOnce(onProgress) {
     let info = _pendingUpdate;
     const current = app.getVersion();
     if (!info || compareVersions(info.version, current) <= 0) {

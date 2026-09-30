@@ -222,6 +222,7 @@ function registerIpc(getWindow) {
         return { ok: true, mode: variant };
     });
 
+    const MAIN_OWNED_SETTINGS = ['proxy_auto_latched', 'proxy_web_fallback_latched', 'proxy_last_good_control_domain', 'proxy_last_good_media_domain', 'skipped_version'];
     handle('save_settings', (e, { settings }) => {
         const current = loadSettings();
         state.settings = current;
@@ -234,6 +235,8 @@ function registerIpc(getWindow) {
             noTypingForceOff: current.privacy_no_typing_force_off || [],
         };
         const next = Object.assign({}, settings || {});
+        // Main-owned state: the page sends whole snapshots, which must not revert these.
+        for (const k of MAIN_OWNED_SETTINGS) delete next[k];
         if (Object.prototype.hasOwnProperty.call(next, 'save_path') && next.save_path !== current.save_path) {
             const grant = approvedSavePaths.get(e.sender.id);
             let accepted = false;
@@ -269,7 +272,7 @@ function registerIpc(getWindow) {
             if (win && !win.isDestroyed()) win.webContents.send('settings-changed', state.settings);
         }
         if (proxyConfigChanged) configureProxySettings(state.settings);
-        scheduleChecks();
+        if (current.update_check_interval !== state.settings.update_check_interval) scheduleChecks();
         if (state.settings.devtools_enabled !== true) {
             const win = getWindow();
             if (win && !win.isDestroyed() && win.webContents.isDevToolsOpened()) {
