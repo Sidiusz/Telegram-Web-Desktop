@@ -1871,7 +1871,7 @@ test('proxy stall recovery activates auto proxy and rotates away from a stalled 
     assert.match(route, /state\.mode === 'auto' && !state\.autoLatched/);
     assert.match(route, /persistAutoLatch\(reason === 'renderer-network-stall' \? 'direct-network-stall'/);
     assert.match(route, /STALL_ROTATE_COOLDOWN_MS = 45 \* 1000/);
-    assert.match(route, /state\.avoidControlDomain = String\(stalledDomain\)/);
+    assert.match(route, /state\.avoidControlDomain = canonicalDomain\(stalledDomain\)/);
     assert.match(route, /clearBridgePreferredDomain\(state\.avoidControlDomain, false\)/);
     assert.match(route, /state\.reconnectEpoch\+\+/);
 });
