@@ -1272,7 +1272,8 @@ test('desktop notification popup follows Telegram toast geometry and has no dead
 
     assert.match(notif, /const WIDTH = 384/);
     assert.match(notif, /#stack\{position:absolute;inset:0;overflow:hidden/);
-    assert.match(notif, /\.card\{position:absolute;left:8px;right:8px;height:156px/);
+    assert.match(notif, /\.card\{position:absolute;left:8px;right:8px;height:\$\{CARD_HEIGHT\}px/);
+    assert.match(notif, /const CARD_H=\$\{CARD_HEIGHT\};\s*const GAP=\$\{CARD_GAP\};\s*const STACK_H=\$\{STACK_HEIGHT\};/);
     assert.match(notif, /background:rgba\(33,33,33,\.94\)/);
     assert.match(notif, /backdrop-filter:blur\(8px\)/);
     assert.match(notif, /border:1px solid rgba\(255,255,255,\.14\)/);

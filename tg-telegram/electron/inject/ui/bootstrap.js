@@ -377,10 +377,6 @@ document.addEventListener('click', function(e){
         var a=t.closest && t.closest('.Audio'); if(a){ var at=a.querySelector('.title'); if(at) return (at.textContent||'').trim(); }
         return '';
     }
-    function curPeer(){
-        var el=document.querySelector('#MiddleColumn .ChatInfo .Avatar[data-peer-id], .MiddleHeader .ChatInfo .Avatar[data-peer-id]');
-        return el?el.getAttribute('data-peer-id'):'';
-    }
     // Клик — это старт скачивания? Ловим: иконку/кнопку скачивания (действие в
     // сообщении, кнопка «Загрузка» в просмотрщике по aria-label) И пункт «Скачать»
     // в контекст-меню (клик по тексту пункта не попадает в саму иконку, поэтому
@@ -407,13 +403,13 @@ document.addEventListener('click', function(e){
         // (downloads-registry), карточку не плодим.
         if(t.closest('.File._tgdl_done_ok_')) return;
         if(typeof startImmediateDownloadCard==='function'){
-            try{ startImmediateDownloadCard(origNameFor(t), curPeer()); }catch(_){}
+            try{ startImmediateDownloadCard(origNameFor(t), _dlCurrentPeer()); }catch(_){}
         }
     }, true);
     // Смена чата → пересчитать визуал карточек без постоянного 500ms polling.
-    var _lastP=curPeer();
+    var _lastP=_dlCurrentPeer();
     function reflowOnPeerChange(){
-        var p=curPeer();if(p===_lastP)return;_lastP=p;
+        var p=_dlCurrentPeer();if(p===_lastP)return;_lastP=p;
         if(window.__tgdlReflowCards)try{window.__tgdlReflowCards();}catch(_){}
     }
     ['pushState','replaceState'].forEach(function(k){

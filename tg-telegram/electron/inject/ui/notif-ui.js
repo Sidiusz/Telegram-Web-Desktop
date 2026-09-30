@@ -125,7 +125,7 @@ function _dlRemoveCard(id){
     _dlClaimable=_dlClaimable.filter(function(x){return x.id!==id;});
     if(c.dismiss)c.dismiss();else if(c.shell)c.shell.remove();
 }
-// Текущий открытый чат (peerId) — для выбора визуала карточки (в чате / фоновая).
+// Peer id of the open chat (download cards and the download-click hook).
 function _dlCurrentPeer(){
     var el=document.querySelector('#MiddleColumn .ChatInfo .Avatar[data-peer-id], .MiddleHeader .ChatInfo .Avatar[data-peer-id]');
     return el?el.getAttribute('data-peer-id'):'';

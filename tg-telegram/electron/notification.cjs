@@ -108,7 +108,7 @@ function buildHtml() {
         font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;user-select:none;}
     #stack{position:absolute;inset:0;overflow:hidden;}
     /* Fixed-slot stack: no flex reflow and no BrowserWindow resize while cards exist. */
-    .card{position:absolute;left:8px;right:8px;height:156px;
+    .card{position:absolute;left:8px;right:8px;height:${CARD_HEIGHT}px;
         background:rgba(33,33,33,.94);backdrop-filter:blur(8px);border:1px solid rgba(255,255,255,.14);
         border-radius:16px;padding:17px;color:#fff;box-shadow:0 6px 24px rgba(0,0,0,.28);
         opacity:1;transform:translate3d(0,0,0);will-change:transform,opacity;}
@@ -139,10 +139,10 @@ function buildHtml() {
     const stack=document.getElementById('stack');
     const cards=new Map();
     const order=[];
-    const MAX_CARDS=3;
-    const CARD_H=156;
-    const GAP=8;
-    const STACK_H=484;
+    const MAX_CARDS=${MAX_CARDS};
+    const CARD_H=${CARD_HEIGHT};
+    const GAP=${CARD_GAP};
+    const STACK_H=${STACK_HEIGHT};
     const MOVE_MS=280;
     const FADE_MS=180;
     const MOVE_EASE='cubic-bezier(.25,1,.5,1)';
