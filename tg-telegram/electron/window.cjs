@@ -37,7 +37,7 @@ function startupBackground(theme) {
     return theme === 'light' ? '#ffffff' : '#212121';
 }
 
-const WEB_ASSET_PATCH_REVISION = 'runtime-v6';
+const WEB_ASSET_PATCH_REVISION = 'pins-v7';
 async function refreshPatchedTelegramAssetCache(ses) {
     const marker = path.join(app.getPath('userData'), '.twd-web-assets-revision');
     try {
