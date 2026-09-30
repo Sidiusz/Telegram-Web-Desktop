@@ -21,13 +21,13 @@ const DC_IPS = Object.freeze({
 const NAMED_DC = Object.freeze({ pluto: 1, venus: 2, aurora: 3, vesta: 4, flora: 5 });
 
 const state = {
-    installed: false, session: null, mode: 'auto', autoLatched: false,
+    installed: false, mode: 'auto', autoLatched: false,
     autoReason: '', flowsealDomains: DEFAULT_CF_BASE_DOMAINS.slice(),
     domainSource: 'flowseal', customDomains: [], pinnedDomain: '',
     preferredControlDomain: '', preferredMediaDomain: '',
     workerEnabled: false, workerDomains: [], autoFailures: 1,
     autoWindowSec: 12, webFallback: true, webFallbackLatched: false,
-    dcIps: { ...DC_IPS }, cursor: new Map(), directFailures: [],
+    dcIps: { ...DC_IPS }, directFailures: [],
     lastRoute: 'direct', lastDomain: '', lastError: '', lastDc: 0,
     refreshTimer: null, revision: 0, reconnectEpoch: 0, bridgePort: 0, bridgeToken: '',
     avoidControlDomain: '', avoidControlUntil: 0,
@@ -166,7 +166,6 @@ async function refreshFlowsealDomains() {
         const decoded = normalizeDomains(lines.map(decodeFlowsealDomain));
         if (decoded.length < 3) return { ok: false, error: 'domain list too short' };
         state.flowsealDomains = decoded;
-        state.cursor.clear();
         broadcastProxyState();
         console.log(`[TG-PROXY] Flowseal domain pool refreshed (${decoded.length})`);
         return { ok: true, domains: decoded.length };
@@ -192,7 +191,6 @@ async function refreshFlowsealDomains() {
 }
 function configureProxySettings(settings) {
     applySettings(settings || loadSettings());
-    state.cursor.clear();
     broadcastProxyState();
     if (isProxyActive() && state.domainSource === 'flowseal') refreshFlowsealDomains().catch(() => {});
     return getProxyStatus();
@@ -201,7 +199,6 @@ function persist(patch) {
     saveSettings(patch);
     const s = loadSettings();
     applySettings(s);
-    state.cursor.clear();
     broadcastProxyState();
     return s;
 }
@@ -214,16 +211,6 @@ function setProxyMode(mode) {
     state.lastError = '';
     state.lastRoute = next === 'always' ? 'cf' : 'direct';
     if (isProxyActive() && state.domainSource === 'flowseal') refreshFlowsealDomains().catch(() => {});
-    return getProxyStatus();
-}
-function resetAutoProxy() {
-    persist({ proxy_mode: 'auto', proxy_auto_latched: false, proxy_web_fallback_latched: false });
-    state.autoLatched = false;
-    state.webFallbackLatched = false;
-    state.autoReason = '';
-    state.directFailures = [];
-    state.lastError = '';
-    state.lastRoute = 'direct';
     return getProxyStatus();
 }
 function forceProxyReconnect(reason = 'renderer-network-stall') {
@@ -374,7 +361,6 @@ async function testProxyConnectivity() {
 function installFlowsealWsRoute(ses, initialSettings) {
     if (state.installed || !ses) return getProxyStatus();
     state.installed = true;
-    state.session = ses;
     applySettings(initialSettings || loadSettings());
     const wr = ses.webRequest;
     wr.onBeforeRequest({ urls: ['wss://*/*', 'ws://*/*'] }, (details, callback) => {
@@ -441,7 +427,7 @@ function noteTelegramLoadFailure(error) {
 }
 
 module.exports = {
-    installFlowsealWsRoute, configureProxySettings, setProxyMode, resetAutoProxy, forceProxyReconnect,
+    installFlowsealWsRoute, configureProxySettings, setProxyMode, forceProxyReconnect,
     updateProxyOptions, getProxyStatus, getProxyBootstrap, noteTelegramLoadFailure,
     refreshFlowsealDomains, testProxyConnectivity, isWebFallbackEnabled, clearWebFallbackLatch, shouldBlockDirectTelegram,
     dcFromTelegramWsHost, DEFAULT_CF_BASE_DOMAINS, DC_IPS,

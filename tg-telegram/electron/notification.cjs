@@ -417,7 +417,6 @@ function queueNotification(data) {
         btnOpen: clipText(data && data.btnOpen, 64),
         btnRead: clipText(data && data.btnRead, 64),
         peerId: /^-?\d+$/.test(peer) ? peer : '',
-        playSound: data && data.playSound !== false,
         duration: Number.isFinite(rawDuration) ? Math.max(2, Math.min(30, rawDuration)) : 6,
     };
     ensureWin();

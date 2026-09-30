@@ -45,11 +45,6 @@ function sanitizeFilename(name) {
     return s || 'file';
 }
 
-function sanitizePathForDownloads(dir, filename) {
-    const safe = sanitizeFilename(filename);
-    return uniquePath(path.join(dir, safe));
-}
-
 // Mark-of-the-Web so SmartScreen and Office Protected View treat saved Telegram files as downloaded.
 function markFromInternet(file, hostUrl = 'https://web.telegram.org/') {
     if (process.platform !== 'win32') return false;
@@ -59,4 +54,4 @@ function markFromInternet(file, hostUrl = 'https://web.telegram.org/') {
     } catch (_) { return false; }
 }
 
-module.exports = { uniquePath, reservePath, sanitizeFilename, sanitizePathForDownloads, markFromInternet };
+module.exports = { uniquePath, reservePath, sanitizeFilename, markFromInternet };

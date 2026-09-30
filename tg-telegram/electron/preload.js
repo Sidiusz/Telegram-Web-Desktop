@@ -372,13 +372,6 @@ function _tgWakeForeground() {
     try { window.dispatchEvent(new Event('focus')); } catch (e) {}
 }
 contextBridge.exposeInMainWorld('__tgHiddenCtrl', {
-    setHidden: (v, force = false) => {
-        const next = !!v;
-        if (next === _tgHidden && !force) return;
-        _tgHidden = next;
-        try { document.dispatchEvent(new Event('visibilitychange')); } catch (e) {}
-        try { window.dispatchEvent(new Event(next ? 'blur' : 'focus')); } catch (e) {}
-    },
     setHasFocus: (v) => { _tgHasFocus = !!v; },
     wakeForeground: () => _tgWakeForeground(),
 });
@@ -399,7 +392,7 @@ if (document.readyState === 'loading') document.addEventListener('DOMContentLoad
 else _tgInstallForegroundObserver();
 
 const TWD_ALLOWED_INVOKE = new Set([
-    'get_settings','get_app_info','get_window_state','get_proxy_status','set_proxy_mode','reset_proxy_auto','reconnect_proxy','save_proxy_options',
+    'get_settings','get_app_info','get_window_state','get_proxy_status','set_proxy_mode','reconnect_proxy','save_proxy_options',
     'refresh_proxy_domains','test_proxy_connectivity','show_notification','preview_notification','save_settings','toggle_devtools','open_url','open_default_apps',
     'open_folder_dialog','get_downloads','bind_download','forget_download','delete_download','cancel_download',
     'open_downloads_folder','open_download_folder','open_download_file','clear_cache','fetch_changelog','fetch_changelog_structured',
@@ -473,7 +466,6 @@ contextBridge.exposeInMainWorld('tgBridge', {
     saveBlob: twdSaveBlob,
     onDownloadEvent: (cb) => { ipcRenderer.on('download-event', (_e, data) => cb(data)); },
 
-    onNotification: (cb) => { ipcRenderer.on('show-notification', (_e, data) => cb(data)); },
     onSettingsChanged: (cb) => { ipcRenderer.on('settings-changed', (_e, data) => cb(data)); },
     onWindowStateChanged: (cb) => { ipcRenderer.on('window-state-changed', (_e, data) => cb(data)); },
 
