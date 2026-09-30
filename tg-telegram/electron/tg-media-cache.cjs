@@ -43,13 +43,18 @@ function patchTelegramMediaCache(body) {
     const getterNeedle = `function ${getterFn}(e){return ${cacheVar}.get(e)}`;
     const insertAt = out.indexOf(getterNeedle);
     if (insertAt < 0) return { body: source, patched: false };
+    out = out.slice(0, insertAt) + `function ${getterFn}(e){return __twdMediaCacheGet(e)}` +
+        out.slice(insertAt + getterNeedle.length);
+    // Entries used recently may still be on their way into the DOM (lazy render,
+    // transitions), so only entries idle for PROTECT_MS and not on screen are revoked.
     const helper = `
-let __twdMediaCacheRevoked=0;
-function __twdMediaCacheRefs(){const s=new Set;try{document.querySelectorAll('img[src^="blob:"],video[src^="blob:"],audio[src^="blob:"],source[src^="blob:"]').forEach(n=>{const v=n.currentSrc||n.src;if(v)s.add(v)})}catch(_){}return s}
-function __twdMediaCacheTrim(){if(${cacheVar}.size<=96)return;const refs=__twdMediaCacheRefs();for(const[k,v]of ${cacheVar}){if(${cacheVar}.size<=64)break;if(typeof v!=='string'||!v.startsWith('blob:')||refs.has(v))continue;${cacheVar}.delete(k);try{URL.revokeObjectURL(v);__twdMediaCacheRevoked++}catch(_){}}}
-function __twdMediaCacheSet(k,v){${cacheVar}.delete(k);${cacheVar}.set(k,v);__twdMediaCacheTrim();return v}
-function __twdMediaCacheDrop(k){const v=${cacheVar}.get(k);${cacheVar}.delete(k);if(typeof v==='string'&&v.startsWith('blob:'))setTimeout(()=>{if(!__twdMediaCacheRefs().has(v))try{URL.revokeObjectURL(v);__twdMediaCacheRevoked++}catch(_){}},1000)}
-globalThis.__twdMediaCacheStats=()=>{let blobEntries=0;for(const v of ${cacheVar}.values())if(typeof v==='string'&&v.startsWith('blob:'))blobEntries++;return{entries:${cacheVar}.size,blobEntries,revoked:__twdMediaCacheRevoked,highWater:96,target:64}};
+let __twdMediaCacheRevoked=0;const __twdMediaCacheUsed=new Map;const __twdMediaCacheProtectMs=60000;
+function __twdMediaCacheRefs(){const s=new Set;try{document.querySelectorAll('img[src^="blob:"],video[src^="blob:"],audio[src^="blob:"],source[src^="blob:"]').forEach(n=>{if(n.src)s.add(n.src);if(n.currentSrc)s.add(n.currentSrc)});document.querySelectorAll('video[poster^="blob:"]').forEach(n=>s.add(n.poster));document.querySelectorAll('image').forEach(n=>{const v=n.getAttribute('href')||n.getAttribute('xlink:href')||'';if(v.startsWith('blob:'))s.add(v)});document.querySelectorAll('[style*="blob:"]').forEach(n=>{for(const m of String(n.getAttribute('style')||'').matchAll(/blob:[^"')\\s]+/g))s.add(m[0])})}catch(_){}return s}
+function __twdMediaCacheTrim(keep){if(${cacheVar}.size<=96)return;const now=Date.now();for(const k of __twdMediaCacheUsed.keys())if(!${cacheVar}.has(k))__twdMediaCacheUsed.delete(k);let refs=null;for(const[k,v]of ${cacheVar}){if(${cacheVar}.size<=64)break;if(k===keep||typeof v!=='string'||!v.startsWith('blob:'))continue;if(now-(__twdMediaCacheUsed.get(k)||0)<__twdMediaCacheProtectMs)continue;refs||(refs=__twdMediaCacheRefs());if(refs.has(v))continue;${cacheVar}.delete(k);__twdMediaCacheUsed.delete(k);try{URL.revokeObjectURL(v);__twdMediaCacheRevoked++}catch(_){}}}
+function __twdMediaCacheGet(k){const v=${cacheVar}.get(k);if(v!==void 0){__twdMediaCacheUsed.set(k,Date.now());${cacheVar}.delete(k);${cacheVar}.set(k,v)}return v}
+function __twdMediaCacheSet(k,v){${cacheVar}.delete(k);${cacheVar}.set(k,v);__twdMediaCacheUsed.set(k,Date.now());__twdMediaCacheTrim(k);return v}
+function __twdMediaCacheDrop(k){const v=${cacheVar}.get(k);${cacheVar}.delete(k);__twdMediaCacheUsed.delete(k);if(typeof v==='string'&&v.startsWith('blob:'))setTimeout(()=>{if(!__twdMediaCacheRefs().has(v))try{URL.revokeObjectURL(v);__twdMediaCacheRevoked++}catch(_){}},1000)}
+globalThis.__twdMediaCacheStats=()=>{let blobEntries=0;for(const v of ${cacheVar}.values())if(typeof v==='string'&&v.startsWith('blob:'))blobEntries++;return{entries:${cacheVar}.size,blobEntries,revoked:__twdMediaCacheRevoked,highWater:96,target:64,protectMs:__twdMediaCacheProtectMs}};
 `;
     return { body: out.slice(0, insertAt) + helper + out.slice(insertAt), patched: true };
 }
