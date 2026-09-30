@@ -6,9 +6,9 @@ const fs = require('fs');
 const { getScripts } = require('./scripts.cjs');
 const { loadAddonScripts } = require('./addons.cjs');
 const { loadFeatureScripts } = require('./features.cjs');
-const { saveDownloads, trackActive, untrackActive } = require('./downloads.cjs');
+const { addDownloadRecord, patchDownloadRecord, trackActive, untrackActive } = require('./downloads.cjs');
 const { loadSettings } = require('./settings.cjs');
-const { uniquePath, reservePath } = require('./utils.cjs');
+const { uniquePath, reservePath, sanitizeFilename } = require('./utils.cjs');
 const { installFlowsealWsRoute, noteTelegramLoadFailure, isWebFallbackEnabled, clearWebFallbackLatch, shouldBlockDirectTelegram } = require('./tg-flowseal-route.cjs');
 function blockedTransportResponse() {
     return new Response('', { status: 503, statusText: 'Blocked by proxy mode' });
@@ -416,9 +416,7 @@ function createWindow(state, onTelegramLink, options = {}) {
 
     mainWindow.webContents.session.on('will-download', (event, item) => {
         const settings = loadSettings();
-        const rawName = item.getFilename();
-        const { sanitizeFilename } = require('./utils.cjs');
-        const originalFilename = sanitizeFilename(rawName);
+        const originalFilename = sanitizeFilename(item.getFilename());
 
         const downloadDir = settings.save_path || app.getPath('downloads');
         try {
@@ -431,49 +429,27 @@ function createWindow(state, onTelegramLink, options = {}) {
         item.setSavePath(uniquePath(path.join(downloadDir, originalFilename)));
         const releasePath = reservePath(item.getSavePath());
 
-        state.downloadCounter += 1;
-        const id = state.downloadCounter;
         const savePath = item.getSavePath();
         const filename = path.basename(savePath) || originalFilename;
-
-        state.downloads.push({
-            id, url: item.getURL(), filename, path: savePath, status: 'downloading',
-            recv: 0, total: Math.max(0, Number(item.getTotalBytes()) || 0),
-        });
-        saveDownloads(state.downloads);
-        trackActive(id, item);
-
-        // origName is the name as sent in the message (renderer matches mid by it); filename is the actual saved name (for the manager).
-        sendDownloadEvent({
-            type: 'start', id, filename, origName: originalFilename,
+        const bytes = () => ({
+            received: Math.max(0, Number(item.getReceivedBytes()) || 0),
             total: Math.max(0, Number(item.getTotalBytes()) || 0),
         });
 
+        const id = addDownloadRecord(state, { url: item.getURL(), filename, path: savePath, total: bytes().total });
+        trackActive(id, item);
+
+        // origName is the name as sent in the message (renderer matches mid by it); filename is the actual saved name (for the manager).
+        sendDownloadEvent({ type: 'start', id, filename, origName: originalFilename, total: bytes().total });
+
         item.on('updated', (event, dlState) => {
+            const { received, total } = bytes();
             if (dlState === 'interrupted') {
-                const dl = state.downloads.find(d => d.id === id);
-                if (dl) {
-                    dl.status = 'failed';
-                    dl.recv = Math.max(0, Number(item.getReceivedBytes()) || 0);
-                    dl.total = Math.max(0, Number(item.getTotalBytes()) || 0);
-                    saveDownloads(state.downloads);
-                }
-                sendDownloadEvent({
-                    type: 'done', id, status: 'failed',
-                    received: Math.max(0, Number(item.getReceivedBytes()) || 0),
-                    total: Math.max(0, Number(item.getTotalBytes()) || 0),
-                });
+                patchDownloadRecord(state, id, { status: 'failed', recv: received, total });
+                sendDownloadEvent({ type: 'done', id, status: 'failed', received, total });
             } else {
-                const received = Math.max(0, Number(item.getReceivedBytes()) || 0);
-                const total = Math.max(0, Number(item.getTotalBytes()) || 0);
-                const dl = state.downloads.find(d => d.id === id);
-                if (dl) { dl.recv = received; dl.total = total; }
-                sendDownloadEvent({
-                    type: 'progress',
-                    id,
-                    received,
-                    total,
-                });
+                patchDownloadRecord(state, id, { recv: received, total }, false);
+                sendDownloadEvent({ type: 'progress', id, received, total });
             }
         });
 
@@ -483,19 +459,9 @@ function createWindow(state, onTelegramLink, options = {}) {
             const status = dlState === 'completed' ? 'completed' : (dlState === 'cancelled' ? 'cancelled' : 'failed');
             // User-cancelled: drop the partial file.
             if (status === 'cancelled' && savePath) { try { fs.unlinkSync(savePath); } catch (e) {} }
-            const dl = state.downloads.find(d => d.id === id);
-            if (dl) {
-                dl.status = status;
-                dl.path = item.getSavePath();
-                dl.recv = Math.max(0, Number(item.getReceivedBytes()) || 0);
-                dl.total = Math.max(0, Number(item.getTotalBytes()) || 0);
-                saveDownloads(state.downloads);
-            }
-            sendDownloadEvent({
-                type: 'done', id, status,
-                received: Math.max(0, Number(item.getReceivedBytes()) || 0),
-                total: Math.max(0, Number(item.getTotalBytes()) || 0),
-            });
+            const { received, total } = bytes();
+            patchDownloadRecord(state, id, { status, path: item.getSavePath(), recv: received, total });
+            sendDownloadEvent({ type: 'done', id, status, received, total });
         });
     });
 

@@ -4,7 +4,7 @@ const { init: initNotifications, queueNotification } = require('./notification.c
 const { loadSettings, saveSettings } = require('./settings.cjs');
 const { configureProxySettings, setProxyMode, forceProxyReconnect, updateProxyOptions, getProxyStatus, getProxyBootstrap, refreshFlowsealDomains, testProxyConnectivity } = require('./tg-flowseal-route.cjs');
 const { getFallbackInfo } = require('./telegram-web-fallback.cjs');
-const { loadDownloads, saveDownloads, deleteDownload, cancelActive } = require('./downloads.cjs');
+const { loadDownloads, saveDownloads, deleteDownload, addDownloadRecord, patchDownloadRecord, cancelActive } = require('./downloads.cjs');
 const { getAddons, deleteAddon, openAddonsFolder, toggleAddon } = require('./addons.cjs');
 const { uniquePath, reservePath, sanitizeFilename, markFromInternet } = require('./utils.cjs');
 const { historyConfig, privacyConfig } = require('./renderer-config.cjs');
@@ -551,13 +551,7 @@ function registerIpc(getWindow) {
         try { await item.file.close(); } catch (_) {}
         try { await fs.promises.unlink(item.temp); } catch (_) {}
         item.releasePath();
-        const rec = state.downloads.find(d => d.id === item.id);
-        if (rec) {
-            rec.status = status;
-            rec.recv = item.received;
-            rec.total = item.expectedTotal;
-            saveDownloads(state.downloads);
-        }
+        patchDownloadRecord(state, item.id, { status, recv: item.received, total: item.expectedTotal });
         emitBlobDownload({
             type: 'done',
             id: item.id,
@@ -599,9 +593,8 @@ function registerIpc(getWindow) {
         }
 
         const streamId = event.sender.id + '-' + Date.now().toString(36) + '-' + (++blobSaveSeq).toString(36);
-        state.downloadCounter += 1;
-        const id = state.downloadCounter;
         const savedName = path.basename(dest);
+        const id = addDownloadRecord(state, { filename: savedName, path: dest, total: expectedTotal });
         const item = {
             streamId,
             senderId: event.sender.id,
@@ -622,11 +615,6 @@ function registerIpc(getWindow) {
         };
         blobSaves.set(streamId, item);
         blobSaveByDownloadId.set(id, streamId);
-        state.downloads.push({
-            id, url: '', filename: savedName, path: dest, status: 'downloading',
-            recv: 0, total: expectedTotal,
-        });
-        saveDownloads(state.downloads);
         emitBlobDownload({ type: 'start', id, filename: savedName, origName: safeName, total: expectedTotal });
 
         item.senderDestroyedHandler = () => {
@@ -662,11 +650,7 @@ function registerIpc(getWindow) {
                 offset += result.bytesWritten;
             }
             item.received += buf.length;
-            const rec = state.downloads.find(d => d.id === item.id);
-            if (rec) {
-                rec.recv = item.received;
-                rec.total = item.expectedTotal;
-            }
+            patchDownloadRecord(state, item.id, { recv: item.received, total: item.expectedTotal }, false);
             emitBlobDownload({
                 type: 'progress',
                 id: item.id,
@@ -705,14 +689,7 @@ function registerIpc(getWindow) {
         detachBlobSender(item);
         blobSaves.delete(item.streamId);
         blobSaveByDownloadId.delete(item.id);
-        const rec = state.downloads.find(d => d.id === item.id);
-        if (rec) {
-            rec.status = 'completed';
-            rec.path = item.dest;
-            rec.recv = item.received;
-            rec.total = item.expectedTotal;
-            saveDownloads(state.downloads);
-        }
+        patchDownloadRecord(state, item.id, { status: 'completed', path: item.dest, recv: item.received, total: item.expectedTotal });
         emitBlobDownload({
             type: 'done',
             id: item.id,
