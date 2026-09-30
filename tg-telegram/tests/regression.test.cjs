@@ -1593,6 +1593,45 @@ test('main process survives late download events and cleans interrupted blob sav
     assert.match(ipc, /item\.sender\.removeListener\('did-start-navigation', item\.senderNavigationHandler\)/);
 });
 
+test('settings are read once per load and written once per save', () => {
+    const Module = require('node:module');
+    const origLoad = Module._load;
+    const stores = [];
+    class FakeStore {
+        constructor(opts) { this.name = opts && opts.name; this.data = {}; this.reads = 0; this.writes = 0; stores.push(this); }
+        get store() { this.reads++; return JSON.parse(JSON.stringify(this.data)); }
+        get(k, d) { this.reads++; return k in this.data ? this.data[k] : d; }
+        has(k) { return k in this.data; }
+        set(k, v) { this.writes++; if (k && typeof k === 'object') Object.assign(this.data, k); else this.data[k] = v; }
+        delete(k) { this.writes++; delete this.data[k]; }
+    }
+    Module._load = function (request, ...rest) {
+        if (request === 'electron-store') return { default: FakeStore };
+        return origLoad.call(this, request, ...rest);
+    };
+    try {
+        delete require.cache[require.resolve('../electron/settings.cjs')];
+        const { loadSettings, saveSettings } = require('../electron/settings.cjs');
+        const main = stores.find(s => s.name === 'settings');
+        main.data._builtin_features_migrated_131 = true;
+        main.reads = 0;
+        const s = loadSettings();
+        assert.equal(s.proxy_mode, 'auto');
+        assert.ok(main.reads <= 2, `loadSettings read the file ${main.reads} times`);
+        main.writes = 0;
+        saveSettings(Object.assign({}, s, { notif_sound: false, proxy_mode: 'always' }));
+        assert.equal(main.writes, 1, 'a full snapshot save is one write');
+        assert.equal(main.data.proxy_mode, 'always');
+        saveSettings(loadSettings());
+        assert.equal(main.writes, 1, 'saving unchanged settings writes nothing');
+        saveSettings({ notif_volume: 'loud' });
+        assert.equal(main.writes, 1, 'invalid values are ignored');
+    } finally {
+        Module._load = origLoad;
+        delete require.cache[require.resolve('../electron/settings.cjs')];
+    }
+});
+
 test('every injected script compiles exactly as it is shipped', () => {
     const Module = require('node:module');
     const origLoad = Module._load;
