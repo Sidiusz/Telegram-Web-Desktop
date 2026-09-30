@@ -1532,6 +1532,16 @@ test('message history never removes Telegram-owned nodes, stays under a storage 
     assert.match(read('electron/features.cjs'), /savePublic: s\.messages_save_public === true/);
 });
 
+test('Web A fallback latch recovers and offline failures never latch it', () => {
+    const win = read('electron/window.cjs');
+    const route = read('electron/tg-flowseal-route.cjs');
+    assert.match(win, /if \(!net\.isOnline\(\)\) throw e;\s*noteTelegramLoadFailure/);
+    assert.match(win, /clearWebFallbackLatch\(\)\) \{\s*console\.log\('\[TG-PROXY\] direct Web A reachable again/);
+    assert.match(win, /webContents\.on\('did-fail-load', \(_event, code, description, _url, isMainFrame\) => \{/);
+    assert.match(win, /code === -3/);
+    assert.match(route, /function clearWebFallbackLatch\(\) \{[\s\S]{0,160}saveSettings\(\{ proxy_web_fallback_latched: false \}\)/);
+});
+
 test('external link hook never bypasses Telegram link confirmation or double-opens', () => {
     const source = read('electron/inject/external.js');
     const opened = [];

@@ -308,6 +308,12 @@ function getProxyStatus() {
     };
 }
 function isWebFallbackEnabled() { return state.webFallback; }
+function clearWebFallbackLatch() {
+    if (!state.webFallbackLatched) return false;
+    state.webFallbackLatched = false;
+    saveSettings({ proxy_web_fallback_latched: false });
+    return true;
+}
 
 function testWs(url, timeoutMs = 6000) {
     return new Promise(resolve => {
@@ -419,7 +425,7 @@ function noteTelegramLoadFailure(error) {
 module.exports = {
     installFlowsealWsRoute, configureProxySettings, setProxyMode, resetAutoProxy, forceProxyReconnect,
     updateProxyOptions, getProxyStatus, getProxyBootstrap, noteTelegramLoadFailure,
-    refreshFlowsealDomains, testProxyConnectivity, isWebFallbackEnabled,
+    refreshFlowsealDomains, testProxyConnectivity, isWebFallbackEnabled, clearWebFallbackLatch,
     dcFromTelegramWsHost, DEFAULT_CF_BASE_DOMAINS, DC_IPS,
     setBridgeEndpoint, reportBridgeRoute, reportBridgeError,
     reportBridgePreferredDomain, clearBridgePreferredDomain,
