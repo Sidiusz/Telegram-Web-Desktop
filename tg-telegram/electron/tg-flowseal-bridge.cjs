@@ -389,6 +389,8 @@ async function startEmbeddedFlowsealBridge() {
         handleProtocols(protocols) {
             return protocols.has('binary') ? 'binary' : false;
         },
+        // Only Telegram's own MTProto worker may use the relay (not Mini App frames or other local pages).
+        verifyClient: ({ origin }) => origin === 'https://web.telegram.org',
     });
     wss.on('connection', handleLocalConnection);
     wss.on('error', err => console.error('[TG-PROXY-BRIDGE] server error:', err));

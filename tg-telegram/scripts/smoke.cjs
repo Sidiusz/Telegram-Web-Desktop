@@ -157,6 +157,16 @@ async function telegramTarget(port) {
 
     const blocked = await cdp.eval('window.tgBridge.invoke("__smoke_unknown__").then(()=>"allowed",e=>"blocked:"+e.message)');
     assert.match(blocked, /^blocked:/);
+    assert.equal(await cdp.eval('window.tgBridge.onSettingsChanged(()=>{})===undefined'), true, 'bridge listeners must not leak ipcRenderer internals');
+    const foreignOrigin = await new Promise(resolve => {
+      const bridgePort = (events.match(/\[TG-PROXY-BRIDGE\] listening on 127\.0\.0\.1:(\d+)/) || [])[1];
+      if (!bridgePort) return resolve('no-port');
+      const probe = new WebSocket(`ws://127.0.0.1:${bridgePort}/apiws?dc=2&token=x`, 'binary', { origin: 'https://evil.example' });
+      probe.once('unexpected-response', (_req, res) => resolve('rejected:' + res.statusCode));
+      probe.once('open', () => { probe.close(); resolve('accepted'); });
+      probe.once('error', () => resolve('rejected'));
+    });
+    assert.match(foreignOrigin, /^rejected/, 'the proxy bridge refuses foreign origins');
 
     const addons = await cdp.eval('window.tgBridge.invoke("get_addons").then(x=>x.map(a=>a.key))');
     assert.ok(Array.isArray(addons));
