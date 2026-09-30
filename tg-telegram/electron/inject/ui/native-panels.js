@@ -134,7 +134,7 @@ function openDownloadsNative(){
             const clr=_genIconButton('delete',T('dl_clear'),'small',true);
             clr.addEventListener('click',()=>{
                 showModal({
-                    title:T('dl_clear_t'),msg:T('dl_clear_m'),
+                    title:T('dl_clear_t'),msgHtml:T('dl_clear_m'),
                     okText:T('dl_clear_upper'),okDanger:true,
                     onOk:async()=>{
                         const items=await INV('get_downloads');
@@ -494,7 +494,7 @@ function _nativeDlRow(d,cb,liEl){
     if(d.id!=null){
         var del=_genIconButton('delete',T('dl_delete'),'tiny',true);
         del.addEventListener('click',function(e){e.preventDefault();e.stopPropagation();showModal({
-            title:T('dl_del_t'),msg:'«'+String(d.filename||'')+'»<br><small style="color:#aaa">'+T('dl_delete_disk')+'</small>',
+            title:T('dl_del_t'),msgHtml:'«'+_escHtml(String(d.filename||''))+'»<br><small style="color:#aaa">'+_escHtml(T('dl_delete_disk'))+'</small>',
             okText:T('del_upper'),okDanger:true,onOk:async function(){await INV('delete_download',{id:d.id});cb();}
         });});
         actions.appendChild(del);
@@ -509,7 +509,11 @@ async function renderDownloadsNative(content){
     const cardCls=_genCardCls(),headerTpl=_genHeaderTpl(),liEl=document.querySelector('#Settings .ListItem.narrow')||document.querySelector('#Settings .ListItem');
     if(!cardCls||!liEl){setTimeout(()=>{if(content.isConnected)renderDownloadsNative(content);},120);return;}
     let settings={};try{settings=await INV('get_settings')||{};}catch(e){}
-    const merged=await collectDownloads();content.innerHTML='';
+    const merged=await collectDownloads();
+    // The 700ms live refresh must not rebuild unchanged rows: a rebuild between mousedown and mouseup loses the click.
+    const sig=JSON.stringify([settings.save_path||'',merged.map(d=>[d.id,d.status,d.recv,d.total,d.filename,d.exists])]);
+    if(content.__twdDlSig===sig&&content.childElementCount)return;
+    content.__twdDlSig=sig;content.innerHTML='';
     const addSection=(title,card)=>content.append(_genHeader(headerTpl,title),card);
 
     const cfg=_genCard(cardCls);cfg.classList.add('_twd-panel-card_');
