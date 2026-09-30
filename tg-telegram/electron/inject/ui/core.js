@@ -1,7 +1,6 @@
 const INV=(cmd,args)=>window.tgBridge.invoke(cmd,args);
 const CSS=`
 .Menu.main-menu .bubble.menu-container{max-height:90vh!important;overflow-y:auto!important;}
-.Badge{display:inline-flex !important;align-items:center !important;justify-content:center !important;min-width:12px !important;height:12px !important;padding:0 3px !important;border-radius:6px !important;background:#F23C34 !important;color:#fff !important;font-size:9px !important;font-weight:700 !important;line-height:1 !important;box-sizing:border-box !important;letter-spacing:-.3px !important;}
 /* Toasts and popup cards use Telegram's own .Notification/.Notification-container classes. */
 /* Modal shell aligned with current Telegram Web A. */
 ._mo_{position:fixed;inset:0;z-index:2147483647;display:flex;align-items:center;justify-content:center;background:rgba(0,0,0,.25);opacity:1;transition:opacity .2s;}
