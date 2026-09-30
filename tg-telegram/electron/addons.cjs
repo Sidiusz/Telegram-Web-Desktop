@@ -91,15 +91,19 @@ function toggleAddon(addonKey, enabled) {
 
 // ── Список аддонов ────────────────────────────────────────────────────────────
 
+// .js/.crx add-on files in `dir` that pass the size limit.
+function addonFiles(dir) {
+    let entries;
+    try { entries = fs.readdirSync(dir); } catch (e) { return []; }
+    return entries
+        .map(entry => ({ entry, ext: path.extname(entry).toLowerCase().slice(1), fullPath: path.join(dir, entry), addonKey: 'user:' + entry }))
+        .filter(x => (x.ext === 'js' || x.ext === 'crx') && addonFileWithinLimit(x.fullPath, x.ext));
+}
+
 function readAddonsFromDir(dir) {
     const result = [];
     try {
-        for (const entry of fs.readdirSync(dir)) {
-            const ext = path.extname(entry).toLowerCase().slice(1);
-            if (ext !== 'js' && ext !== 'crx') continue;
-            const fullPath = path.join(dir, entry);
-            if (!addonFileWithinLimit(fullPath, ext)) continue;
-            const addonKey = 'user:' + entry;
+        for (const { entry, ext, fullPath, addonKey } of addonFiles(dir)) {
             let version = null;
             let displayName = entry;
             let group = null;
@@ -193,13 +197,7 @@ function extractCrxContentScripts(data) {
 function loadScriptsFromDir(dir) {
     const scripts = [];
     try {
-        for (const entry of fs.readdirSync(dir)) {
-            const ext      = path.extname(entry).toLowerCase().slice(1);
-            if (ext !== 'js' && ext !== 'crx') continue;
-            const addonKey = 'user:' + entry;
-            const fullPath = path.join(dir, entry);
-            if (!addonFileWithinLimit(fullPath, ext)) continue;
-
+        for (const { ext, fullPath, addonKey } of addonFiles(dir)) {
             if (ext === 'js') {
                 let content;
                 try { content = fs.readFileSync(fullPath, 'utf8'); } catch (e) { continue; }
