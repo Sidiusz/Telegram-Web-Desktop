@@ -194,17 +194,22 @@ function htmlToText(h) {
     return s.replace(/[ \t]+\n/g, '\n').replace(/\n{3,}/g, '\n\n').trim();
 }
 
-// Secondary path — github.com atom feed + expanded_assets page (no API, no rate
-// limit). Returns {version,url,filename,notes} or throws.
-async function fetchLatestReleaseWeb() {
+// Release entries of the github.com atom feed: {rawTag, version, notes|null}.
+async function fetchAtomEntries() {
     const atom = await fetchText(RELEASES_ATOM_URL);
-    // Feed order follows creation date, so pick the highest version instead of the first.
-    const entries = atom.split(/<entry>/).slice(1).map(e => {
+    return atom.split(/<entry>/).slice(1).map(e => {
         const t = e.match(/releases\/tag\/([^"<\s]+)/);
         if (!t) return null;
         const c = e.match(/<content[^>]*>([\s\S]*?)<\/content>/);
         return { rawTag: t[1], version: normVer(decodeURIComponent(t[1])), notes: c ? htmlToText(c[1]) : null };
     }).filter(Boolean);
+}
+
+// Secondary path — github.com atom feed + expanded_assets page (no API, no rate
+// limit). Returns {version,url,filename,notes} or throws.
+async function fetchLatestReleaseWeb() {
+    // Feed order follows creation date, so pick the highest version instead of the first.
+    const entries = await fetchAtomEntries();
     if (!entries.length) throw new Error('no tag in atom feed');
     const best = entries.reduce((a, b) => (compareVersions(b.version, a.version) > 0 ? b : a));
 
@@ -298,7 +303,7 @@ function assertAllowedHost(url) {
     const u = new URL(url);
     if (u.protocol !== 'https:') throw new Error('Update URL must use HTTPS');
     if (u.hostname !== 'github.com') throw new Error('Update host not allowed: ' + u.hostname);
-    const prefix = '/Sidiusz/Telegram-Web-Desktop/releases/download/';
+    const prefix = '/' + RELEASE_REPO + '/releases/download/';
     if (!u.pathname.startsWith(prefix)) throw new Error('Update URL is outside the release repository');
     return u;
 }
@@ -546,13 +551,7 @@ function compareVersions(a, b) {
 
 // All releases (for the block "Changelog" screen), from the atom feed — no API.
 async function fetchReleasesWeb() {
-    const atom = await fetchText(RELEASES_ATOM_URL);
-    return atom.split(/<entry>/).slice(1).map(e => {
-        const t = e.match(/releases\/tag\/([^"<\s]+)/);
-        if (!t) return null;
-        const c = e.match(/<content[^>]*>([\s\S]*?)<\/content>/);
-        return { version: normVer(decodeURIComponent(t[1])), notes: c ? htmlToText(c[1]) : '' };
-    }).filter(Boolean);
+    return (await fetchAtomEntries()).map(e => ({ version: e.version, notes: e.notes || '' }));
 }
 
 // All releases as a list. For the block "Changelog" screen. API first, then atom feed.
