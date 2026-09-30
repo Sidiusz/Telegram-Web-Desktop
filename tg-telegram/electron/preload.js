@@ -471,13 +471,13 @@ async function twdSaveBlob(blobUrl, filename) {
 contextBridge.exposeInMainWorld('tgBridge', {
     invoke: twdInvoke,
     saveBlob: twdSaveBlob,
-    onDownloadEvent: (cb) => ipcRenderer.on('download-event', (_e, data) => cb(data)),
+    onDownloadEvent: (cb) => { ipcRenderer.on('download-event', (_e, data) => cb(data)); },
 
-    onNotification: (cb) => ipcRenderer.on('show-notification', (_e, data) => cb(data)),
-    onSettingsChanged: (cb) => ipcRenderer.on('settings-changed', (_e, data) => cb(data)),
-    onWindowStateChanged: (cb) => ipcRenderer.on('window-state-changed', (_e, data) => cb(data)),
+    onNotification: (cb) => { ipcRenderer.on('show-notification', (_e, data) => cb(data)); },
+    onSettingsChanged: (cb) => { ipcRenderer.on('settings-changed', (_e, data) => cb(data)); },
+    onWindowStateChanged: (cb) => { ipcRenderer.on('window-state-changed', (_e, data) => cb(data)); },
 
-    onUpdateAvailable: (cb) => ipcRenderer.on('update-available', (_e, data) => cb(data)),
-    onUpdateProgress: (cb) => ipcRenderer.on('update-download-progress', (_e, data) => cb(data)),
-    onUpdateDone: (cb) => ipcRenderer.on('update-download-done', (_e, data) => cb(data)),
+    onUpdateAvailable: (cb) => { ipcRenderer.on('update-available', (_e, data) => cb(data)); },
+    onUpdateProgress: (cb) => { ipcRenderer.on('update-download-progress', (_e, data) => cb(data)); },
+    onUpdateDone: (cb) => { ipcRenderer.on('update-download-done', (_e, data) => cb(data)); },
 });
