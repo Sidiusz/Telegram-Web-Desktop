@@ -7,6 +7,7 @@ const { getFallbackInfo } = require('./telegram-web-fallback.cjs');
 const { loadDownloads, saveDownloads, deleteDownload, cancelActive } = require('./downloads.cjs');
 const { getAddons, deleteAddon, openAddonsFolder, toggleAddon } = require('./addons.cjs');
 const { uniquePath, reservePath, sanitizeFilename, markFromInternet } = require('./utils.cjs');
+const { historyConfig, privacyConfig } = require('./renderer-config.cjs');
 const path = require('path');
 const fs = require('fs');
 const { updateTrayBadge, setTrayLang, setTrayImageFromDataURL, getTrayBaseDataURL } = require('./tray.cjs');
@@ -96,43 +97,19 @@ function registerIpc(getWindow) {
         state.settings = loadSettings();
         return state.settings;
     });
-    ipcMain.on('get_history_bootstrap', (event) => {
-        try {
-            const win = getWindow();
-            const s = state.settings || loadSettings();
-            event.returnValue = win && !win.isDestroyed() && event.sender === win.webContents ? {
-                showDeleted: s.messages_show_deleted === true,
-                showDisappearing: s.messages_show_disappearing === true,
-                saveDeleted: s.messages_save_deleted === true,
-                saveDisappearing: s.messages_save_disappearing === true,
-                editHistory: s.messages_edit_history === true,
-                savePublic: s.messages_save_public === true,
-                scope: s.messages_history_scope || 'client',
-            } : null;
-        } catch (_) { event.returnValue = null; }
-    });
-    ipcMain.on('get_privacy_bootstrap', (event) => {
-        try {
-            const win = getWindow();
-            const s = state.settings || loadSettings();
-            event.returnValue = win && !win.isDestroyed() && event.sender === win.webContents ? {
-                noReadReceipts: s.privacy_no_read_receipts === true,
-                noTyping: s.privacy_no_typing === true,
-                noReadForceOn: s.privacy_no_read_force_on || [],
-                noReadForceOff: s.privacy_no_read_force_off || [],
-                noTypingForceOn: s.privacy_no_typing_force_on || [],
-                noTypingForceOff: s.privacy_no_typing_force_off || [],
-            } : null;
-        } catch (_) { event.returnValue = null; }
-    });
-    ipcMain.on('get_proxy_bootstrap', (event) => {
-        // Preload asks synchronously at document_start, before senderFrame.url is guaranteed
-        // to contain the committed Telegram URL. Bind this one channel to the exact main WebContents.
-        try {
-            const win = getWindow();
-            event.returnValue = win && !win.isDestroyed() && event.sender === win.webContents ? getProxyBootstrap() : null;
-        } catch (_) { event.returnValue = null; }
-    });
+    // Preload asks these synchronously at document_start, before senderFrame.url is guaranteed
+    // to contain the committed Telegram URL, so they are bound to the exact main WebContents.
+    function handleSync(channel, build) {
+        ipcMain.on(channel, (event) => {
+            try {
+                const win = getWindow();
+                event.returnValue = win && !win.isDestroyed() && event.sender === win.webContents ? build() : null;
+            } catch (_) { event.returnValue = null; }
+        });
+    }
+    handleSync('get_history_bootstrap', () => historyConfig(state.settings || loadSettings()));
+    handleSync('get_privacy_bootstrap', () => privacyConfig(state.settings || loadSettings()));
+    handleSync('get_proxy_bootstrap', () => getProxyBootstrap());
 
     handle('get_app_info', () => ({
         version: app.getVersion(),
@@ -226,14 +203,7 @@ function registerIpc(getWindow) {
     handle('save_settings', (e, { settings }) => {
         const current = loadSettings();
         state.settings = current;
-        const previousPrivacy = {
-            noReadReceipts: current.privacy_no_read_receipts === true,
-            noTyping: current.privacy_no_typing === true,
-            noReadForceOn: current.privacy_no_read_force_on || [],
-            noReadForceOff: current.privacy_no_read_force_off || [],
-            noTypingForceOn: current.privacy_no_typing_force_on || [],
-            noTypingForceOff: current.privacy_no_typing_force_off || [],
-        };
+        const previousPrivacy = privacyConfig(current);
         const next = Object.assign({}, settings || {});
         // Main-owned state: the page sends whole snapshots, which must not revert these.
         for (const k of MAIN_OWNED_SETTINGS) delete next[k];
@@ -255,14 +225,7 @@ function registerIpc(getWindow) {
             'proxy_web_fallback','proxy_web_fallback_latched','proxy_dc_ips',
         ];
         const proxyConfigChanged = proxyConfigKeys.some(k => JSON.stringify(current[k]) !== JSON.stringify(state.settings[k]));
-        const privacy = {
-            noReadReceipts: state.settings.privacy_no_read_receipts === true,
-            noTyping: state.settings.privacy_no_typing === true,
-            noReadForceOn: state.settings.privacy_no_read_force_on || [],
-            noReadForceOff: state.settings.privacy_no_read_force_off || [],
-            noTypingForceOn: state.settings.privacy_no_typing_force_on || [],
-            noTypingForceOff: state.settings.privacy_no_typing_force_off || [],
-        };
+        const privacy = privacyConfig(state.settings);
         if (JSON.stringify(privacy) !== JSON.stringify(previousPrivacy)) {
             const win = getWindow();
             if (win && !win.isDestroyed()) win.webContents.send('privacy-state-changed', privacy);

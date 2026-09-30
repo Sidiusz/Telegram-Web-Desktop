@@ -2,6 +2,7 @@
 
 const fs = require('fs');
 const path = require('path');
+const { historyConfig } = require('./renderer-config.cjs');
 
 function featuresDir() {
     return path.join(__dirname, 'features');
@@ -42,15 +43,7 @@ function loadFeatureScripts(settings) {
     });
     scripts.push('window.__twdMessageFilterConfig=' + messageFilterCfg + ';\n' + readFeature('message_filter.js'));
 
-    const cfg = JSON.stringify({
-        showDeleted: s.messages_show_deleted === true,
-        showDisappearing: s.messages_show_disappearing === true,
-        saveDeleted: s.messages_save_deleted === true,
-        saveDisappearing: s.messages_save_disappearing === true,
-        editHistory: s.messages_edit_history === true,
-        savePublic: s.messages_save_public === true,
-        scope: s.messages_history_scope || 'client',
-    });
+    const cfg = JSON.stringify(historyConfig(s));
     scripts.push('window.__twdMessageHistoryConfig=' + cfg + ';\n' + readFeature('message_history.js'));
 
     return scripts;

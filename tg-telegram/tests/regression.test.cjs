@@ -1115,7 +1115,8 @@ test('message history keeps memory independent from local persistence scope', ()
     const preload = read('electron/preload.js');
     assert.equal(fs.existsSync(path.join(root, 'electron/message-history.cjs')), false);
     assert.match(ipc, /get_history_bootstrap/);
-    assert.match(ipc, /savePublic: s\.messages_save_public === true/);
+    assert.match(ipc, /handleSync\('get_history_bootstrap', \(\) => historyConfig\(/);
+    assert.equal(require('../electron/renderer-config.cjs').historyConfig({ messages_save_public: true }).savePublic, true);
     assert.match(ipc, /handle\('get_window_state'/);
     assert.match(ipc, /win\.isVisible\(\)/);
     assert.match(ipc, /win\.isMinimized\(\)/);
@@ -1532,7 +1533,8 @@ test('message history never removes Telegram-owned nodes, stays under a storage 
     assert.match(history, /'\._twd-deleted-hidden_\{display:none!important;\}'/);
     assert.match(history, /var MAX_PERSIST_CHARS = 1500000;/);
     assert.match(history, /size \+ parts\[start - 1\]\.length \+ 1 <= MAX_PERSIST_CHARS/);
-    assert.match(read('electron/features.cjs'), /savePublic: s\.messages_save_public === true/);
+    const historyScript = require('../electron/features.cjs').loadFeatureScripts({ messages_save_public: true }).find(x => x.includes('__twdMessageHistoryConfig='));
+    assert.match(historyScript, /"savePublic":true/);
 });
 
 test('Web A fallback latch recovers and offline failures never latch it', () => {
