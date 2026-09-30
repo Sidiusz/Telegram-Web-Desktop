@@ -580,4 +580,4 @@ async function fetchChangelog() {
 }
 
 module.exports = { init, scheduleChecks, checkForUpdate, downloadPendingUpdate, fetchChangelog, fetchReleases };
-module.exports._internals = { compareVersions, parseLatestYml, downloadOnce, verifyDownload };
+module.exports._internals = { compareVersions, parseLatestYml, downloadOnce, verifyDownload, assertAllowedHost, isInstallerAssetName };

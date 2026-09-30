@@ -1584,6 +1584,54 @@ test('a notification arriving during the last fade-out re-shows the popup', () =
     assert.match(popup, /_win\.setShape\(\[\{ x: 0, y: STACK_HEIGHT - height, width: WIDTH, height \}\]\);[\s\S]{0,200}if \(!_win\.isVisible\(\) && process\.env\.TWD_SMOKE_HIDDEN !== '1'\) _win\.showInactive\(\);/);
 });
 
+test('updater only trusts our HTTPS release assets with a matching digest', async () => {
+    const os = require('node:os');
+    const crypto = require('node:crypto');
+    const Module = require('node:module');
+    const origLoad = Module._load;
+    Module._load = function (request, ...rest) {
+        if (request === 'electron') return { app: { getVersion: () => '1.3.2', getPath: () => os.tmpdir() }, net: {}, powerMonitor: { on() {} } };
+        if (request === 'electron-store') return { default: class { constructor() { this.store = {}; } get(k, d) { return d; } has() { return false; } set() {} delete() {} } };
+        return origLoad.call(this, request, ...rest);
+    };
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'twd-upd-test-'));
+    try {
+        delete require.cache[require.resolve('../electron/updater.cjs')];
+        delete require.cache[require.resolve('../electron/settings.cjs')];
+        const { compareVersions, parseLatestYml, verifyDownload, assertAllowedHost, isInstallerAssetName } = require('../electron/updater.cjs')._internals;
+        assert.ok(compareVersions('1.10.0', '1.9.9') > 0);
+        assert.ok(compareVersions('1.2.7-beta', '1.2.7') < 0);
+        assert.equal(compareVersions('v1.3.2'.replace(/^v/, ''), '1.3.2'), 0);
+
+        const yml = 'version: 1.3.3\nfiles:\n  - url: Telegram-Web-Desktop-Setup-1.3.3.exe\n    sha512: abc==\n    size: 42\n';
+        assert.deepEqual(parseLatestYml(yml, 'Telegram-Web-Desktop-Setup-1.3.3.exe'), { sha512: 'abc==', size: 42 });
+
+        const ok = 'https://github.com/Sidiusz/Telegram-Web-Desktop/releases/download/1.3.3/Telegram.Web.Desktop.Setup.1.3.3.exe';
+        assert.doesNotThrow(() => assertAllowedHost(ok));
+        for (const bad of [ok.replace('https:', 'http:'), ok.replace('github.com', 'github.com.evil.io'), ok.replace('Sidiusz/Telegram-Web-Desktop', 'someone/else')]) {
+            assert.throws(() => assertAllowedHost(bad));
+        }
+        assert.equal(isInstallerAssetName('Telegram.Web.Desktop.Setup.1.3.3.exe'), true);
+        assert.equal(isInstallerAssetName('Telegram.Web.Desktop.Setup.1.3.3.exe.blockmap'), false);
+
+        const exe = path.join(dir, 'setup.exe');
+        const body = Buffer.concat([Buffer.from('MZ'), crypto.randomBytes(4096)]);
+        fs.writeFileSync(exe, body);
+        const digest = 'sha256:' + crypto.createHash('sha256').update(body).digest('hex');
+        await verifyDownload(exe, body.length, null, digest);
+        await assert.rejects(verifyDownload(exe, body.length, null, ''), /trusted update digest is unavailable/);
+        await assert.rejects(verifyDownload(exe, body.length, null, 'sha256:' + '0'.repeat(64)), /digest mismatch/);
+        const notExe = path.join(dir, 'fake.exe');
+        fs.writeFileSync(notExe, Buffer.concat([Buffer.from('PK'), crypto.randomBytes(4096)]));
+        await assert.rejects(verifyDownload(notExe, 4098, null, digest), /not a Windows installer/);
+    } finally {
+        Module._load = origLoad;
+        delete require.cache[require.resolve('../electron/updater.cjs')];
+        delete require.cache[require.resolve('../electron/settings.cjs')];
+        fs.rmSync(dir, { recursive: true, force: true });
+    }
+});
+
 test('bundle patches fail safe: pins need every reducer, cache patch keeps identifier boundaries', () => {
     const { patchTelegramExtendedPins, extendedPinsPrelude } = require('../electron/tg-extended-pins.cjs');
     const partial = patchTelegramExtendedPins('case`updatePinnedChatIds`:let{ids:a,folderId:b}=c,d=b===1?`archived`:`active`;return x;case`updatePinnedSavedDialogIds`:');
