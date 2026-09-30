@@ -31,10 +31,15 @@ const state = {
     lastRoute: 'direct', lastDomain: '', lastError: '', lastDc: 0,
     refreshTimer: null, revision: 0, reconnectEpoch: 0, bridgePort: 0, bridgeToken: '',
     avoidControlDomain: '', avoidControlUntil: 0,
-};function normalizeMode(mode) { return mode === 'always' || mode === 'off' ? mode : 'auto'; }
+};
+
+function normalizeMode(mode) { return mode === 'always' || mode === 'off' ? mode : 'auto'; }
 function isProxyActive() { return state.mode === 'always' || (state.mode === 'auto' && state.autoLatched); }
+function canonicalDomain(value) {
+    return String(value || '').trim().toLowerCase().replace(/^wss?:\/\//, '').replace(/\/.*$/, '');
+}
 function validDomain(domain) {
-    const d = String(domain || '').trim().toLowerCase().replace(/^wss?:\/\//, '').replace(/\/.*$/, '');
+    const d = canonicalDomain(domain);
     if (!d || d.length > 253 || d.startsWith('.') || d.endsWith('.')) return false;
     const labels = d.split('.');
     return labels.length > 1 && labels.every(x => x && x.length <= 63 &&
@@ -42,9 +47,11 @@ function validDomain(domain) {
 }
 function normalizeDomains(value) {
     const list = Array.isArray(value) ? value : String(value || '').split(/[\s,;]+/);
-    return Array.from(new Set(list.map(x => String(x).trim().toLowerCase()
-        .replace(/^wss?:\/\//, '').replace(/\/.*$/, '')).filter(validDomain)));
+    return Array.from(new Set(list.map(canonicalDomain).filter(validDomain)));
 }
+function domainOrEmpty(value) { return validDomain(value) ? canonicalDomain(value) : ''; }
+function clampAutoFailures(v) { return Math.max(1, Math.min(10, Number(v) || 1)); }
+function clampAutoWindowSec(v) { return Math.max(3, Math.min(120, Number(v) || 12)); }
 function validIpv4(value) {
     const p = String(value || '').trim().split('.');
     return p.length === 4 && p.every(x => /^\d{1,3}$/.test(x) && Number(x) >= 0 && Number(x) <= 255);
@@ -93,19 +100,22 @@ function reportBridgeRoute(dc, domain, kind = 'cf') {
     state.lastRoute = kind; state.lastDomain = String(domain || '');
     state.lastDc = Number(dc) || 0; state.lastError = '';
 }
+function preferredSlot(media) {
+    return media
+        ? ['preferredMediaDomain', 'proxy_last_good_media_domain']
+        : ['preferredControlDomain', 'proxy_last_good_control_domain'];
+}
 function reportBridgePreferredDomain(domain, media = false) {
-    const d = validDomain(domain) ? String(domain).trim().toLowerCase() : '';
+    const d = domainOrEmpty(domain);
     if (!d) return;
-    const field = media ? 'preferredMediaDomain' : 'preferredControlDomain';
-    const key = media ? 'proxy_last_good_media_domain' : 'proxy_last_good_control_domain';
+    const [field, key] = preferredSlot(media);
     if (state[field] === d) return;
     state[field] = d;
     saveSettings({ [key]: d });
 }
 function clearBridgePreferredDomain(domain, media = false) {
     const d = String(domain || '').trim().toLowerCase();
-    const field = media ? 'preferredMediaDomain' : 'preferredControlDomain';
-    const key = media ? 'proxy_last_good_media_domain' : 'proxy_last_good_control_domain';
+    const [field, key] = preferredSlot(media);
     if (!d || state[field] !== d) return;
     state[field] = '';
     saveSettings({ [key]: '' });
@@ -120,7 +130,8 @@ function broadcastProxyState() {
     for (const wc of webContents.getAllWebContents()) {
         try { if (!wc.isDestroyed()) wc.send('proxy-state-changed', payload); } catch (_) {}
     }
-}function dcFromTelegramWsHost(hostname) {
+}
+function dcFromTelegramWsHost(hostname) {
     const h = String(hostname || '').toLowerCase();
     if (!h.endsWith('.web.telegram.org')) return null;
     const label = h.slice(0, -'.web.telegram.org'.length);
@@ -171,18 +182,22 @@ async function refreshFlowsealDomains() {
         return { ok: true, domains: decoded.length };
     } catch (e) { return { ok: false, error: e && e.message ? e.message : String(e) }; }
     finally { clearTimeout(timer); }
-}function applySettings(s) {
+}
+function kickDomainRefresh() {
+    if (state.domainSource === 'flowseal') refreshFlowsealDomains().catch(() => {});
+}
+function applySettings(s) {
     state.mode = normalizeMode(s.proxy_mode);
     state.autoLatched = state.mode === 'auto' && s.proxy_auto_latched === true;
     state.domainSource = s.proxy_domain_source === 'custom' ? 'custom' : 'flowseal';
     state.customDomains = normalizeDomains(s.proxy_custom_domains);
-    state.pinnedDomain = validDomain(s.proxy_pinned_domain) ? String(s.proxy_pinned_domain).trim().toLowerCase() : '';
-    state.preferredControlDomain = validDomain(s.proxy_last_good_control_domain) ? String(s.proxy_last_good_control_domain).trim().toLowerCase() : '';
-    state.preferredMediaDomain = validDomain(s.proxy_last_good_media_domain) ? String(s.proxy_last_good_media_domain).trim().toLowerCase() : '';
+    state.pinnedDomain = domainOrEmpty(s.proxy_pinned_domain);
+    state.preferredControlDomain = domainOrEmpty(s.proxy_last_good_control_domain);
+    state.preferredMediaDomain = domainOrEmpty(s.proxy_last_good_media_domain);
     state.workerEnabled = s.proxy_worker_enabled === true;
     state.workerDomains = normalizeDomains(s.proxy_worker_domains);
-    state.autoFailures = Math.max(1, Math.min(10, Number(s.proxy_auto_failures) || 1));
-    state.autoWindowSec = Math.max(3, Math.min(120, Number(s.proxy_auto_window_sec) || 12));
+    state.autoFailures = clampAutoFailures(s.proxy_auto_failures);
+    state.autoWindowSec = clampAutoWindowSec(s.proxy_auto_window_sec);
     state.webFallback = s.proxy_web_fallback !== false;
     state.webFallbackLatched = state.webFallback && s.proxy_web_fallback_latched === true;
     state.dcIps = normalizeDcIps(s.proxy_dc_ips);
@@ -192,7 +207,7 @@ async function refreshFlowsealDomains() {
 function configureProxySettings(settings) {
     applySettings(settings || loadSettings());
     broadcastProxyState();
-    if (isProxyActive() && state.domainSource === 'flowseal') refreshFlowsealDomains().catch(() => {});
+    if (isProxyActive()) kickDomainRefresh();
     return getProxyStatus();
 }
 function persist(patch) {
@@ -210,7 +225,7 @@ function setProxyMode(mode) {
     state.directFailures = [];
     state.lastError = '';
     state.lastRoute = next === 'always' ? 'cf' : 'direct';
-    if (isProxyActive() && state.domainSource === 'flowseal') refreshFlowsealDomains().catch(() => {});
+    if (isProxyActive()) kickDomainRefresh();
     return getProxyStatus();
 }
 function forceProxyReconnect(reason = 'renderer-network-stall') {
@@ -225,7 +240,7 @@ function forceProxyReconnect(reason = 'renderer-network-stall') {
     const stalledDomain = state.preferredControlDomain ||
         (state.lastRoute !== 'direct' ? state.lastDomain : '');
     if (validDomain(stalledDomain)) {
-        state.avoidControlDomain = String(stalledDomain).trim().toLowerCase();
+        state.avoidControlDomain = canonicalDomain(stalledDomain);
         state.avoidControlUntil = Date.now() + STALL_ROTATE_COOLDOWN_MS;
         clearBridgePreferredDomain(state.avoidControlDomain, false);
         console.warn(`[TG-PROXY] temporarily avoiding stalled control domain ${state.avoidControlDomain}`);
@@ -241,11 +256,11 @@ function updateProxyOptions(options) {
     const patch = {};
     if ('domainSource' in o) patch.proxy_domain_source = o.domainSource === 'custom' ? 'custom' : 'flowseal';
     if ('customDomains' in o) patch.proxy_custom_domains = normalizeDomains(o.customDomains);
-    if ('pinnedDomain' in o) patch.proxy_pinned_domain = validDomain(o.pinnedDomain) ? String(o.pinnedDomain).trim().toLowerCase() : '';
+    if ('pinnedDomain' in o) patch.proxy_pinned_domain = domainOrEmpty(o.pinnedDomain);
     if ('workerEnabled' in o) patch.proxy_worker_enabled = o.workerEnabled === true;
     if ('workerDomains' in o) patch.proxy_worker_domains = normalizeDomains(o.workerDomains);
-    if ('autoFailures' in o) patch.proxy_auto_failures = Math.max(1, Math.min(10, Number(o.autoFailures) || 1));
-    if ('autoWindowSec' in o) patch.proxy_auto_window_sec = Math.max(3, Math.min(120, Number(o.autoWindowSec) || 12));
+    if ('autoFailures' in o) patch.proxy_auto_failures = clampAutoFailures(o.autoFailures);
+    if ('autoWindowSec' in o) patch.proxy_auto_window_sec = clampAutoWindowSec(o.autoWindowSec);
     if ('webFallback' in o) {
         patch.proxy_web_fallback = o.webFallback !== false;
         if (o.webFallback === false) patch.proxy_web_fallback_latched = false;
@@ -257,7 +272,8 @@ function updateProxyOptions(options) {
     if (needsReconnect) state.reconnectEpoch++;
     persist(patch);
     return getProxyStatus();
-}function persistAutoLatch(reason) {
+}
+function persistAutoLatch(reason) {
     if (state.mode !== 'auto' || state.autoLatched) return false;
     state.autoLatched = true;
     state.autoReason = reason || 'direct-ws-failed';
@@ -265,7 +281,7 @@ function updateProxyOptions(options) {
     saveSettings({ proxy_mode: 'auto', proxy_auto_latched: true });
     console.warn(`[TG-PROXY] auto switched to embedded proxy (${state.autoReason})`);
     broadcastProxyState();
-    if (state.domainSource === 'flowseal') refreshFlowsealDomains().catch(() => {});
+    kickDomainRefresh();
     return true;
 }
 function recordDirectFailure(details) {
@@ -397,20 +413,13 @@ function installFlowsealWsRoute(ses, initialSettings) {
     });
     wr.onCompleted({ urls: ['wss://*/*', 'ws://*/*'] }, details => {
         const routed = parseRoutedTarget(details.url);
-        if (routed && details.statusCode < 400) {
-            state.lastRoute = routed.kind;
-            state.lastDomain = routed.domain;
-            state.lastDc = routed.dc;
-            state.lastError = '';
-        }
+        if (routed && details.statusCode < 400) reportBridgeRoute(routed.dc, routed.domain, routed.kind);
     });
     if (!state.refreshTimer) {
-        state.refreshTimer = setInterval(() => {
-            if (state.domainSource === 'flowseal') refreshFlowsealDomains().catch(() => {});
-        }, DOMAIN_REFRESH_MS);
+        state.refreshTimer = setInterval(kickDomainRefresh, DOMAIN_REFRESH_MS);
         if (state.refreshTimer.unref) state.refreshTimer.unref();
     }
-    if (state.domainSource === 'flowseal') refreshFlowsealDomains().catch(() => {});
+    kickDomainRefresh();
     console.log(`[TG-PROXY] route installed; mode=${state.mode}; active=${isProxyActive()}`);
     return getProxyStatus();
 }
