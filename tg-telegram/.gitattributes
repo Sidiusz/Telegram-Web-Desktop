@@ -2,3 +2,6 @@
 # их в CRLF (иначе бесконечные «изменения» и лишние \r в склейке UI_JS).
 *.js  text eol=lf
 *.cjs text eol=lf
+# cmd.exe label lookup (goto) is unreliable in LF-only batch files.
+*.bat text eol=crlf
+*.cmd text eol=crlf
