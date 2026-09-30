@@ -467,11 +467,12 @@ function _twdCustomFilterBlock(ctx,s,content){
     var wrap=document.createElement('div');wrap.className='_twd-filter-custom_';
     var title=document.createElement('div');title.className='_twd-filter-custom-title_';title.textContent=T('twd_message_filter_custom');
     var desc=document.createElement('div');desc.className='_twd-filter-custom-desc_';desc.textContent=T('twd_message_filter_custom_desc');
-    var input=document.createElement('input');input.type='text';input.className='form-control _twd-filter-custom-input_';input.placeholder=T('twd_message_filter_custom_placeholder');
+    var input=document.createElement('input');input.type='text';input.className='form-control _twd-filter-custom-input_';input.placeholder=T('twd_message_filter_custom_placeholder');input.maxLength=160;
     input.addEventListener('keydown',function(e){
         if(e.key!=='Enter')return;
         e.preventDefault();var v=input.value.trim();if(!v)return;
-        var next=(s.message_filter_custom||[]).slice();if(next.indexOf(v)<0)next.push(v);
+        // Same limits as settings.cjs: an over-limit list would be rejected as a whole.
+        var next=(s.message_filter_custom||[]).slice();if(next.indexOf(v)<0&&next.length<256)next.push(v);
         _twdConfigureMessageFilter({message_filter_custom:next}).then(function(){if(content.isConnected)_twdRenderNativePage(content,'messages');}).catch(function(){});
     });
     wrap.append(title,desc,input);
