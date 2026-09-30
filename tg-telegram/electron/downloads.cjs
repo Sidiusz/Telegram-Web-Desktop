@@ -63,6 +63,23 @@ function saveDownloads(downloads) {
     } catch (e) {}
 }
 
+// Appends an in-progress record to the shared list and returns its id.
+function addDownloadRecord(state, { url = '', filename, path: filePath, total = 0 }) {
+    state.downloadCounter += 1;
+    const id = state.downloadCounter;
+    state.downloads.push({ id, url, filename, path: filePath, status: 'downloading', recv: 0, total });
+    saveDownloads(state.downloads);
+    return id;
+}
+
+function patchDownloadRecord(state, id, patch, persist = true) {
+    const rec = state.downloads.find(d => d.id === id);
+    if (!rec) return null;
+    Object.assign(rec, patch);
+    if (persist) saveDownloads(state.downloads);
+    return rec;
+}
+
 // Live DownloadItems by id — lets the renderer cancel an in-flight download.
 const activeItems = new Map();
 
@@ -87,4 +104,7 @@ function deleteDownload(downloads, id) {
     return updated;
 }
 
-module.exports = { loadDownloads, saveDownloads, deleteDownload, trackActive, untrackActive, cancelActive };
+module.exports = {
+    loadDownloads, saveDownloads, deleteDownload, addDownloadRecord, patchDownloadRecord,
+    trackActive, untrackActive, cancelActive,
+};

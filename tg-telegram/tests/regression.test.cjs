@@ -1487,7 +1487,7 @@ test('desktop layouts keep Telegram composer wrap whenever a reply/edit/forward 
 test('downloads never share a target path, never delete foreign files, and carry Mark-of-the-Web', () => {
     const os = require('node:os');
     const { uniquePath, reservePath, markFromInternet } = require('../electron/utils.cjs');
-    const { deleteDownload } = require('../electron/downloads.cjs');
+    const { deleteDownload, addDownloadRecord, patchDownloadRecord } = require('../electron/downloads.cjs');
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'twd-dl-test-'));
     try {
         const first = uniquePath(path.join(dir, 'x.pdf'));
@@ -1513,6 +1513,13 @@ test('downloads never share a target path, never delete foreign files, and carry
         fs.writeFileSync(own, 'C');
         deleteDownload([{ id: 3, path: own, status: 'completed' }], 3);
         assert.equal(fs.existsSync(own), false, 'a completed record still deletes its own file');
+
+        const st = { downloads: [], downloadCounter: 4 };
+        const recPath = path.join(dir, 'a.bin');
+        assert.equal(addDownloadRecord(st, { filename: 'a.bin', path: recPath, total: 10 }), 5);
+        assert.deepEqual(st.downloads, [{ id: 5, url: '', filename: 'a.bin', path: recPath, status: 'downloading', recv: 0, total: 10 }]);
+        assert.equal(patchDownloadRecord(st, 5, { status: 'completed', recv: 10 }, false).status, 'completed');
+        assert.equal(patchDownloadRecord(st, 99, { status: 'failed' }, false), null);
 
         if (process.platform === 'win32') {
             const saved = path.join(dir, 'doc.zip');
