@@ -1,7 +1,6 @@
 const INV=(cmd,args)=>window.tgBridge.invoke(cmd,args);
 const CSS=`
 .Menu.main-menu .bubble.menu-container{max-height:90vh!important;overflow-y:auto!important;}
-._empty_{color:#aaa;text-align:center;padding:32px 16px;font-size:13px;}
 .Badge{display:inline-flex !important;align-items:center !important;justify-content:center !important;min-width:12px !important;height:12px !important;padding:0 3px !important;border-radius:6px !important;background:#F23C34 !important;color:#fff !important;font-size:9px !important;font-weight:700 !important;line-height:1 !important;box-sizing:border-box !important;letter-spacing:-.3px !important;}
 /* Toasts and popup cards use Telegram's own .Notification/.Notification-container classes. */
 /* Modal shell aligned with current Telegram Web A. */
@@ -17,9 +16,6 @@ const CSS=`
 ._mo_ ._msg_{color:var(--color-text,#fff);font-size:1rem;line-height:1.5;unicode-bidi:plaintext;}
 ._mo_ ._url_{color:var(--color-primary,#8774e1);font-size:.875rem;word-break:break-all;padding:.625rem .75rem;background:var(--color-code-bg,rgba(112,117,121,.08));border-radius:var(--border-radius-default-small,.625rem);}
 ._mo_ ._upd_cl_{margin-top:.25rem;color:var(--color-text-secondary,#aaa);font-size:.9375rem;line-height:1.4;white-space:pre-wrap;max-height:13.75rem;overflow-y:auto;}
-._mo_ ._wn_intro_{color:var(--color-text-secondary,#aaa);font-size:.9375rem;line-height:1.4;}
-._mo_ ._wn_item_{display:flex;gap:.625rem;align-items:flex-start;margin-top:.75rem;font-size:.9375rem;line-height:1.4;}
-._mo_ ._wn_bullet_{color:var(--color-primary,#8774e1);font-size:1.125rem;line-height:1.3;flex-shrink:0;}
 ._mo_ .dialog-footer{display:flex;align-items:center;gap:1rem;margin-top:.25rem;padding-top:.75rem;border-top:1px solid var(--color-borders,rgba(255,255,255,.1));}
 ._mo_ .dialog-footer-note{color:var(--color-text-secondary,#aaa);font-size:.8125rem;line-height:1.3;flex:1 1 auto;min-width:0;}
 ._mo_ .dialog-buttons{flex-flow:row-reverse wrap;justify-content:flex-start;gap:.5rem 1rem;display:flex;margin-left:auto;flex:0 0 auto;}
@@ -164,7 +160,6 @@ html._tgreading_ .bubble.menu-container.shown{opacity:0 !important;pointer-event
 `;
 
 function ensureCSS(){if(!document.getElementById('_tgcss_')){const s=document.createElement('style');s.id='_tgcss_';s.textContent=CSS;(document.head||document.documentElement).appendChild(s);}}
-function ensureToast(){}
 function toast(msg,icon){try{if(typeof showNativeToast==='function')return showNativeToast(msg,icon);}catch(e){}}
 function _twdFitMenuViewport(node){
     var menu=node&&node.matches&&node.matches('.bubble.menu-container')?node:(node&&node.closest?node.closest('.bubble.menu-container'):null);

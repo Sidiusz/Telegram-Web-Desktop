@@ -226,10 +226,6 @@
                         writable: true,
                         value: wrappedPostMessage,
                     });
-                    Object.defineProperty(proto, '__twdNotifProtoHooked', {
-                        configurable: true,
-                        value: true,
-                    });
                 }
                 return;
             }

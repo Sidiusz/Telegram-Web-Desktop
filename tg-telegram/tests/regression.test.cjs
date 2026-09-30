@@ -128,8 +128,8 @@ test('developer tools stay locked until the setting is enabled', () => {
     assert.ok(win.includes("key === 'i' || key === 'j' || key === 'c'"));
     assert.ok(ipc.includes("if (settings.devtools_enabled !== true) return { error: 'disabled', open: false };"));
     assert.ok(ipc.includes('win.webContents.isDevToolsOpened()'));
-    assert.ok(settingsUi.includes('function _setDevtoolsEnabled(v)'));
-    assert.match(settingsUi, /_saveOne\(\{devtools_enabled:!!v\}\)[\s\S]*toggle_devtools/);
+    const settingsPage = read('electron/inject/ui/twd-settings-native.js');
+    assert.match(settingsPage, /_twdSave\(\{devtools_enabled:v\}\)\.then\(function\(\)\{return INV\('toggle_devtools',\{open:v\}\);\}\)/);
 });
 
 test('download and addon safety regressions stay covered', () => {
