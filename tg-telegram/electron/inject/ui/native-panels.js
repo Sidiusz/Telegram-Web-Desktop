@@ -167,13 +167,6 @@ function closeNativeDlPanel(){
 }
 
 // ── «Прокси» ────────────────────────────────────────────────────────────────
-function openProxyNative(){
-    return _withSettingsReady(()=>openNativePanel({
-        title:T('proxy'),
-        renderContent(content){ renderProxyNative(content); },
-    }));
-}
-
 async function renderProxyNative(content){
     if(!content)return;
     content.innerHTML='<div class="_tpempty_">'+T('loading')+'</div>';

@@ -327,14 +327,14 @@ try {
             if (NativeWorker && !window.__twdNativeWorker) {
                 window.Worker = class RoutedWorker extends NativeWorker {
                     constructor(url, options) {
-                        let target = url, tagged = false;
+                        let target = url;
                         try {
                             const u = new URL(String(url), window.location.href);
                             if (u.hostname === 'web.telegram.org' && u.pathname.startsWith('/a/') && /\/(?:worker-[^/]+|index\.worker-[^/]+)\.js$/i.test(u.pathname)) {
                                 u.searchParams.set('__twd_proxy', '1');
                                 u.searchParams.set('__twd_proxy_rev', proxyWorkerNonce);
                                 u.searchParams.set('__twd_proxy_channel', proxyChannelName);
-                                target = u.toString(); tagged = true;
+                                target = u.toString();
                             }
                         } catch (_) {}
                         super(target, options);

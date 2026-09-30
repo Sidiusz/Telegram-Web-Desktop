@@ -53,9 +53,6 @@ function pickModal(opts){
     mo.addEventListener('click',function(e){if(e.target===mo)close();});
 }
 
-window._tgLink=async function(url){
-    try{await INV('open_url',{url});}catch(e){}
-};
 
 // ── Фейк-панель «как родной раздел настроек» (#5) ───────────────────────────
 // Ложится поверх колонки #Settings (position:absolute;inset:0), шапку клонируем

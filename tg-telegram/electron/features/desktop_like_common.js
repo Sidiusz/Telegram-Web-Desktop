@@ -12,13 +12,6 @@
     var _myPeerId = '';
     var _switchGrace = 0;
 
-    function isPrivate() {
-        var list = document.querySelector('#MiddleColumn .MessageList');
-        if (!list || !list.classList.contains('no-avatars')) return false;
-        // Channels/groups are also no-avatars, but keep a positive data-peer-id while the hash keeps the minus (#-100...).
-        var m = (location.hash || '').match(/#(-?\d+)/);
-        return !!m && m[1].charAt(0) !== '-';
-    }
     function getCurrentPeerId() {
         var el = document.querySelector('.MiddleHeader .ChatInfo .Avatar[data-peer-id]');
         return el ? el.getAttribute('data-peer-id') : '';

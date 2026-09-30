@@ -1,14 +1,4 @@
 // ── #3: общие нативные строители виджетов (клонируем живые виджеты TG) ───────
-function _saveOne(patch){
-    return INV('get_settings').then(function(s){
-        return INV('save_settings',{settings:Object.assign({},s||{},patch)});
-    });
-}
-function _setDevtoolsEnabled(v){
-    _saveOne({devtools_enabled:!!v})
-        .then(function(){ return INV('toggle_devtools',{open:!!v}); })
-        .catch(function(){});
-}
 function _wireUiLabUnlock(row){
     if(!row||row.__twdUiLabUnlock)return;
     row.__twdUiLabUnlock=true;
@@ -260,6 +250,5 @@ function _genDecoratedRow(icon,title,value,onClick,tone,sub,danger){
     if(onClick){if(ripple)btn.appendChild(ripple);btn.setAttribute('role','button');btn.setAttribute('tabindex','0');btn.addEventListener('click',function(e){e.stopPropagation();onClick(v);});}else{btn.removeAttribute('role');btn.removeAttribute('tabindex');}
     r._v=v;r._value=v;r._title=titleEl;r._subtitle=subEl;return r;
 }
-function _genRow(liEl,icon,title,value,onClick,danger){return _genDecoratedRow(icon,title,value,onClick,_toneForIcon(icon,danger),'',danger);}
 
 // ── Corner-уведомления ───────────────────────────────────────────────────

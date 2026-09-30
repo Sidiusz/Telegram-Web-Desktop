@@ -1,4 +1,4 @@
-function tryInject(){ensureCSS();ensureToast();ensureCornerWrap();ensurePanels();}
+function tryInject(){ensureCSS();ensureCornerWrap();}
 
 // Иконка трея с числом непрочитанных: базовый логотип + небольшой красный бейдж
 // в правом-нижнем углу (≈половина размера иконки). SVG→nativeImage в main не
@@ -788,7 +788,7 @@ window.__tgMarkAllRead=function(){
 // pipeline и играем /a/notification.mp3 сами; если TG всё же успел сыграть свой —
 // не дублируем (lastTgSound).
 (function setupIncomingNotifications(){
-    var seen={}, seeded=false, lastTgSound=0;
+    var lastTgSound=0;
     // Кэш настроек (звук/громкость/категории). Загружаем один раз, затем main
     // пушит изменения сразу после save_settings — без постоянного IPC polling.
     var cfg={notif_sound:true,notif_volume:0.8,notif_cat_private:true,notif_cat_group:true,notif_cat_channel:true};

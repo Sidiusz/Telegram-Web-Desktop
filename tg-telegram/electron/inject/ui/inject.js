@@ -1,7 +1,3 @@
-// Старые слайд-панели (_tgst_/_tgcl_) больше не нужны: настройки/загрузки/
-// дополнения/чейнджлог рисуются нативными панелями поверх #Settings.
-function ensurePanels(){}
-
 // ── ИНЖЕКТ МЕНЮ: Строго по структуре DOM без догадок ────────────────────
 function _twdNativeMenuSeparator(preferredRoot){
     var roots=[];
