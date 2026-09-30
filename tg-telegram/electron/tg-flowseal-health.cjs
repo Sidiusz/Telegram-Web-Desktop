@@ -191,6 +191,20 @@ function hedgedOpen(candidates, connect, {
     });
 }
 
+// Telegram reports transport-level failures (e.g. -404 unknown auth key, -429 flood) as a bare
+// 4-byte negative int packet instead of an MTProto message.
+function readTransportError(plain, protoTag) {
+    if (!plain || !protoTag) return 0;
+    let code = 0;
+    if (protoTag.toString('hex') === 'efefefef') {
+        if (plain.length === 5 && plain[0] === 1) code = plain.readInt32LE(1);
+    } else if (plain.length === 8 && plain.readUInt32LE(0) === 4) {
+        code = plain.readInt32LE(4);
+    }
+    return code < 0 ? code : 0;
+}
+
 module.exports = {
     UpstreamHealth, DEFAULT_COOLDOWN_MS, frameInProgress, watchFrameStall, rotateCandidates, hedgedOpen,
+    readTransportError,
 };
