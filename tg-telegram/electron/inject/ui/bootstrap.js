@@ -377,6 +377,8 @@ document.addEventListener('click', function(e){
         // В частности пункт меню «Загрузки» сам содержит icon-download и раньше
         // создавал ложную карточку «Файл / Скачивание…» при открытии панели.
         if(t.closest('#Settings,._tgpanel_,._mo_,[id^="_tgmi_"]')) return false;
+        // Inline photo/video/round-video load and cancel only fill Telegram's media cache.
+        if(t.closest('.media-inner,.RoundVideo,.media-loading,.message-transfer-progress')) return false;
         var el=t.closest('.icon-download,.download-button,[aria-label="Download"],[aria-label="Загрузка"],[title="Download"],[title="Загрузка"],.MenuItem,button');
         if(!el) return false;
         if(el.classList&&(el.classList.contains('icon-download')||el.classList.contains('download-button'))) return true;
