@@ -9,7 +9,10 @@ const { loadFeatureScripts } = require('./features.cjs');
 const { saveDownloads, trackActive, untrackActive } = require('./downloads.cjs');
 const { loadSettings } = require('./settings.cjs');
 const { uniquePath, reservePath } = require('./utils.cjs');
-const { installFlowsealWsRoute, noteTelegramLoadFailure, isWebFallbackEnabled, clearWebFallbackLatch } = require('./tg-flowseal-route.cjs');
+const { installFlowsealWsRoute, noteTelegramLoadFailure, isWebFallbackEnabled, clearWebFallbackLatch, shouldBlockDirectTelegram } = require('./tg-flowseal-route.cjs');
+function blockedTransportResponse() {
+    return new Response('', { status: 503, statusText: 'Blocked by proxy mode' });
+}
 const { fetchTelegramWebAFallback } = require('./telegram-web-fallback.cjs');
 const { injectTelegramWorkerProxy } = require('./tg-flowseal-worker.cjs');
 const { injectTelegramExtendedPins, injectExtendedPinsPrelude } = require('./tg-extended-pins.cjs');
@@ -191,6 +194,7 @@ function createWindow(state, onTelegramLink, options = {}) {
                 if (isTelegramWebsyncUrl(url)) return telegramWebsyncNoopResponse();
                 const isTgCandidate = isWebAUrl(url, 'https:');
                 if (!isTgCandidate) {
+                    if (shouldBlockDirectTelegram(url)) return blockedTransportResponse();
                     return net.fetch(request, { bypassCustomProtocolHandlers: true });
                 }
                 let resp = await fetchTelegramAsset(request, url);
@@ -221,7 +225,10 @@ function createWindow(state, onTelegramLink, options = {}) {
                         const url = request.url;
                         if (isTelegramWebsyncUrl(url)) return telegramWebsyncNoopResponse();
                         const isTgCandidate = isWebAUrl(url, 'http:');
-                        if (!isTgCandidate) return net.fetch(request, { bypassCustomProtocolHandlers: true });
+                        if (!isTgCandidate) {
+                            if (shouldBlockDirectTelegram(url)) return blockedTransportResponse();
+                            return net.fetch(request, { bypassCustomProtocolHandlers: true });
+                        }
                         let resp = await fetchTelegramAsset(request, url);
                         resp = await injectTelegramWorkerProxy(resp, url);
                         resp = await injectTelegramExtendedPins(resp, url);

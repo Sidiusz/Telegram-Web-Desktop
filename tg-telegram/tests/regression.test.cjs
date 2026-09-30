@@ -1584,6 +1584,40 @@ test('a notification arriving during the last fade-out re-shows the popup', () =
     assert.match(popup, /_win\.setShape\(\[\{ x: 0, y: STACK_HEIGHT - height, width: WIDTH, height \}\]\);[\s\S]{0,200}if \(!_win\.isVisible\(\) && process\.env\.TWD_SMOKE_HIDDEN !== '1'\) _win\.showInactive\(\);/);
 });
 
+test('proxy mode never lets Telegram traffic leave directly', () => {
+    const Module = require('node:module');
+    const origLoad = Module._load;
+    let saved = { proxy_mode: 'always' };
+    Module._load = function (request, ...rest) {
+        if (request === 'electron') return { webContents: { getAllWebContents: () => [] }, net: { fetch: () => Promise.reject(new Error('offline')) } };
+        if (request.endsWith('settings.cjs')) return { loadSettings: () => Object.assign({}, saved), saveSettings: s => { saved = Object.assign({}, saved, s); } };
+        return origLoad.call(this, request, ...rest);
+    };
+    const origWarn = console.warn;
+    console.warn = () => {};
+    try {
+        delete require.cache[require.resolve('../electron/tg-flowseal-route.cjs')];
+        const route = require('../electron/tg-flowseal-route.cjs');
+        route.configureProxySettings({ proxy_mode: 'always' });
+        assert.equal(route.shouldBlockDirectTelegram('wss://zws2-1.web.telegram.org/apiws'), true);
+        assert.equal(route.shouldBlockDirectTelegram('wss://venus.web.telegram.org/apiws_premium'), true);
+        assert.equal(route.shouldBlockDirectTelegram('https://zws4.web.telegram.org:443/apiw1'), true, 'Web A HTTP transport fallback');
+        assert.equal(route.shouldBlockDirectTelegram('ws://127.0.0.1:5555/apiws?dc=2'), false, 'the local bridge stays reachable');
+        assert.equal(route.shouldBlockDirectTelegram('https://web.telegram.org/a/assets/x.js'), false, 'page assets are not MTProto');
+        route.configureProxySettings({ proxy_mode: 'off' });
+        assert.equal(route.shouldBlockDirectTelegram('wss://zws2.web.telegram.org/apiws'), false);
+        route.configureProxySettings({ proxy_mode: 'auto', proxy_auto_latched: false });
+        assert.equal(route.shouldBlockDirectTelegram('wss://zws2.web.telegram.org/apiws'), false, 'auto mode tries direct first');
+    } finally {
+        console.warn = origWarn;
+        Module._load = origLoad;
+        delete require.cache[require.resolve('../electron/tg-flowseal-route.cjs')];
+    }
+    const win = read('electron/window.cjs');
+    assert.equal((win.match(/if \(shouldBlockDirectTelegram\(url\)\) return blockedTransportResponse\(\);/g) || []).length, 2);
+    assert.match(read('electron/tg-flowseal-route.cjs'), /if \(shouldBlockDirectTelegram\(details\.url\)\) return callback\(\{ cancel: true \}\);/);
+});
+
 test('updater only trusts our HTTPS release assets with a matching digest', async () => {
     const os = require('node:os');
     const crypto = require('node:crypto');
