@@ -1,4 +1,4 @@
-﻿(function () {
+(function () {
     if (window.__twdMessageFilterRuntimeStarted) return;
     window.__twdMessageFilterRuntimeStarted = true;
 
@@ -25,7 +25,9 @@
     function domainMatch(host,domain){host=String(host||'').toLowerCase().replace(/^www\./,'');domain=String(domain||'').toLowerCase();return host===domain||host.endsWith('.'+domain);}
     function activeDomains(all,disabled){var off=(disabled||[]).map(function(x){return String(x).toLowerCase();});return all.filter(function(x){return off.indexOf(x)<0;});}
     function messageUrls(msg){var out=[];msg.querySelectorAll('a[href]').forEach(function(a){try{out.push(new URL(a.href,location.href));}catch(_){}});var raw=String(msg.innerText||'').match(/https?:\/\/[^\s<>()]+/gi)||[];raw.forEach(function(x){try{out.push(new URL(x));}catch(_){}});return out;}
-    function hasDomain(msg,domains){var urls=messageUrls(msg);if(urls.some(function(u){return domains.some(function(d){return domainMatch(u.hostname,d);});}))return true;var text=lower(msg.innerText||'');return domains.some(function(d){return text.indexOf(d)>=0;});}
+    function hasDomain(msg,domains){var urls=messageUrls(msg);if(urls.some(function(u){return domains.some(function(d){return domainMatch(u.hostname,d);});}))return true;var text=lower(msg.innerText||'');return domains.some(function(d){return domainInText(text,d);});}
+    // Bare-domain mentions must stand alone: "t.co" must not match inside "microsoft.com".
+    function domainInText(text,d){return new RegExp('(?<![a-z0-9-])'+d.replace(/[.*+?^${}()|[\]\\]/g,'\\$&')+'(?![a-z0-9-])').test(text);}
     // Kind of a Telegram/external target: bot deep links, private invites/folders, or other sites.
     function linkTarget(u){
         var q=u.searchParams,host=u.hostname.toLowerCase().replace(/^www\./,'');
@@ -71,7 +73,7 @@
         var off=(cfg.hiddenDisabled||[]).map(String);
         return hiddenLinks(msg).some(function(t){return off.indexOf(t.kind)<0&&!(signature&&signature.has(t.key));});
     }
-    function matches(msg,signature){var text=String(msg.innerText||'');if(cfg.hiddenLinks!==false&&hasHiddenAdLink(msg,signature))return true;if(!text.trim())return false;if(cfg.standard!==false){if(STANDARD.some(function(p){return phraseMatch(text,p);}))return true;if(/(^|\W)реклам(?:а|ы|е|у|ой|ный|ная|ное|ные)(?=\W|$)/iu.test(lower(text)))return true;}if(cfg.hashtags!==false&&/(^|\s)#(?:реклама|ad|ads|advertisement|advertising|sponsored|promo)\b/iu.test(lower(text)))return true;if(cfg.shortLinks!==false&&hasDomain(msg,activeDomains(SHORT,cfg.shortDisabled)))return true;if(cfg.refLinks!==false&&hasDomain(msg,activeDomains(REF,cfg.refDisabled)))return true;if((cfg.custom||[]).some(function(p){return phraseMatch(text,p);}))return true;return false;}
+    function matches(msg,signature){var text=String(msg.innerText||'');if(cfg.hiddenLinks!==false&&hasHiddenAdLink(msg,signature))return true;if(!text.trim())return false;if(cfg.standard!==false){if(STANDARD.some(function(p){return phraseMatch(text,p);}))return true;if(/(?<![\p{L}\p{N}_])реклам(?:а|ы|е|у|ой|ный|ная|ное|ные)(?![\p{L}\p{N}_])/iu.test(lower(text)))return true;}if(cfg.hashtags!==false&&/(^|\s)#(?:реклама|ad|ads|advertisement|advertising|sponsored|promo)(?![\p{L}\p{N}_])/iu.test(lower(text)))return true;if(cfg.shortLinks!==false&&hasDomain(msg,activeDomains(SHORT,cfg.shortDisabled)))return true;if(cfg.refLinks!==false&&hasDomain(msg,activeDomains(REF,cfg.refDisabled)))return true;if((cfg.custom||[]).some(function(p){return phraseMatch(text,p);}))return true;return false;}
     function clearMessage(msg){msg.classList.remove('_twd-filter-hidden_','_twd-filter-marked_');msg.removeAttribute('data-twd-filtered');}
     function paintMessage(msg,hit){clearMessage(msg);if(!hit)return;msg.setAttribute('data-twd-filtered','1');msg.classList.add(cfg.markOnly===true?'_twd-filter-marked_':'_twd-filter-hidden_');}
     function clearAll(){document.querySelectorAll('#MiddleColumn .Message._twd-filter-hidden_,#MiddleColumn .Message._twd-filter-marked_').forEach(clearMessage);}
