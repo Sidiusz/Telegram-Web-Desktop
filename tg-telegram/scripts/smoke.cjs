@@ -224,6 +224,18 @@ async function telegramTarget(port) {
         footer:api.testMessages([a('https://t.me/news_bot','предложить новость'),a('https://t.me/news_bot','предложить новость'),a('https://t.me/news_bot','предложить новость'),a('https://t.me/other_bot?start=x','бонус')]),
       };
     })()`);
+    const phraseChecks = await cdp.eval(`(()=>{
+      const api=window.__twdMessageFilterApi;
+      return {
+        microsoft:api.testText('Скачал обновление с microsoft.com и reddit.com'),
+        shortLink:api.testText('подробнее: t.co/abc123'),
+        cyrHashtag:api.testText('#реклама новый курс'),
+        cyrHashtagEnd:api.testText('Новый курс #реклама'),
+        insideWord:api.testText('Это антиреклама продукта'),
+        adWord:api.testText('Реклама. ООО Ромашка'),
+      };
+    })()`);
+    assert.deepEqual(phraseChecks, { microsoft: false, shortLink: true, cyrHashtag: true, cyrHashtagEnd: true, insideWord: false, adWord: true });
     assert.deepEqual(hiddenLinks, {
       bot: true, startParam: true, visibleMention: false, invite: true, postLink: false, external: false,
       footer: [false, false, false, true],
