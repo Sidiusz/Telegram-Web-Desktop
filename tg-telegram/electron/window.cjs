@@ -60,6 +60,12 @@ let forceQuit = false;
 
 app.on('before-quit', () => { forceQuit = true; });
 
+// Download callbacks can fire after the main window closed (quit with a download running).
+function sendDownloadEvent(payload) {
+    const win = getWindow();
+    if (win) { try { win.webContents.send('download-event', payload); } catch (_) {} }
+}
+
 function getWindow() {
     if (!mainWindow) return null;
     try { return mainWindow.isDestroyed() ? null : mainWindow; } catch (_) { return null; }
@@ -290,7 +296,8 @@ function createWindow(state, onTelegramLink, options = {}) {
         callback({ responseHeaders: headers });
     });
 
-    mainWindow.webContents.on('console-message', (e, level, message) => {
+    mainWindow.webContents.on('console-message', (event) => {
+        const message = String(event.message || '');
         if (
             message.includes('Failed to fetch') ||
             message.includes('MTProtoSender') ||
@@ -303,8 +310,8 @@ function createWindow(state, onTelegramLink, options = {}) {
             message.includes('[ERROR]') ||
             message.includes('[WARN]')
         ) return;
-        const levels = ['', 'INFO', 'WARN', 'ERROR'];
-        console.log(`[PAGE ${levels[level] || level}]`, message);
+        const levels = { info: 'INFO', warning: 'WARN', error: 'ERROR' };
+        console.log(`[PAGE ${levels[event.level] || String(event.level || '').toUpperCase()}]`, message);
     });
 
     mainWindow.webContents.on('dom-ready', () => {
@@ -461,7 +468,7 @@ function createWindow(state, onTelegramLink, options = {}) {
         trackActive(id, item);
 
         // origName is the name as sent in the message (renderer matches mid by it); filename is the actual saved name (for the manager).
-        mainWindow.webContents.send('download-event', {
+        sendDownloadEvent({
             type: 'start', id, filename, origName: originalFilename,
             total: Math.max(0, Number(item.getTotalBytes()) || 0),
         });
@@ -475,7 +482,7 @@ function createWindow(state, onTelegramLink, options = {}) {
                     dl.total = Math.max(0, Number(item.getTotalBytes()) || 0);
                     saveDownloads(state.downloads);
                 }
-                mainWindow.webContents.send('download-event', {
+                sendDownloadEvent({
                     type: 'done', id, status: 'failed',
                     received: Math.max(0, Number(item.getReceivedBytes()) || 0),
                     total: Math.max(0, Number(item.getTotalBytes()) || 0),
@@ -485,7 +492,7 @@ function createWindow(state, onTelegramLink, options = {}) {
                 const total = Math.max(0, Number(item.getTotalBytes()) || 0);
                 const dl = state.downloads.find(d => d.id === id);
                 if (dl) { dl.recv = received; dl.total = total; }
-                mainWindow.webContents.send('download-event', {
+                sendDownloadEvent({
                     type: 'progress',
                     id,
                     received,
@@ -508,7 +515,7 @@ function createWindow(state, onTelegramLink, options = {}) {
                 dl.total = Math.max(0, Number(item.getTotalBytes()) || 0);
                 saveDownloads(state.downloads);
             }
-            mainWindow.webContents.send('download-event', {
+            sendDownloadEvent({
                 type: 'done', id, status,
                 received: Math.max(0, Number(item.getReceivedBytes()) || 0),
                 total: Math.max(0, Number(item.getTotalBytes()) || 0),
