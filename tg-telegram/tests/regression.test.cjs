@@ -1571,6 +1571,12 @@ test('patched MTProto worker is never stored in the service-worker cache', async
     assert.match(read('electron/inject/ui/bootstrap.js'), /if\(\/__twd_proxy_channel=\/\.test\(k\.url\)\)c\.delete\(k\);/);
 });
 
+test('notification flag repair rewrites Telegram state only when a flag changed', () => {
+    const intercept = read('electron/inject/notif-intercept.js');
+    assert.match(intercept, /if\(changed\)\{ needsReload=true; try\{ c\.update\(v\); \}catch\(e\)\{\} \}/);
+    assert.doesNotMatch(intercept, /needsReload=true; \}\s*try\{ c\.update\(v\); \}catch\(e\)\{\}\s*\}/);
+});
+
 test('a notification arriving during the last fade-out re-shows the popup', () => {
     const popup = read('electron/notification.cjs');
     assert.match(popup, /_win\.setShape\(\[\{ x: 0, y: STACK_HEIGHT - height, width: WIDTH, height \}\]\);[\s\S]{0,200}if \(!_win\.isVisible\(\) && process\.env\.TWD_SMOKE_HIDDEN !== '1'\) _win\.showInactive\(\);/);

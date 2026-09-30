@@ -69,9 +69,11 @@
                     if(/^tt-global-state(?:_\d+)?$/.test(key)){
                         var v=c.value, byKey=v&&v.settings&&v.settings.byKey;
                         if(byKey){
-                            if(byKey.hasWebNotifications!==true){ byKey.hasWebNotifications=true; needsReload=true; }
-                            if(byKey.hasPushNotifications!==false){ byKey.hasPushNotifications=false; needsReload=true; }
-                            try{ c.update(v); }catch(e){}
+                            var changed=false;
+                            if(byKey.hasWebNotifications!==true){ byKey.hasWebNotifications=true; changed=true; }
+                            if(byKey.hasPushNotifications!==false){ byKey.hasPushNotifications=false; changed=true; }
+                            // tt-global-state is megabytes; rewrite it only when a flag actually needs repair.
+                            if(changed){ needsReload=true; try{ c.update(v); }catch(e){} }
                         }
                     }
                     c.continue();
