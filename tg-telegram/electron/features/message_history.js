@@ -20,6 +20,8 @@
     var PERSIST_KEY = '__twd_message_history_v2';
     var MAX_EDITS = 20;
     var MAX_RECORDS = 5000;
+    // localStorage is shared with Telegram's own session data; keep history well under the origin quota.
+    var MAX_PERSIST_CHARS = 1500000;
 
     function langRu() {
         return String(document.documentElement.lang || navigator.language || '').toLowerCase().indexOf('ru') === 0;
@@ -127,7 +129,9 @@
                 });
             });
             if (out.length > MAX_RECORDS) out = out.slice(out.length - MAX_RECORDS);
-            if (out.length) localStorage.setItem(PERSIST_KEY, JSON.stringify({version:3,records:out}));
+            var parts = out.map(function (x) { return JSON.stringify(x); }), start = parts.length, size = 0;
+            while (start > 0 && size + parts[start - 1].length + 1 <= MAX_PERSIST_CHARS) { start--; size += parts[start].length + 1; }
+            if (start < parts.length) localStorage.setItem(PERSIST_KEY, '{"version":3,"records":[' + parts.slice(start).join(',') + ']}');
             else localStorage.removeItem(PERSIST_KEY);
         } catch (_) {}
     }
@@ -259,11 +263,16 @@
         if(!chatId||!historyChatAllowed(chatId))return;
         document.querySelectorAll('#MiddleColumn .Message[data-message-id]').forEach(function(node){
             var rec=getRecord(chatId,String(node.getAttribute('data-message-id')||''));
-            if(!rec||!rec.deleted){if(node.querySelector('._twd-deleted-trash_'))unmarkNodeDeleted(node);return;}
-            if(recordShouldShow(rec))markNodeDeleted(node,rec);
-            else node.remove();
+            if(!rec||!rec.deleted){node.classList.remove('_twd-deleted-hidden_');if(node.querySelector('._twd-deleted-trash_'))unmarkNodeDeleted(node);return;}
+            if(recordShouldShow(rec)){node.classList.remove('_twd-deleted-hidden_');markNodeDeleted(node,rec);}
+            else hideDeletedNode(node);
         });
         queueRestoreDeleted();
+    }
+    // Telegram still owns nodes whose deletion was held back; removing them breaks its later DOM updates.
+    function hideDeletedNode(node) {
+        if (node.classList.contains('_twd-deleted-clone_')) node.remove();
+        else { unmarkNodeDeleted(node); node.classList.add('_twd-deleted-hidden_'); }
     }
     function inspectAdded(node) {
         if (!(node instanceof Element)) return;
@@ -277,7 +286,7 @@
             var rec = getRecord(currentChatId(), mid);
             if (rec && rec.deleted) {
                 if (recordShouldShow(rec)) markNodeDeleted(msg, rec);
-                else { msg.remove(); return; }
+                else { hideDeletedNode(msg); return; }
             }
             trackDomMessage(msg);
         });
@@ -650,6 +659,7 @@
         var style = document.createElement('style');
         style.id = '_twd-message-history-style_';
         style.textContent = [
+            '._twd-deleted-hidden_{display:none!important;}',
             '._twd-deleted-message_ .message-content,.message-content:has(>._twd-deleted-trash_){outline:2px dashed var(--color-error,#e65b5b);outline-offset:1px;position:relative;overflow:visible;}',
             '._twd-deleted-message_ .quick-reaction,.message-content:has(>._twd-deleted-trash_) .quick-reaction{display:none!important;pointer-events:none!important;}',
             '._twd-deleted-message_ .Reactions,._twd-deleted-message_ .ReactionList,.Message:has(._twd-deleted-trash_) .Reactions,.Message:has(._twd-deleted-trash_) .ReactionList{pointer-events:none!important;}',
