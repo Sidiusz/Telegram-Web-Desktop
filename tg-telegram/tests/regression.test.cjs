@@ -485,6 +485,20 @@ test('proxy upstream opening is hedged instead of racing every domain', async ()
     );
 });
 
+test('proxy bridge decodes Telegram transport errors and logs per-socket traffic', () => {
+    const { readTransportError } = require('../electron/tg-flowseal-health.cjs');
+    const abridged = Buffer.from('efefefef', 'hex');
+    const intermediate = Buffer.from('eeeeeeee', 'hex');
+    const err = code => { const b = Buffer.alloc(4); b.writeInt32LE(code); return b; };
+    assert.equal(readTransportError(Buffer.concat([Buffer.from([1]), err(-404)]), abridged), -404);
+    assert.equal(readTransportError(Buffer.concat([Buffer.from([4, 0, 0, 0]), err(-429)]), intermediate), -429);
+    assert.equal(readTransportError(Buffer.concat([Buffer.from([1]), err(7)]), abridged), 0);
+    assert.equal(readTransportError(Buffer.alloc(40), abridged), 0);
+    const bridge = read('electron/tg-flowseal-bridge.cjs');
+    assert.match(bridge, /closed by \$\{closedBy \|\| `client \(\$\{code\}\)`\}/);
+    assert.match(bridge, /Telegram transport error \$\{transportError\}/);
+});
+
 test('proxy health does not add heartbeat traffic and validates routes by MTProto response', () => {
     const bridge = read('electron/tg-flowseal-bridge.cjs');
     assert.doesNotMatch(bridge, /\.ping\s*\(/);

@@ -4,7 +4,7 @@ const http = require('http');
 const crypto = require('crypto');
 const { WebSocketServer, WebSocket } = require('ws');
 const {
-    UpstreamHealth, DEFAULT_COOLDOWN_MS, watchFrameStall, rotateCandidates, hedgedOpen,
+    UpstreamHealth, DEFAULT_COOLDOWN_MS, watchFrameStall, rotateCandidates, hedgedOpen, readTransportError,
 } = require('./tg-flowseal-health.cjs');
 const {
     getProxyBootstrap, setBridgeEndpoint,
@@ -157,6 +157,10 @@ function openUpstream(cfg, dc, media) {
     });
 }
 
+function formatBytes(n) {
+    return n < 1024 ? `${n}B` : n < 1048576 ? `${(n / 1024).toFixed(1)}KB` : `${(n / 1048576).toFixed(1)}MB`;
+}
+
 function closePeer(ws, code = 1011, reason = 'bridge closed') {
     try {
         if (ws && (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING)) {
@@ -186,6 +190,9 @@ function handleLocalConnection(local, request) {
     let mediaProbeStartedAt = 0;
     let mediaProbeDone = !media;
     let stopStallWatch = () => {};
+    let protoTag = null;
+    let closedBy = '';
+    const traffic = { upBytes: 0, upFrames: 0, downBytes: 0, downFrames: 0, maxDown: 0, openedAt: Date.now() };
     const initialCfg = getProxyBootstrap();
     const upstreamReady = initialCfg.active
         ? openUpstream(initialCfg, dc, media).then(opened => ({ opened }), error => ({ error }))
@@ -207,6 +214,7 @@ function handleLocalConnection(local, request) {
         const message = err?.message || String(err || 'bridge failure');
         reportBridgeError(dc, message);
         console.error(`[TG-PROXY-BRIDGE] DC${dc}${media ? ' media' : ''}: ${message}`);
+        closedBy = closedBy || `bridge (${message})`;
         closePeer(local, 1011, 'upstream failed');
         if (upstream) closePeer(upstream, 1011, 'bridge failed');
     };
@@ -272,7 +280,7 @@ function handleLocalConnection(local, request) {
                 if (chunk.length !== 64) throw new Error(`expected 64-byte init, got ${chunk.length}`);
                 const cfg = getProxyBootstrap();
                 if (!cfg.active) throw new Error('proxy became inactive');
-                const protoTag = decodeClientProtoTag(chunk);
+                protoTag = decodeClientProtoTag(chunk);
                 const relayInit = generateRelayInit(protoTag, media ? -dc : dc);
                 console.log(`[TG-PROXY-BRIDGE] DC${dc}${media ? ' media' : ''} proto=${protoTag.toString('hex')}`);
                 ctx = buildCrypto(chunk, relayInit);
@@ -304,9 +312,16 @@ function handleLocalConnection(local, request) {
                 upstream.on('message', incoming => {
                     try {
                         const raw = Buffer.from(incoming);
+                        traffic.downBytes += raw.length;
+                        traffic.downFrames++;
+                        if (raw.length > traffic.maxDown) traffic.maxDown = raw.length;
                         if (!media && !controlProbeDone) finishControlProbe();
                         if (!mediaProbeDone) finishMediaProbe();
                         const plain = ctx.relayIn.update(raw);
+                        const transportError = readTransportError(plain, protoTag);
+                        if (transportError) {
+                            console.warn(`[TG-PROXY-BRIDGE] DC${dc}${media ? ' media' : ''} via ${upstreamCandidate.domain}: Telegram transport error ${transportError}`);
+                        }
                         const clientCipher = ctx.clientIn.update(plain);
                         if (local.readyState === WebSocket.OPEN) local.send(clientCipher, { binary: true });
                     } catch (e) { fail(e); }
@@ -315,6 +330,7 @@ function handleLocalConnection(local, request) {
                     if (closed) return;
                     const why = reason?.toString() || `upstream closed ${code}`;
                     if (code !== 1000 || (!media && !controlProbeDone) || (media && !mediaProbeDone)) noteActiveFailure(why);
+                    closedBy = closedBy || `upstream (${code}${reason?.length ? ' ' + reason : ''})`;
                     closePeer(local, code === 1000 ? 1000 : 1011, why);
                 });
                 upstream.on('error', err => {
@@ -326,6 +342,8 @@ function handleLocalConnection(local, request) {
             }
 
             if (!upstream || upstream.readyState !== WebSocket.OPEN) throw new Error('upstream is not open');
+            traffic.upBytes += chunk.length;
+            traffic.upFrames++;
             const plain = ctx.clientOut.update(chunk);
             const relayed = ctx.relayOut.update(plain);
             if (media) {
@@ -336,10 +354,15 @@ function handleLocalConnection(local, request) {
             upstream.send(relayed, { binary: true });
         }).catch(fail);
     });
-    local.on('close', () => {
+    local.on('close', code => {
         clearControlProbe();
         clearMediaProbe();
         stopStallWatch();
+        if (!closed && upstreamCandidate) {
+            const secs = ((Date.now() - traffic.openedAt) / 1000).toFixed(1);
+            console.log(`[TG-PROXY-BRIDGE] DC${dc}${media ? ' media' : ''} via ${upstreamCandidate.domain} closed by ${closedBy || `client (${code})`} after ${secs}s: ` +
+                `up ${formatBytes(traffic.upBytes)}/${traffic.upFrames}, down ${formatBytes(traffic.downBytes)}/${traffic.downFrames} (max ${formatBytes(traffic.maxDown)})`);
+        }
         closed = true;
         if (upstream) {
             try { upstream.close(1000, 'local closed'); } catch (_) {}
