@@ -8,6 +8,38 @@
     let allowReadPeerId = '';
     let allowReadOnceUntil = 0;
     const live = new Set();
+    const mediaSockets = new Map();
+    const mediaRequests = new Set();
+    let mediaRecoveryTimer = null;
+    const MEDIA_REQUEST_STALL_MS = 12000;
+
+    // Watch actual file RPCs, not socket silence: MTProto acknowledgements and idle
+    // pooled sockets legitimately receive no reply. The old first-frame probe stops
+    // after authentication, before most file transfers even begin.
+    globalThis.__twdInvokeWithMediaRecovery = async (request, invoke) => {
+        if (!cfg.active || !/^upload\.(getfile|getcdnfile|getwebfile)$/.test(requestName(request))) return invoke();
+        const token = { startedAt: Date.now() };
+        mediaRequests.add(token);
+        if (!mediaRecoveryTimer) {
+            mediaRecoveryTimer = setInterval(() => {
+                const now = Date.now();
+                if (!cfg.active || !Array.from(mediaRequests).some(r => now - r.startedAt >= MEDIA_REQUEST_STALL_MS)) return;
+                for (const [ws, lastProgress] of mediaSockets) {
+                    if (now - lastProgress < MEDIA_REQUEST_STALL_MS || ws.readyState !== NativeWebSocket.OPEN) continue;
+                    mediaSockets.set(ws, now);
+                    try { ws.close(4002, 'media-request-stalled'); } catch (_) {}
+                }
+            }, 1000);
+        }
+        try { return await invoke(); }
+        finally {
+            mediaRequests.delete(token);
+            if (!mediaRequests.size) {
+                clearInterval(mediaRecoveryTimer);
+                mediaRecoveryTimer = null;
+            }
+        }
+    };
     const readReceiptMethods = new Set([
         'messages.readhistory',
         'channels.readhistory',
@@ -130,7 +162,11 @@
             const info = dcInfo(new URL(String(originalUrl)).hostname);
             if (!info) return ws;
             live.add(ws);
-            ws.addEventListener('close', () => live.delete(ws), { once: true });
+            if (info.media) {
+                mediaSockets.set(ws, Date.now());
+                ws.addEventListener('message', () => { mediaSockets.set(ws, Date.now()); });
+            }
+            ws.addEventListener('close', () => { live.delete(ws); mediaSockets.delete(ws); }, { once: true });
         } catch (_) {}
         return ws;
     }

@@ -18,7 +18,8 @@ function patchTelegramPrivacy(body) {
     const guarded = original.replace(
         'try{',
         `try{if(globalThis.__twdPrivacyShouldBlock&&globalThis.__twdPrivacyShouldBlock(${requestVar}))return;`
-    );
+    ).replace(`${match[2]}.invoke(${match[3]},${match[4]},${match[5]},${match[6]})`,
+        `globalThis.__twdInvokeWithMediaRecovery(${requestVar},()=>${match[2]}.invoke(${match[3]},${match[4]},${match[5]},${match[6]}))`);
     return {
         body: body.slice(0, match.index) + guarded + body.slice(match.index + original.length),
         patched: true,

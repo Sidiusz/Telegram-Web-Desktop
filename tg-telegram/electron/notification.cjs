@@ -6,6 +6,29 @@ let _win = null;          // persistent stack window, reused
 let _ready = false;
 let _pending = [];
 let _idSeq = 0;
+let _deliveryTimer = null;
+let _inFlight = null;
+const _attempts = new Map();
+
+function clearDeliveryTimer() {
+    clearTimeout(_deliveryTimer);
+    _deliveryTimer = null;
+}
+
+function recoverDelivery(win) {
+    if (_win !== win) return;
+    clearDeliveryTimer();
+    _inFlight = null;
+    dropWin(win);
+    // Bound retries when a preload or renderer cannot start at all.
+    _pending = _pending.filter(item => {
+        const attempts = (_attempts.get(item.id) || 0) + 1;
+        if (attempts > 2) { _attempts.delete(item.id); return false; }
+        _attempts.set(item.id, attempts);
+        return true;
+    });
+    if (_pending.length) { ensureWin(); flush(); }
+}
 
 const WIDTH = 384;
 const MARGIN = 16;
@@ -32,6 +55,15 @@ function isPopupSender(event) {
 
 function init(getMainWindow) {
     _getMainWindow = getMainWindow;
+
+    ipcMain.on('notif-presented', (event, { id } = {}) => {
+        if (!isPopupSender(event) || id !== _inFlight) return;
+        clearDeliveryTimer();
+        _pending = _pending.filter(item => item.id !== id);
+        _attempts.delete(id);
+        _inFlight = null;
+        flush();
+    });
 
     ipcMain.on('notif-shape', (event, { count } = {}) => {
         if (!isPopupSender(event)) return;
@@ -318,7 +350,10 @@ function buildHtml() {
     }
 
     window.notifBridge.onAdd(function(data){
-        enqueue(function(){return addCard(data);});
+        enqueue(async function(){
+            await addCard(data);
+            window.notifBridge.presented(data.id);
+        });
     });
 </script>
 </body></html>`;
@@ -377,6 +412,7 @@ function ensureWin() {
     _ready = false;
     win.webContents.once('did-finish-load', () => {
         if (_win !== win || win.isDestroyed()) return;
+        clearDeliveryTimer();
         _ready = true;
         flush();
     });
@@ -389,20 +425,26 @@ function ensureWin() {
     });
     // Renderer crash/hang leaves the BrowserWindow alive but blank. Destroy exactly
     // the failed instance; the next queueNotification will build a fresh one.
-    const drop = () => dropWin(win);
+    const drop = () => recoverDelivery(win);
     win.webContents.on('render-process-gone', drop);
-    win.webContents.on('unresponsive', drop);
+    win.on('unresponsive', drop);
     win.webContents.on('did-fail-load', drop);
+    _deliveryTimer = setTimeout(drop, READY_TIMEOUT_MS);
+    _deliveryTimer.unref?.();
     return win;
 }
 
 function flush() {
-    if (!_win || _win.isDestroyed() || !_ready) return;
-    const items = _pending;
-    _pending = [];
-    if (!items.length) return;
-    items.forEach(it => _win.webContents.send('notif-add', it));
-    if (process.env.TWD_SMOKE_HIDDEN !== '1') _win.showInactive();
+    if (!_win || _win.isDestroyed() || !_ready || _inFlight !== null || !_pending.length) return;
+    const win = _win;
+    const item = _pending[0];
+    _inFlight = item.id;
+    _deliveryTimer = setTimeout(() => recoverDelivery(win), READY_TIMEOUT_MS);
+    _deliveryTimer.unref?.();
+    try {
+        win.webContents.send('notif-add', item);
+        if (process.env.TWD_SMOKE_HIDDEN !== '1') win.showInactive();
+    } catch (_) { recoverDelivery(win); }
 }
 
 function queueNotification(data) {
@@ -419,9 +461,12 @@ function queueNotification(data) {
         peerId: /^-?\d+$/.test(peer) ? peer : '',
         duration: Number.isFinite(rawDuration) ? Math.max(2, Math.min(30, rawDuration)) : 6,
     };
-    ensureWin();
     _pending.push(payload);
-    if (_pending.length > MAX_PENDING) _pending.splice(0, _pending.length - MAX_PENDING);
+    if (_pending.length > MAX_PENDING) {
+        const removed = _pending.splice(_inFlight === null ? 0 : 1, _pending.length - MAX_PENDING);
+        removed.forEach(item => _attempts.delete(item.id));
+    }
+    ensureWin();
     if (_ready) flush();
 }
 

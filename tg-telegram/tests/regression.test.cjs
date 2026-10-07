@@ -707,7 +707,7 @@ test('global unread and typing privacy defaults are off and RPC guard is injecte
     const fixture = 'async function $(e,t={}){let x=1;try{let t=await Lg.invoke(e,i,d,c);return gm(t),!r&&fc(t)&&$m(t),u?t&&!0:t}catch(t){return}}';
     const patched = patchTelegramPrivacy(fixture);
     assert.equal(patched.patched, true);
-    assert.match(patched.body, /__twdPrivacyShouldBlock\(e\)\)return;let t=await Lg\.invoke\(e,i,d,c\)/);
+    assert.match(patched.body, /__twdPrivacyShouldBlock\(e\)\)return;let t=await globalThis\.__twdInvokeWithMediaRecovery\(e,\(\)=>Lg\.invoke\(e,i,d,c\)\)/);
 
 });
 
@@ -1379,7 +1379,7 @@ test('notification category filter distinguishes Telegram channels from groups',
 test('notification backlog stays memory-bounded if the popup renderer is unavailable', () => {
     const popup = read('electron/notification.cjs');
     assert.match(popup, /const MAX_PENDING = 32/);
-    assert.match(popup, /if \(_pending\.length > MAX_PENDING\) _pending\.splice\(0, _pending\.length - MAX_PENDING\)/);
+    assert.match(popup, /_pending\.splice\(_inFlight === null \? 0 : 1, _pending\.length - MAX_PENDING\)/);
     assert.match(popup, /const MAX_ICON_DATA_URL = 2 \* 1024 \* 1024/);
 });
 
@@ -1413,7 +1413,7 @@ test('Telegram media cache patch evicts only unreferenced blob URLs and keeps di
 
     const win = read('electron/window.cjs');
     assert.match(win, /injectTelegramMediaCache/);
-    assert.match(win, /WEB_ASSET_PATCH_REVISION = 'pins-v7'/);
+    assert.match(win, /WEB_ASSET_PATCH_REVISION = 'media-notif-v8'/);
     assert.match(win, /clearStorageData\(\{ origin: 'https:\/\/web\.telegram\.org', storages: \['cachestorage'\] \}\)/);
     assert.doesNotMatch(win, /storages: \[[^\]]*(?:cookies|indexdb|localstorage)/);
 });

@@ -22,6 +22,7 @@
     var nativeNotification = window.Notification;
     if (!nativeNotification && typeof window.Notification !== 'function') return;
 
+    var permissionQueryHook = null;
     function ensureNotificationPermission() {
         try {
             // Do NOT manufacture PushManager/PushSubscription/ServiceWorker APIs.
@@ -29,8 +30,9 @@
             // inventing missing APIs sends Web A down a path the runtime may not
             // actually support and can corrupt its hasWeb/hasPush notification state.
             if (navigator.permissions && navigator.permissions.query) {
+                if (navigator.permissions.query === permissionQueryHook) return;
                 var nativeQuery = navigator.permissions.query.bind(navigator.permissions);
-                navigator.permissions.query = function(desc) {
+                permissionQueryHook = function(desc) {
                     if (desc && (desc.name === 'notifications' || desc.name === 'notification')) {
                         return Promise.resolve({
                             state: 'granted',
@@ -42,6 +44,7 @@
                     }
                     return nativeQuery(desc);
                 };
+                navigator.permissions.query = permissionQueryHook;
             }
         } catch (e) {}
     }
@@ -332,18 +335,6 @@
         }
     }
     installNotificationShim();
-
-    try {
-        if (navigator.permissions && navigator.permissions.query) {
-            var nativeQuery2 = navigator.permissions.query.bind(navigator.permissions);
-            navigator.permissions.query = function(desc) {
-                if (desc && (desc.name === 'notifications' || desc.name === 'notification')) {
-                    return permissionsResponse();
-                }
-                return nativeQuery2(desc);
-            };
-        }
-    } catch (e) {}
 
     // Long-lived desktop sessions are the important case here. Web A may replace its
     // service-worker controller or another script may restore browser globals hours
