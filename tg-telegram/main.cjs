@@ -51,16 +51,43 @@ function showMainWindow(win, maximize = true) {
     win.focus();
 }
 
-function handleTgUrl(tgUrl) {
-    const win = getWindow();
-    if (!win) return;
-    showMainWindow(win, true);
-    // webZ reads tgaddr from the hash only at app startup. loadURL to a URL that
-    // differs only by hash is a same-document nav (no reload) → the effect never
-    // re-runs and the link is ignored. A unique query param forces a full load.
+// Open the link inside the running Web A, the same way a click on a t.me link in a chat does:
+// no reload, no white flash, and the chat slides in with Telegram's own transition.
+function openLinkInPage(win, tgUrl) {
+    const js = `(()=>{try{var rt=window.__twdTelegramRuntime;if(!rt||typeof rt.getActions!=='function')return 'wait';
+var g=rt.getGlobal(),a=rt.getActions();if(!g||!g.isSynced||!a||typeof a.openTelegramLink!=='function')return 'wait';
+a.openTelegramLink({url:${JSON.stringify(tgUrl)}});return 'ok';}catch(e){return 'error';}})()`;
+    if (!win || win.isDestroyed() || win.webContents.isLoading()) return Promise.resolve('wait');
+    return win.webContents.executeJavaScript(js, true).catch(() => 'error');
+}
+
+// webZ reads tgaddr from the hash only at app startup. loadURL to a URL that
+// differs only by hash is a same-document nav (no reload) → the effect never
+// re-runs and the link is ignored. A unique query param forces a full load.
+function reloadWithLink(win, tgUrl) {
+    if (!win || win.isDestroyed()) return;
     const internalUrl = 'https://web.telegram.org/a/?_tgdl=' + Date.now()
         + '#?tgaddr=' + encodeURIComponent(tgUrl);
-    win.webContents.loadURL(internalUrl);
+    win.webContents.loadURL(internalUrl).catch(() => {});
+}
+
+const LINK_WAIT_MS = 20000;
+let linkSeq = 0;
+async function handleTgUrl(tgUrl) {
+    const win = getWindow();
+    if (!win) return;
+    // Like Telegram Desktop: bring the window forward as it is, without maximizing it.
+    showMainWindow(win, false);
+    const seq = ++linkSeq;
+    const started = Date.now();
+    // Right after launch Web A may still be loading or syncing; wait for it instead of reloading.
+    while (seq === linkSeq && Date.now() - started < LINK_WAIT_MS) {
+        const result = await openLinkInPage(win, tgUrl);
+        if (result === 'ok') return;
+        if (result === 'error') break;
+        await new Promise(resolve => setTimeout(resolve, 300));
+    }
+    if (seq === linkSeq) reloadWithLink(win, tgUrl);
 }
 
 const initialDeepLink = getTgUrlFromArgs(process.argv);
@@ -98,10 +125,7 @@ app.whenReady().then(async () => {
 
     Menu.setApplicationMenu(null);
 
-    if (initialDeepLink) {
-        const win = getWindow();
-        win.webContents.once('did-finish-load', () => handleTgUrl(initialDeepLink));
-    }
+    if (initialDeepLink) void handleTgUrl(initialDeepLink);
 });
 
 app.on('before-quit', () => { void stopEmbeddedFlowsealBridge().catch(() => {}); });
