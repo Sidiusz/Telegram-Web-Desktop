@@ -36,6 +36,7 @@ test('download filenames cannot address Windows device files', () => {
     assert.equal(sanitizeFilename('COM9.jpg'), '_COM9.jpg');
     assert.equal(sanitizeFilename('normal file.pdf...   '), 'normal file.pdf');
     assert.equal(sanitizeFilename('../folder/file.txt'), '_folder_file.txt');
+    assert.equal(sanitizeFilename('invoice\u202Efdp.exe'), 'invoicefdp.exe', 'bidi overrides cannot disguise an extension');
 });
 
 test('Windows installer registers tg:// as a Default Apps contender without hijacking test builds', () => {
@@ -1532,7 +1533,7 @@ test('downloads never share a target path, never delete foreign files, and carry
     const ipc = read('electron/ipc.cjs');
     assert.match(ipc, /const releasePath = reservePath\(dest\)/);
     assert.match(ipc, /await fs\.promises\.rename\(item\.temp, item\.dest\);\s*markFromInternet\(item\.dest\);/);
-    assert.match(read('electron/window.cjs'), /const releasePath = reservePath\(item\.getSavePath\(\)\)/);
+    assert.match(read('electron/window.cjs'), /releasePath = reservePath\(item\.getSavePath\(\)\)/);
 });
 
 test('message history never removes Telegram-owned nodes, stays under a storage budget, and keeps savePublic', () => {

@@ -29,6 +29,9 @@ function uniquePath(p) {
 function sanitizeFilename(name) {
     let s = String(name || 'file').trim() || 'file';
     s = s.replace(/[\0-\x1F\/\\:*?"<>|]/g, '_');
+    // Bidi and other invisible format characters (U+202E RLO etc.) let "invoice\u202Efdp.exe"
+    // display as "invoiceexe.pdf" in Explorer and in the downloads list.
+    s = s.replace(/[\u007F-\u009F\p{Cf}]/gu, '');
     // Windows trims trailing dots/spaces and treats names such as CON, NUL, COM1,
     // etc. as device files even when an extension is present. Normalize those
     // before joining with the downloads directory.

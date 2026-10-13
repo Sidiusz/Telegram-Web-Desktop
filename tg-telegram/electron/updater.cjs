@@ -461,9 +461,16 @@ async function verifyDownload(filePath, total, expected, releaseDigest) {
 async function downloadUpdate(url, filename, onProgress, releaseDigest) {
     assertAllowedHost(url);
 
-    const destDir = app.getPath('downloads');
+    // A private folder, not Downloads: the page can save files into Downloads, so an installer
+    // there could be replaced between verification and launch.
+    const destDir = path.join(app.getPath('userData'), 'updates');
     const safeName = sanitizeFilename(filename) || sanitizeFilename(new URL(url).pathname.split('/').pop()) || 'update.exe';
     if (!safeName.toLowerCase().endsWith('.exe')) throw new Error('Invalid filename');
+    await fs.promises.mkdir(destDir, { recursive: true });
+    for (const name of await fs.promises.readdir(destDir).catch(() => [])) {
+        // Installers from earlier updates; one still running stays locked and is skipped.
+        if (/\.exe(?:\.part)?$/i.test(name)) await fs.promises.unlink(path.join(destDir, name)).catch(() => {});
+    }
     const destPath = uniquePath(path.join(destDir, safeName));
     const partPath = destPath + '.part';
     try { fs.unlinkSync(partPath); } catch (e) {}

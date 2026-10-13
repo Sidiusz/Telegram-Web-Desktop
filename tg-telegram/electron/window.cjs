@@ -426,8 +426,16 @@ function createWindow(state, onTelegramLink, options = {}) {
             try { item.cancel(); } catch (_) {}
             return;
         }
-        item.setSavePath(uniquePath(path.join(downloadDir, originalFilename)));
-        const releasePath = reservePath(item.getSavePath());
+        let releasePath;
+        try {
+            item.setSavePath(uniquePath(path.join(downloadDir, originalFilename)));
+            releasePath = reservePath(item.getSavePath());
+        } catch (e) {
+            // An unhandled throw here leaves Chromium to pick its own path and overwrite rules.
+            console.error('[DOWNLOAD] no free file name:', e && e.message ? e.message : e);
+            try { item.cancel(); } catch (_) {}
+            return;
+        }
 
         const savePath = item.getSavePath();
         const filename = path.basename(savePath) || originalFilename;
