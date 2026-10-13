@@ -955,7 +955,7 @@ test('custom UI stays inside Telegram Settings and keeps native navigation seman
     assert.match(settings, /function _largeSvgGlyph\(/);
     assert.match(settings, /__twdLargeSvgIcons\[icon\]/);
     // Tiles without an own glyph use Telegram's filled icons, never thin outline ones.
-    ['settings-filled','notifications-filled','support-filled','web-filled','piechart-filled','note-filled','clock-filled','info-filled']
+    ['settings-filled','notifications-filled','support-filled','web-filled','piechart-filled','privacy-policy-filled','clock-filled','info-filled']
         .forEach(name => assert.ok(settings.includes("'" + name + "'"), name));
     largeIcons.forEach(name => assert.doesNotMatch(fs.readFileSync(path.join(root, 'electron', 'assets', 'icons', name + '.svg'), 'utf8'), /stroke/));
     assert.doesNotMatch(twd, /'visual_interface'/);

@@ -196,7 +196,7 @@ function _nativeDecoratedTemplate(tone,multiline){
 // Settings tiles use Telegram's own filled glyphs: white shapes with cut-outs, no thin outlines.
 function _filledIconName(icon){var map={info:'info-filled',user:'account-filled',mention:'mention-filled',folder:'folder-filled',
     settings:'settings-filled',notifications:'notifications-filled',messages:'support-filled',proxy:'web-filled',
-    data:'piechart-filled',changelog:'note-filled',schedule:'clock-filled'};return map[icon]||icon;}
+    data:'piechart-filled',changelog:'privacy-policy-filled',schedule:'clock-filled'};return map[icon]||icon;}
 // Filled Material Icons (round, Apache-2.0) used only where Telegram has no semantic glyph.
 // extension = add-ons; device_hub = proxy/network route. The native colored tile is still cloned from Telegram.
 var _TWD_FILLED_GLYPHS={

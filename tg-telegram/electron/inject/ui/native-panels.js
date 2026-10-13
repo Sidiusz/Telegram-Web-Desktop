@@ -397,7 +397,7 @@ function _clNativeRow(liEl,line){
     var raw=String(line||'').trim().replace(/^(?:[-+•]|\*(?!\*))\s+/,'');
     var strong=raw.match(/^\*\*(.+?)\*\*\s*(.*)$/),title='',sub='';
     if(strong){title=_clPlainMarkdown(strong[1]);sub=_clPlainMarkdown(strong[2]);}
-    else{var txt=_clPlainMarkdown(raw),m=txt.match(/^([^:]{2,24}):\s+(.+)$/);title=m?m[1]+':':txt;sub=m?m[2]:'';}
+    else title=_clPlainMarkdown(raw);
     var r=_genNativeSettingRow(liEl,title,sub,'',null);if(r._value)r._value.remove();r.classList.add('is-static');
     if(strong&&r._title)r._title.style.fontWeight='var(--font-weight-medium,500)';
     var b=r.querySelector('.ListItem-button');if(b){b.removeAttribute('role');b.removeAttribute('tabindex');}return r;
