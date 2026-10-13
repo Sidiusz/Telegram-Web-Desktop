@@ -98,6 +98,23 @@
         #MiddleColumn.tgdl-private .MessageList.no-avatars .Message.last-in-group:not(.is-album) .message-content.media .full-media {
             border-bottom-left-radius: 0 !important;
         }
+        /* Media joins the text or header next to it, as in stock Telegram: square the edge that
+           touches a caption/footer below or a sender name/title above. Only free edges stay round.
+           Same prefixes as the rounding rules above, so these always win. */
+        #MiddleColumn.tgdl-private .MessageList.no-avatars .Message .message-content.media.has-footer:not(.web-page):not(.poll) :is(.media-inner,.full-media,.Album),
+        #MiddleColumn.tgdl-private .MessageList.no-avatars .Message .message-content.media.has-replies:not(.custom-shape) :is(.media-inner,.full-media,.Album),
+        #MiddleColumn .MessageList:not(.no-avatars) .Message .message-content.media.has-footer:not(.web-page):not(.poll) :is(.media-inner,.full-media,.Album),
+        #MiddleColumn .MessageList:not(.no-avatars) .Message .message-content.media.has-replies:not(.custom-shape) :is(.media-inner,.full-media,.Album) {
+            border-bottom-left-radius: 0 !important;
+            border-bottom-right-radius: 0 !important;
+        }
+        #MiddleColumn.tgdl-private .MessageList.no-avatars .Message .message-content.media:is(.has-subheader,.force-sender-name):not(.custom-shape) :is(.media-inner,.full-media,.Album),
+        #MiddleColumn.tgdl-private .MessageList.no-avatars .Message .message-content.media.text.is-inverted-media :is(.media-inner,.full-media,.Album),
+        #MiddleColumn .MessageList:not(.no-avatars) .Message .message-content.media:is(.has-subheader,.force-sender-name):not(.custom-shape) :is(.media-inner,.full-media,.Album),
+        #MiddleColumn .MessageList:not(.no-avatars) .Message .message-content.media.text.is-inverted-media :is(.media-inner,.full-media,.Album) {
+            border-top-left-radius: 0 !important;
+            border-top-right-radius: 0 !important;
+        }
 
         #MiddleColumn .MessageList:not(.no-avatars) .Message.own {
             padding-left: 44px !important;

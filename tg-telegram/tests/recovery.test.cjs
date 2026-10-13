@@ -453,3 +453,14 @@ test('a media sender that stops answering is reconnected instead of leaving file
     now = 400000; tick();
     assert.equal(timers.size, 0, 'requests that never settle are dropped after the watch limit');
 });
+
+test('desktop layout keeps media square where a caption or header touches it', () => {
+    const base = read('features/desktop_like_base.js');
+    const rounding = base.indexOf('border-bottom-left-radius: var(--border-radius-messages) !important;');
+    const square = base.indexOf('.message-content.media.has-footer:not(.web-page):not(.poll) :is(.media-inner,.full-media,.Album)');
+    assert.ok(rounding > 0 && square > rounding, 'the caption rule comes after the all-corner rounding');
+    // Same high-specificity prefix as the rounding rule, or the rounding wins in private chats.
+    assert.match(base, /#MiddleColumn\.tgdl-private \.MessageList\.no-avatars \.Message \.message-content\.media\.has-footer:not\(\.web-page\):not\(\.poll\) :is\(\.media-inner,\.full-media,\.Album\)/);
+    assert.match(base, /#MiddleColumn \.MessageList:not\(\.no-avatars\) \.Message \.message-content\.media\.has-footer/);
+    assert.match(base, /:is\(\.has-subheader,\.force-sender-name\):not\(\.custom-shape\) :is\(\.media-inner,\.full-media,\.Album\)/);
+});
