@@ -1,5 +1,6 @@
 const { transformedJsResponse } = require('./tg-bundle-patch.cjs');
-const MEDIA_CHUNK_RE = /\/assets\/Checkbox-[^/]+\.js$/i;
+// Web A moved its media loader from the Checkbox chunk to the Transition chunk; accept both.
+const MEDIA_CHUNK_RE = /\/assets\/(?:Checkbox|Transition)-[^/]+\.js$/i;
 const MEDIA_MARKER = 'Failed to fetch media';
 
 function escapeRegex(value) {
@@ -56,7 +57,7 @@ async function injectTelegramMediaCache(response, urlString) {
     const source = await response.text();
     const patched = patchTelegramMediaCache(source);
     if (patched.patched) console.log('[TWD-MEMORY] Telegram media cache LRU installed');
-    else console.warn('[TWD-MEMORY] Telegram media cache module was not recognized');
+    else if (source.includes(MEDIA_MARKER)) console.warn('[TWD-MEMORY] Telegram media cache module was not recognized');
     return transformedJsResponse(response, patched.body);
 }
 

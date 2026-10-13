@@ -358,7 +358,8 @@ function handleLocalConnection(local, request) {
         clearControlProbe();
         clearMediaProbe();
         stopStallWatch();
-        if (media && code === 4002 && upstreamCandidate) noteActiveFailure('media request stalled');
+        // 4002: the worker saw a file/auth request get no answer on this socket (media or exported control).
+        if (code === 4002 && upstreamCandidate) noteActiveFailure(media ? 'media request stalled' : 'request stalled');
         if (!closed && upstreamCandidate) {
             const secs = ((Date.now() - traffic.openedAt) / 1000).toFixed(1);
             console.log(`[TG-PROXY-BRIDGE] DC${dc}${media ? ' media' : ''} via ${upstreamCandidate.domain} closed by ${closedBy || `client (${code})`} after ${secs}s: ` +

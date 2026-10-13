@@ -9,36 +9,87 @@
     let allowReadOnceUntil = 0;
     const live = new Set();
     const mediaSockets = new Map();
-    const mediaRequests = new Set();
+    // Last sign of life per Telegram socket: opened, a frame arrived, or bytes still leaving.
+    const lastProgress = new WeakMap();
+    const watchedRequests = new Set();
     let mediaRecoveryTimer = null;
     const MEDIA_REQUEST_STALL_MS = 12000;
+    const WATCH_MAX_MS = 3 * 60 * 1000;
+    // Requests of exported (media) senders that must get an answer. Uploads (upload.Save*) are
+    // left out: a slow uplink sends a part for longer than the stall window without any reply.
+    const WATCHED_SEND = /^(upload\.get(file|cdnfile|webfile|filehashes|cdnfilehashes)|auth\.(import|export)authorization|invokewithlayer)$/;
+
+    function senderSocket(sender) {
+        try {
+            const connection = sender && typeof sender.getConnection === 'function' && sender.getConnection();
+            const client = connection && connection.socket && connection.socket.client;
+            return client && live.has(client) ? client : null;
+        } catch (_) { return null; }
+    }
+    function stallSocket(ws, now) {
+        lastProgress.set(ws, now);
+        mediaSockets.set(ws, now);
+        try { ws.close(4002, 'media-request-stalled'); } catch (_) {}
+    }
+    function checkStalls() {
+        const now = Date.now();
+        if (!cfg.active) return;
+        let unknownSenderStalled = false;
+        for (const token of Array.from(watchedRequests)) {
+            if (now - token.startedAt >= WATCH_MAX_MS) { unwatchRequest(token); continue; }
+            if (!token.sender) {
+                if (now - token.startedAt >= MEDIA_REQUEST_STALL_MS) unknownSenderStalled = true;
+                continue;
+            }
+            const ws = senderSocket(token.sender);
+            if (!ws || ws.readyState !== NativeWebSocket.OPEN) continue;
+            if (ws.bufferedAmount > 0) { lastProgress.set(ws, now); continue; }
+            // A request resent on a fresh socket after reconnect gets a fresh window from its open time.
+            if (now - Math.max(token.startedAt, lastProgress.get(ws) || 0) >= MEDIA_REQUEST_STALL_MS) stallSocket(ws, now);
+        }
+        // Requests without a known sender (main-sender invoke path): close silent media sockets.
+        if (!unknownSenderStalled) return;
+        for (const [ws, last] of mediaSockets) {
+            if (now - last < MEDIA_REQUEST_STALL_MS || ws.readyState !== NativeWebSocket.OPEN) continue;
+            stallSocket(ws, now);
+        }
+    }
+    function watchRequest(sender, signal) {
+        const token = { startedAt: Date.now(), sender: sender || null };
+        watchedRequests.add(token);
+        if (signal && typeof signal.addEventListener === 'function') {
+            try { signal.addEventListener('abort', () => unwatchRequest(token), { once: true }); } catch (_) {}
+        }
+        if (!mediaRecoveryTimer) mediaRecoveryTimer = setInterval(checkStalls, 1000);
+        return token;
+    }
+    function unwatchRequest(token) {
+        watchedRequests.delete(token);
+        if (!watchedRequests.size && mediaRecoveryTimer) {
+            clearInterval(mediaRecoveryTimer);
+            mediaRecoveryTimer = null;
+        }
+    }
 
     // Watch actual file RPCs, not socket silence: MTProto acknowledgements and idle
     // pooled sockets legitimately receive no reply. The old first-frame probe stops
     // after authentication, before most file transfers even begin.
     globalThis.__twdInvokeWithMediaRecovery = async (request, invoke) => {
         if (!cfg.active || !/^upload\.(getfile|getcdnfile|getwebfile)$/.test(requestName(request))) return invoke();
-        const token = { startedAt: Date.now() };
-        mediaRequests.add(token);
-        if (!mediaRecoveryTimer) {
-            mediaRecoveryTimer = setInterval(() => {
-                const now = Date.now();
-                if (!cfg.active || !Array.from(mediaRequests).some(r => now - r.startedAt >= MEDIA_REQUEST_STALL_MS)) return;
-                for (const [ws, lastProgress] of mediaSockets) {
-                    if (now - lastProgress < MEDIA_REQUEST_STALL_MS || ws.readyState !== NativeWebSocket.OPEN) continue;
-                    mediaSockets.set(ws, now);
-                    try { ws.close(4002, 'media-request-stalled'); } catch (_) {}
-                }
-            }, 1000);
-        }
+        const token = watchRequest(null, null);
         try { return await invoke(); }
-        finally {
-            mediaRequests.delete(token);
-            if (!mediaRequests.size) {
-                clearInterval(mediaRecoveryTimer);
-                mediaRecoveryTimer = null;
-            }
-        }
+        finally { unwatchRequest(token); }
+    };
+    // Patched MTProtoSender.send of exported senders: Web A downloads files there, and a relay
+    // that keeps the socket open but stops answering leaves the file at 0% until a restart.
+    // Closing that sender's socket makes GramJS reconnect and resend the pending request.
+    globalThis.__twdWatchSend = (sender, request, promise, signal) => {
+        try {
+            if (!cfg.active || !promise || typeof promise.then !== 'function' || !WATCHED_SEND.test(requestName(request))) return promise;
+            const token = watchRequest(sender, signal);
+            promise.then(() => unwatchRequest(token), () => unwatchRequest(token));
+        } catch (_) {}
+        return promise;
     };
     const readReceiptMethods = new Set([
         'messages.readhistory',
@@ -162,10 +213,13 @@
             const info = dcInfo(new URL(String(originalUrl)).hostname);
             if (!info) return ws;
             live.add(ws);
-            if (info.media) {
-                mediaSockets.set(ws, Date.now());
-                ws.addEventListener('message', () => { mediaSockets.set(ws, Date.now()); });
-            }
+            lastProgress.set(ws, Date.now());
+            if (info.media) mediaSockets.set(ws, Date.now());
+            ws.addEventListener('message', () => {
+                const now = Date.now();
+                lastProgress.set(ws, now);
+                if (mediaSockets.has(ws)) mediaSockets.set(ws, now);
+            });
             ws.addEventListener('close', () => { live.delete(ws); mediaSockets.delete(ws); }, { once: true });
         } catch (_) {}
         return ws;

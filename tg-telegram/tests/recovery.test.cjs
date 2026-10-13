@@ -383,3 +383,73 @@ test('startup splash fades out once Telegram shows its UI, or after the hard cap
     chats.advance(120);
     assert.equal(chats.faded, true);
 });
+
+test('a media sender that stops answering is reconnected instead of leaving files at 0%', async () => {
+    const { patchTelegramMediaSenders } = require('../electron/tg-flowseal-worker.cjs');
+    // MTProtoSender.send as shipped in Web A's worker (only identifiers shortened).
+    const sample = 'class Mi{constructor(e,t){this.request=e;this.promise=new Promise(()=>{})}}class S{constructor(x){this._isExported=x;this.c=null}' +
+        'getConnection(){return this.c}send(e,t,n=!1){let r=this._splitMessageIdRequest(e).map(e=>new Mi(e,t));for(let e=1;e<r.length;e++)r[e].promise.catch(()=>void 0);' +
+        'return n?this._q2(r):(this.log(`Send ${e.className}`),this._q(r)),r[0].promise}_splitMessageIdRequest(e){return[e]}log(){}_q(){}_q2(){}}globalThis.Sender=S;';
+    const patched = patchTelegramMediaSenders(sample);
+    assert.equal(patched.patched, true);
+    assert.match(patched.body, /,this\._isExported&&globalThis\.__twdWatchSend\?globalThis\.__twdWatchSend\(this,e,r\[0\]\.promise,t\):r\[0\]\.promise\}/);
+    assert.equal(patchTelegramMediaSenders(patched.body).patched, false, 'applied once');
+    assert.match(read('tg-flowseal-worker.cjs'), /media sender hook was not found in the MTProto worker/);
+
+    let now = 0;
+    const timers = new Set();
+    class Socket extends EventEmitter {
+        static OPEN = 1;
+        constructor(url) { super(); this.url = url; this.readyState = 1; this.closed = []; this.bufferedAmount = 0; }
+        addEventListener(name, fn) { this.on(name, fn); }
+        close(code) { this.closed.push(code); this.readyState = 3; this.emit('close'); }
+    }
+    const context = { WebSocket: Socket, URL, URLSearchParams, console: { log() {} }, Promise,
+        Date: { now: () => now }, setInterval: fn => { timers.add(fn); return fn; }, clearInterval: fn => timers.delete(fn) };
+    context.globalThis = context;
+    vm.createContext(context);
+    vm.runInContext(read('tg-flowseal-relay-runtime.js')
+        .replace('__TWD_PROXY_BOOTSTRAP__', JSON.stringify({ active: true, bridgePort: 1234, bridgeToken: 'test' }))
+        .replace('__TWD_PROXY_CHANNEL__', '"test"'), context);
+    vm.runInContext(patched.body, context);
+    const tick = () => { for (const fn of Array.from(timers)) fn(); };
+    const connect = (sender, url) => { sender.c = { socket: { client: new context.WebSocket(url) } }; return sender.c.socket.client; };
+
+    const media = new context.Sender(true), other = new context.Sender(true), main = new context.Sender(false);
+    const stuck = connect(media, 'wss://kws4-1.web.telegram.org/apiws');
+    const idle = connect(other, 'wss://kws2-1.web.telegram.org/apiws');
+    const control = connect(main, 'wss://kws2.web.telegram.org/apiws');
+    main.send({ className: 'upload.GetFile' });
+    assert.equal(timers.size, 0, 'the main sender is not watched here');
+    media.send({ className: 'upload.SaveFilePart' });
+    assert.equal(timers.size, 0, 'uploads are never treated as stalls');
+    media.send({ className: 'MsgsAck' });
+    assert.equal(timers.size, 0, 'requests without an answer are not watched');
+
+    media.send({ className: 'upload.GetFile' });
+    assert.equal(timers.size, 1);
+    now = 11999; tick();
+    assert.deepEqual(stuck.closed, [], 'waits the full stall window');
+    now = 12000; tick();
+    assert.deepEqual(stuck.closed, [4002], 'only the stalled sender socket is closed');
+    assert.deepEqual(idle.closed, [], 'an idle healthy media socket is left alone');
+    assert.deepEqual(control.closed, []);
+
+    const fresh = connect(media, 'wss://kws4-1.web.telegram.org/apiws');
+    now = 20000; tick();
+    assert.deepEqual(fresh.closed, [], 'the request resent on the new socket gets a fresh window');
+    now = 31000; fresh.emit('message'); tick();
+    now = 42000; tick();
+    assert.deepEqual(fresh.closed, [], 'incoming frames count as progress');
+    now = 43001; tick();
+    assert.deepEqual(fresh.closed, [4002]);
+
+    const controller = new AbortController();
+    const live = connect(other, 'wss://kws2-1.web.telegram.org/apiws');
+    other.send({ className: 'upload.GetFile' }, controller.signal);
+    controller.abort();
+    now = 90000; tick();
+    assert.deepEqual(live.closed, [], 'a cancelled download stops being watched');
+    now = 400000; tick();
+    assert.equal(timers.size, 0, 'requests that never settle are dropped after the watch limit');
+});

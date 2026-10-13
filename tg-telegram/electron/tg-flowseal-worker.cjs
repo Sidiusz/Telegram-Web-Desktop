@@ -26,6 +26,19 @@ function patchTelegramPrivacy(body) {
     };
 }
 
+// Web A downloads files through exported (per-DC media) senders with sender.send(GetFile),
+// not through invokeRequest, so the RPC hook above never sees them. Hook the sender itself.
+const SENDER_SEND_PATTERN = /send\(([A-Za-z_$][\w$]*),([A-Za-z_$][\w$]*),([A-Za-z_$][\w$]*)=!1\)\{let ([A-Za-z_$][\w$]*)=this\._splitMessageIdRequest\(\1\)([\s\S]{0,400}?),\4\[0\]\.promise\}/;
+
+function patchTelegramMediaSenders(body) {
+    const match = SENDER_SEND_PATTERN.exec(body);
+    if (!match) return { body, patched: false };
+    const [all, req, signal, longPoll, states, middle] = match;
+    const hooked = `send(${req},${signal},${longPoll}=!1){let ${states}=this._splitMessageIdRequest(${req})${middle},` +
+        `this._isExported&&globalThis.__twdWatchSend?globalThis.__twdWatchSend(this,${req},${states}[0].promise,${signal}):${states}[0].promise}`;
+    return { body: body.slice(0, match.index) + hooked + body.slice(match.index + all.length), patched: true };
+}
+
 function workerProxyChannel(urlString) {
     try {
         const u = new URL(urlString);
@@ -49,7 +62,11 @@ async function injectTelegramWorkerProxy(response, urlString) {
 
     const source = await response.text();
     const privacyPatch = patchTelegramPrivacy(source);
-    const body = privacyPatch.body;
+    const senderPatch = patchTelegramMediaSenders(privacyPatch.body);
+    const body = senderPatch.body;
+    if (!senderPatch.patched && /upload\.GetFile/.test(source)) {
+        console.warn('[TG-PROXY] media sender hook was not found in the MTProto worker');
+    }
     const channel = workerProxyChannel(urlString);
     const { getProxyBootstrap } = require('./tg-flowseal-route.cjs');
     const initialProxy = getProxyBootstrap();
@@ -77,4 +94,5 @@ module.exports = {
     isTaggedTelegramWorker,
     workerProxyChannel,
     patchTelegramPrivacy,
+    patchTelegramMediaSenders,
 };
