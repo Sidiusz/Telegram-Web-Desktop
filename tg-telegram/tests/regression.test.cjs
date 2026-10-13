@@ -918,8 +918,13 @@ test('startup surface follows the persisted Telegram theme and its splash never 
     assert.ok(MAX_SPLASH_MS <= 15000);
     assert.match(html, /prefers-reduced-motion/);
     const icon = fs.readFileSync(path.join(root, 'electron', 'icons', 'icon.svg'), 'utf8');
-    assert.ok(html.includes(icon.slice(icon.indexOf('<defs>'), icon.indexOf('</svg>'))), 'the splash draws the app icon itself');
-    assert.doesNotMatch(icon, /ellipse|stroke=/, 'the app icon has no orbit line');
+    const land = /<g clip-path="url\(#twd-icon-globe\)">[\s\S]*?<\/g>/.exec(icon)[0];
+    assert.ok(html.includes(land) && html.includes('<g class="twd-icon-plane">'), 'the splash draws the app icon itself');
+    assert.doesNotMatch(icon, /animateMotion|stroke=/, 'the app icon has no orbit or satellite');
+    const logo = /<svg class="twd-splash-logo"[\s\S]*?<\/svg>/.exec(html)[0];
+    assert.equal((logo.match(/<animateMotion /g) || []).length, 2, 'the splash satellite orbits the planet');
+    assert.ok(logo.indexOf('<animateMotion') < logo.search(/<circle cx="[\d.]+" cy="[\d.]+" r="[\d.]+" fill=/), 'the far half of the orbit is drawn behind the planet');
+    assert.ok(logo.lastIndexOf('clip-path="url(#twd-splash-near)"') < logo.indexOf('<g class="twd-icon-plane">'), 'the near orbit passes under the plane');
     assert.match(win, /backgroundColor: startupBackground\(startupTheme\(initialSettings\)\)/);
     assert.match(win, /injectStartupSurface\(body, startupTheme\(settings\)\)/);
     assert.match(bootstrap, /function installStartupThemeSync\(\)/);

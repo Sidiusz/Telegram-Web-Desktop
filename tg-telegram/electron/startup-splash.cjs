@@ -9,10 +9,31 @@ const SPLASH_ID = 'twd-splash';
 const MAX_SPLASH_MS = 15000;
 const MAIN_SETTLE_MS = 4000;
 
-// The app icon itself (electron/icons/icon.svg), so the splash and the icon never drift apart.
-const LOGO_SVG = fs.readFileSync(path.join(__dirname, 'icons', 'icon.svg'), 'utf8')
-    .replace(/<svg\b[^>]*>/, '<svg class="twd-splash-logo" viewBox="0 0 108 108" aria-hidden="true">')
-    .trim();
+// The splash shows the app icon (electron/icons/icon.svg) at its natural size with the
+// satellite from the original artwork orbiting it; the app icon itself has no orbit.
+// The far half of the orbit passes behind the planet, the near half in front of it but under the plane.
+const ORBIT = { cx: 54.4, cy: 53.3, rx: 47.3, ry: 11.5, tilt: -19.2, sat: 2.6, period: '3.6s' };
+function orbitLayer(near) {
+    const { cx, cy, rx, ry, tilt, sat, period } = ORBIT;
+    const arc = near ? `M${rx} 0A${rx} ${ry} 0 0 1 ${-rx} 0` : `M${-rx} 0A${rx} ${ry} 0 0 1 ${rx} 0`;
+    const loop = `M${rx} 0A${rx} ${ry} 0 1 1 ${-rx} 0A${rx} ${ry} 0 1 1 ${rx} 0Z`;
+    return `<g transform="translate(${cx} ${cy}) rotate(${tilt})"${near ? ' clip-path="url(#twd-splash-near)"' : ''}>` +
+        `<path d="${arc}" fill="none" stroke="#7cbefc" stroke-width="1.05"/>` +
+        `<circle r="${sat}" fill="#8cc8fd"><animateMotion dur="${period}" repeatCount="indefinite" path="${loop}"/></circle></g>`;
+}
+function splashLogo(iconSvg) {
+    const plane = iconSvg.indexOf('<g class="twd-icon-plane">');
+    const scaled = /<g transform="translate\(54 54\) scale\([\d.]+\) translate\([-\d. ]+\)">/.exec(iconSvg);
+    const open = /<svg\b[^>]*>/;
+    if (plane < 0 || !scaled) return iconSvg.replace(open, '<svg class="twd-splash-logo" viewBox="0 0 108 108" aria-hidden="true">').trim();
+    const body = iconSvg.slice(0, scaled.index) + '<g>' + orbitLayer(false) +
+        iconSvg.slice(scaled.index + scaled[0].length, plane) + orbitLayer(true) + iconSvg.slice(plane);
+    return body
+        .replace('<defs>', '<defs><clipPath id="twd-splash-near"><rect x="-60" y="0" width="120" height="30"/></clipPath>')
+        .replace(open, '<svg class="twd-splash-logo" viewBox="4 3 100 100" aria-hidden="true">')
+        .trim();
+}
+const LOGO_SVG = splashLogo(fs.readFileSync(path.join(__dirname, 'icons', 'icon.svg'), 'utf8'));
 
 function splashMarkup(theme) {
     const dark = theme !== 'light';
@@ -23,9 +44,9 @@ function splashMarkup(theme) {
 #${SPLASH_ID}{position:fixed;inset:0;z-index:2147483000;display:flex;flex-direction:column;align-items:center;justify-content:center;
 background:${bg};pointer-events:none;opacity:1;transition:opacity .35s ease;font-family:Roboto,-apple-system,"Segoe UI",sans-serif;}
 #${SPLASH_ID}.twd-splash-out{opacity:0;}
-#${SPLASH_ID} .twd-splash-logo{width:112px;height:112px;filter:drop-shadow(0 8px 26px rgba(56,140,232,.4));animation:twd-splash-in .5s cubic-bezier(.2,.9,.3,1.2) both;}
+#${SPLASH_ID} .twd-splash-logo{width:156px;height:156px;filter:drop-shadow(0 8px 24px rgba(56,140,232,.32));animation:twd-splash-in .5s cubic-bezier(.2,.9,.3,1.2) both;}
 #${SPLASH_ID} .twd-icon-plane{animation:twd-splash-float 2.6s ease-in-out infinite;}
-#${SPLASH_ID} .twd-splash-name{margin-top:22px;font-size:15px;letter-spacing:.2px;color:${text};animation:twd-splash-fade .6s .15s ease both;}
+#${SPLASH_ID} .twd-splash-name{margin-top:6px;font-size:15px;letter-spacing:.2px;color:${text};animation:twd-splash-fade .6s .15s ease both;}
 #${SPLASH_ID} .twd-splash-bar{position:relative;width:132px;height:3px;margin-top:16px;border-radius:2px;overflow:hidden;background:${track};animation:twd-splash-fade .6s .3s ease both;}
 #${SPLASH_ID} .twd-splash-bar::after{content:"";position:absolute;top:0;bottom:0;width:40%;border-radius:2px;background:#3390ec;animation:twd-splash-run 1.25s cubic-bezier(.45,0,.55,1) infinite;}
 @keyframes twd-splash-in{from{opacity:0;transform:scale(.86);}to{opacity:1;transform:none;}}
@@ -55,4 +76,4 @@ function injectStartupSplash(html, theme) {
         .replace(/<body([^>]*)>/i, (m) => m + body);
 }
 
-module.exports = { injectStartupSplash, splashMarkup, MAX_SPLASH_MS };
+module.exports = { injectStartupSplash, splashMarkup, splashLogo, MAX_SPLASH_MS };
