@@ -105,3 +105,89 @@ test('notification health repair does not accumulate permission wrappers over a 
     assert.equal(nativeCalls, 1);
     assert.equal((await query({ name: 'notifications' })).state, 'granted');
 });
+
+test('Telegram notify gate survives a reset hasWebNotifications flag in the current Web A build shape', async () => {
+    const { patchTelegramNotifications } = require('../electron/tg-notification-patch.cjs');
+    // Shape of Web A's lock chunk as shipped: minifier names differ from older builds (isReaction:n).
+    const sample = 'function A(){return globalThis.state}function I(){return globalThis.actions}' +
+        'function s(e){return e.settings.byKey}function Rt(){return!0}function Ct(){return!0}function Q(){return!0}' +
+        'async function Bt(e){return`data:image/png;base64,AA`}' +
+        'async function Ut({chat:e,message:t,isReaction:n=!1}){let r=A(),{hasWebNotifications:i}=s(r);if(!Rt(e,t))return;' +
+        'let l=Ct();if(!i||!l){return}if(!l||!t.id)return;let f=await Bt(e),{title:p,body:m}={title:`T`,body:`B`};' +
+        'if(Q())navigator.serviceWorker?.controller&&navigator.serviceWorker.controller.postMessage({type:`showMessageNotification`,' +
+        'payload:{title:p,body:m,icon:f,chatId:e.id,messageId:t.id}});else{let r=I(),i={body:m,icon:f,badge:f,tag:String(t.id)};' +
+        'new Notification(p,i)}}globalThis.notify=Ut;export{Ut as g};';
+    const patched = patchTelegramNotifications(sample);
+    assert.deepEqual({ ...patched, body: undefined },
+        { body: undefined, iconPatched: true, sinkPatched: true, gatePatched: true, runtimeExposed: true });
+    const again = patchTelegramNotifications(patched.body);
+    assert.equal(again.body, patched.body);
+    assert.equal(again.gatePatched, true);
+    assert.equal(again.runtimeExposed, true);
+
+    const delivered = [];
+    const context = { setTimeout, Promise, Object,
+        navigator: { serviceWorker: { controller: null } },
+        state: { settings: { byKey: { hasWebNotifications: false, hasPushNotifications: true } } },
+        actions: { updateWebNotificationSettings() {} },
+        __twdConsumeSwNotification: m => { delivered.push(m); return true; },
+    };
+    context.globalThis = context;
+    vm.createContext(context);
+    vm.runInContext(patched.body.replace(/export\{[^}]*\};?/, ''), context);
+    assert.equal(context.__twdNotifGatePatched, true);
+    assert.equal(context.__twdTelegramRuntime.getGlobal(), context.state);
+    assert.equal(context.__twdTelegramRuntime.getActions(), context.actions);
+    await context.notify({ chat: { id: '5' }, message: { id: 9 } });
+    assert.equal(delivered.length, 1, 'a reset hasWebNotifications flag no longer drops the notification');
+    assert.equal(context.state.settings.byKey.hasWebNotifications, false, 'Telegram state itself is not mutated');
+});
+
+test('idle notification popup is rebuilt after sleep, unlock or a display change', () => {
+    const windows = [], ipcMain = new EventEmitter(), powerMonitor = new EventEmitter();
+    const screen = new EventEmitter();
+    screen.getPrimaryDisplay = () => ({ workArea: { x: 0, y: 0, width: 1920, height: 1080 } });
+    class Window extends EventEmitter {
+        constructor() {
+            super(); windows.push(this); this.webContents = new EventEmitter(); this.sent = []; this.visible = false;
+            this.webContents.send = (channel, item) => this.sent.push(item);
+        }
+        isDestroyed() { return !!this.dead; }
+        destroy() { this.dead = true; this.emit('closed'); }
+        loadURL() { return Promise.resolve(); }
+        isVisible() { return this.visible; }
+        hide() { this.visible = false; }
+        showInactive() { this.visible = true; }
+        setPosition() {} setAlwaysOnTop() {} setVisibleOnAllWorkspaces() {} setShape() {}
+    }
+    const context = { module: { exports: {} }, __dirname, process: { env: {} }, console, Date,
+        require: name => name === 'electron' ? { BrowserWindow: Window, ipcMain, powerMonitor, screen } : require(name),
+        setTimeout: () => ({}), clearTimeout: () => {} };
+    vm.createContext(context);
+    vm.runInContext(read('notification.cjs'), context);
+    const api = context.module.exports;
+    api.init(() => null);
+
+    api.queueNotification({ title: 'First', peerId: '1' });
+    const first = windows[0];
+    first.webContents.emit('did-finish-load');
+    powerMonitor.emit('resume');
+    assert.equal(first.dead, undefined, 'a popup with a card in flight is kept');
+    ipcMain.emit('notif-presented', { sender: first.webContents }, { id: first.sent[0].id });
+    powerMonitor.emit('resume');
+    assert.equal(first.dead, undefined, 'a popup showing a card is kept');
+    ipcMain.emit('notif-empty', { sender: first.webContents });
+    assert.equal(first.visible, false);
+    powerMonitor.emit('resume');
+    assert.equal(first.dead, true, 'an idle popup is dropped after resume');
+
+    api.queueNotification({ title: 'Second', peerId: '2' });
+    const second = windows[1];
+    assert.ok(second && second !== first, 'next notification builds a fresh popup');
+    second.webContents.emit('did-finish-load');
+    assert.equal(second.sent[0].title, 'Second');
+    ipcMain.emit('notif-presented', { sender: second.webContents }, { id: second.sent[0].id });
+    ipcMain.emit('notif-empty', { sender: second.webContents });
+    screen.emit('display-removed');
+    assert.equal(second.dead, true, 'an idle popup is dropped after a display change');
+});

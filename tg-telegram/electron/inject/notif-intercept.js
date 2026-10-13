@@ -84,7 +84,9 @@
                 tx.oncomplete=function(){
                     try{db.close();}catch(_){}
                     var repairKey='__twd_notif_repaired_at';
-                    if(needsReload){
+                    // The patched notify chunk ignores the cached flag, so a reload would only
+                    // interrupt the user; the IndexedDB fix above is enough for the next start.
+                    if(needsReload&&!window.__twdNotifGatePatched){
                         var now=Date.now(), last=Number(sessionStorage.getItem(repairKey)||0);
                         // Prevent a tight reload loop if Web A writes the stale value again
                         // during startup, but do not suppress future repairs for the whole

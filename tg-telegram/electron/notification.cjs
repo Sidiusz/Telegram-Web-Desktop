@@ -1,5 +1,5 @@
 'use strict';
-const { BrowserWindow, screen, ipcMain } = require('electron');
+const { BrowserWindow, screen, ipcMain, powerMonitor } = require('electron');
 
 let _getMainWindow = null;
 let _win = null;          // persistent stack window, reused
@@ -83,7 +83,22 @@ function init(getMainWindow) {
     ipcMain.on('notif-empty', (event) => {
         if (!isPopupSender(event)) return;
         _win.hide();
+        // A transparent always-on-top window that lived through sleep, a lock screen or a
+        // monitor change can keep acknowledging cards while Windows no longer paints it.
+        // Start long-lived idle popups fresh; the next notification rebuilds it in ~100ms.
+        if (Date.now() - _createdAt > MAX_IDLE_WIN_AGE_MS) recycleIdleWin();
     });
+
+    const recycle = () => recycleIdleWin();
+    try {
+        powerMonitor.on('resume', recycle);
+        powerMonitor.on('unlock-screen', recycle);
+    } catch (_) {}
+    try {
+        screen.on('display-added', recycle);
+        screen.on('display-removed', recycle);
+        screen.on('display-metrics-changed', recycle);
+    } catch (_) {}
 
     ipcMain.on('notif-action', (event, { action, peerId } = {}) => {
         if (!isPopupSender(event)) return;
@@ -366,6 +381,18 @@ function positionWin(win) {
 }
 const READY_TIMEOUT_MS = 10000;
 let _createdAt = 0;
+
+const MAX_IDLE_WIN_AGE_MS = 30 * 60 * 1000;
+
+// Destroy the popup only while nothing is queued, in flight or on screen.
+function recycleIdleWin() {
+    const win = _win;
+    if (!win || win.isDestroyed()) return;
+    if (!_ready || _inFlight !== null || _pending.length) return;
+    try { if (win.isVisible() && process.env.TWD_SMOKE_HIDDEN !== '1') return; } catch (_) {}
+    clearDeliveryTimer();
+    dropWin(win);
+}
 
 function dropWin(win) {
     try { if (win && !win.isDestroyed()) win.destroy(); } catch (e) {}
