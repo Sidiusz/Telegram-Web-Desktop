@@ -191,3 +191,162 @@ test('idle notification popup is rebuilt after sleep, unlock or a display change
     screen.emit('display-removed');
     assert.equal(second.dead, true, 'an idle popup is dropped after a display change');
 });
+
+test('auto proxy latch is re-tested and released once direct Telegram works again', async () => {
+    const Module = require('node:module');
+    const origLoad = Module._load, origWs = global.WebSocket, origSetTimeout = global.setTimeout;
+    let saved = { proxy_mode: 'auto', proxy_auto_latched: true };
+    const timers = [];
+    let directWorks = false;
+    class FakeWs extends EventEmitter {
+        constructor(url) {
+            super(); this.url = url;
+            queueMicrotask(() => this.emit(directWorks ? 'open' : 'error'));
+        }
+        addEventListener(name, fn) { this.once(name, fn); }
+        close() {}
+    }
+    Module._load = function (request, ...rest) {
+        if (request === 'electron') return { webContents: { getAllWebContents: () => [] }, net: { fetch: () => Promise.reject(new Error('offline')) } };
+        if (request.endsWith('settings.cjs')) return { loadSettings: () => Object.assign({}, saved), saveSettings: s => { saved = Object.assign({}, saved, s); } };
+        return origLoad.call(this, request, ...rest);
+    };
+    global.WebSocket = FakeWs;
+    global.setTimeout = (fn, ms) => {
+        if (ms >= 60 * 1000) { const t = { fn, ms, unref() {} }; timers.push(t); return t; }
+        return origSetTimeout(fn, ms);
+    };
+    const quiet = { log: console.log, warn: console.warn };
+    console.log = console.warn = () => {};
+    try {
+        delete require.cache[require.resolve('../electron/tg-flowseal-route.cjs')];
+        const route = require('../electron/tg-flowseal-route.cjs');
+        route.installFlowsealWsRoute({ webRequest: { onBeforeRequest() {}, onErrorOccurred() {}, onCompleted() {} } }, saved);
+        assert.equal(route.getProxyStatus().active, true);
+        const first = timers.pop();
+        assert.equal(first.ms, 30 * 60 * 1000);
+        await first.fn();
+        assert.equal(route.getProxyStatus().active, true, 'still blocked: stay on the proxy');
+        const second = timers.pop();
+        assert.equal(second.ms, 60 * 60 * 1000, 'failed probes back off');
+        directWorks = true;
+        await second.fn();
+        assert.equal(route.getProxyStatus().active, false, 'direct works: leave the proxy');
+        assert.equal(saved.proxy_auto_latched, false);
+        assert.equal(timers.length, 0, 'no probe while direct');
+    } finally {
+        Object.assign(console, quiet);
+        global.WebSocket = origWs;
+        global.setTimeout = origSetTimeout;
+        Module._load = origLoad;
+        delete require.cache[require.resolve('../electron/tg-flowseal-route.cjs')];
+    }
+});
+
+function extractFunctions(source, names) {
+    return names.map(name => {
+        const start = source.indexOf('    function ' + name + '(');
+        assert.ok(start >= 0, name);
+        const end = source.indexOf('\n    }\n', start);
+        return source.slice(start, end + 7);
+    }).join('\n');
+}
+
+test('a restored deleted message stays in id order while newer messages arrive', () => {
+    class Node {
+        constructor(mid) { this.mid = mid == null ? null : String(mid); this.children = []; this.parentNode = null; }
+        getAttribute(name) { return name === 'data-message-id' ? this.mid : null; }
+        get nextSibling() { const s = this.parentNode && this.parentNode.children; return s ? s[s.indexOf(this) + 1] || null : null; }
+        insertBefore(node, ref) {
+            moves++;
+            if (node.parentNode) node.parentNode.children.splice(node.parentNode.children.indexOf(node), 1);
+            const at = ref ? this.children.indexOf(ref) : this.children.length;
+            this.children.splice(at < 0 ? this.children.length : at, 0, node);
+            node.parentNode = this;
+            return node;
+        }
+        appendChild(node) { return this.insertBefore(node, null); }
+        querySelectorAll() {
+            const out = [];
+            const walk = n => n.children.forEach(c => { if (c.mid != null) out.push(c); walk(c); });
+            walk(this);
+            return out;
+        }
+    }
+    let moves = 0;
+    const source = fs.readFileSync(path.join(__dirname, '../electron/features/message_history.js'), 'utf8');
+    const placeDeletedNode = new Function(extractFunctions(source, ['placeDeletedNode']) + '\nreturn placeDeletedNode;')();
+    const order = list => list.querySelectorAll().map(n => n.mid).join(',');
+
+    const list = new Node(), group = new Node();
+    list.appendChild(group);
+    group.appendChild(new Node(10));
+    group.appendChild(new Node(11));
+    const clone = new Node(12);
+    placeDeletedNode(list, clone, '12');
+    assert.equal(clone.parentNode, group, 'the copy joins the sender group instead of the container end');
+    group.appendChild(new Node(13));
+    group.appendChild(new Node(14));
+    assert.equal(order(list), '10,11,12,13,14', 'newer messages render below the deleted one');
+
+    list.appendChild(clone);
+    assert.equal(order(list), '10,11,13,14,12');
+    placeDeletedNode(list, clone, '12');
+    assert.equal(order(list), '10,11,12,13,14', 'a misplaced copy is moved back');
+    moves = 0;
+    placeDeletedNode(list, clone, '12');
+    assert.equal(moves, 0, 'a correctly placed copy is left alone, so the observer settles');
+
+    const second = new Node(15);
+    group.appendChild(second);
+    const third = new Node(16);
+    group.appendChild(third);
+    moves = 0;
+    placeDeletedNode(list, second, '15');
+    placeDeletedNode(list, third, '16');
+    assert.equal(moves, 0, 'adjacent deleted copies do not reorder each other forever');
+});
+
+test('own deleted messages vanish unless the user keeps them', () => {
+    const source = fs.readFileSync(path.join(__dirname, '../electron/features/message_history.js'), 'utf8');
+    const make = cfg => new Function('cfg', extractFunctions(source, ['ownDeletedDropped', 'showEnabledFor', 'recordShouldShow', 'saveEnabledFor']) +
+        '\nreturn { recordShouldShow: recordShouldShow, saveEnabledFor: saveEnabledFor };')(cfg);
+    const own = { deleted: true, outgoing: true }, theirs = { deleted: true, outgoing: false };
+    const off = make({ showDeleted: true, saveDeleted: true });
+    assert.equal(off.recordShouldShow(own), false);
+    assert.equal(off.saveEnabledFor(own), false);
+    assert.equal(off.recordShouldShow(theirs), true);
+    const kept = make({ showDeleted: true, saveDeleted: true, keepOwnDeleted: true });
+    assert.equal(kept.recordShouldShow(own), true);
+    assert.equal(kept.saveEnabledFor(own), true);
+
+    const preload = fs.readFileSync(path.join(__dirname, '../electron/preload.js'), 'utf8');
+    assert.match(preload, /item\.outgoing === true && historyConfig\.keepOwnDeleted !== true/, 'own deletes are not held back in Telegram state');
+    assert.match(preload, /outgoing: node\.classList\.contains\('own'\)/);
+    const settings = fs.readFileSync(path.join(__dirname, '../electron/settings.cjs'), 'utf8');
+    assert.match(settings, /messages_keep_own_deleted: false,/);
+});
+
+test('ad filter matches hashtags and legal markers, not the word "реклама" in conversation', () => {
+    const filter = fs.readFileSync(path.join(__dirname, '../electron/features/message_filter.js'), 'utf8');
+    assert.doesNotMatch(filter, /реклам\(\?:а\|/);
+    assert.doesNotMatch(filter, /'sponsored','advertisement'/);
+    const hashtag = /(^|\s)#(?:реклама|ad|ads|advertisement|advertising|sponsored|promo)(?![\p{L}\p{N}_])/iu;
+    const erid = /(?<![\p{L}\p{N}_])erid\s*[:=]?\s*[a-z0-9]{6,}/iu;
+    assert.ok(filter.includes(hashtag.source));
+    assert.ok(filter.includes(erid.source));
+    const isAd = t => hashtag.test(t.toLowerCase()) || erid.test(t.toLowerCase());
+    assert.equal(isAd('вот такая реклама мне попалась в интернете'), false);
+    assert.equal(isAd('Новый курс #реклама'), true);
+    assert.equal(isAd('Sale today #ad'), true);
+    assert.equal(isAd('#adidas drop'), false);
+    assert.equal(isAd('Реклама. ООО «Ромашка», ИНН 7700000000. erid: 2VtzqwZk7Lp'), true);
+});
+
+test('tg:// links open inside the running page without a reload or maximize', () => {
+    const main = fs.readFileSync(path.join(__dirname, '../main.cjs'), 'utf8');
+    assert.match(main, /a\.openTelegramLink\(\{url:\$\{JSON\.stringify\(tgUrl\)\}\}\)/);
+    assert.match(main, /showMainWindow\(win, false\);/);
+    assert.match(main, /if \(seq === linkSeq\) reloadWithLink\(win, tgUrl\);/, 'reload is only the fallback');
+    assert.match(main, /loadURL\(internalUrl\)\.catch\(\(\) => \{\}\)/);
+});

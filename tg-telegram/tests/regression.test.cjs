@@ -149,9 +149,10 @@ test('download and addon safety regressions stay covered', () => {
     assert.match(downloads, /renameSync/);
     assert.match(downloads, /normalizeDownloadRecord/);
     assert.match(downloads, /status === 'downloading'.*status = 'failed'/s);
-    assert.match(downloads, /downloads\.slice\(-5000\)/);
+    assert.match(downloads, /const MAX_RECORDS = 5000;/);
+    assert.match(downloads, /downloads\.slice\(-MAX_RECORDS\)/);
     assert.match(ipc, /handle\('get_downloads'[\s\S]*filename: d\.filename[\s\S]*recv[\s\S]*total[\s\S]*exists/);
-    assert.match(ipc, /fs\.statSync\(d\.path\)\.size/);
+    assert.match(ipc, /await fs\.promises\.stat\(d\.path\)/);
     assert.match(downloads, /const recv = Number\(raw\.recv\)/);
     assert.match(downloads, /const total = Number\(raw\.total\)/);
     assert.doesNotMatch(ipc, /handle\('get_downloads'[\s\S]{0,350}\.\.\.d/);
@@ -201,7 +202,7 @@ test('download and addon safety regressions stay covered', () => {
     assert.match(ipc, /removeListener\('destroyed', item\.senderDestroyedHandler\)/);
     assert.match(ipc, /senderDestroyedHandler: null/);
     assert.match(ipc, /event\.sender\.once\('destroyed', item\.senderDestroyedHandler\)/);
-    assert.match(ipc, /handle\('begin_blob_save'[\s\S]{0,550}fs\.mkdirSync\(dir, \{ recursive: true \}\)[\s\S]{0,180}mkdir-failed/);
+    assert.match(ipc, /handle\('begin_blob_save'[\s\S]{0,1600}fs\.mkdirSync\(dir, \{ recursive: true \}\)[\s\S]{0,180}mkdir-failed/);
     assert.doesNotMatch(ipc, /handle\('save_blob'/);
     assert.doesNotMatch(ipc, /384 \* 1024 \* 1024/);
     assert.match(preload, /'open_downloads_folder'/);
@@ -1521,6 +1522,12 @@ test('downloads never share a target path, never delete foreign files, and carry
         assert.deepEqual(st.downloads, [{ id: 5, url: '', filename: 'a.bin', path: recPath, status: 'downloading', recv: 0, total: 10 }]);
         assert.equal(patchDownloadRecord(st, 5, { status: 'completed', recv: 10 }, false).status, 'completed');
         assert.equal(patchDownloadRecord(st, 99, { status: 'failed' }, false), null);
+        const big = { downloads: [{ id: 1, status: 'downloading' }], downloadCounter: 1 };
+        for (let i = 2; i <= 5000; i++) big.downloads.push({ id: i, status: 'completed' });
+        addDownloadRecord(big, { filename: 'b.bin', path: recPath });
+        assert.equal(big.downloads.length, 5000, 'memory keeps the same 5000 records as disk');
+        assert.equal(big.downloads[0].id, 1, 'an active download is never trimmed');
+        assert.equal(big.downloads[1].id, 3, 'the oldest finished record goes first');
 
         if (process.platform === 'win32') {
             const saved = path.join(dir, 'doc.zip');

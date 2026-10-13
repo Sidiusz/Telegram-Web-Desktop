@@ -115,7 +115,7 @@ function createWindow(state, onTelegramLink, options = {}) {
         fallbackReloadScheduled = true;
         setTimeout(() => {
             fallbackReloadScheduled = false;
-            if (mainWindow && !mainWindow.isDestroyed()) mainWindow.loadURL(TG_URL);
+            if (mainWindow && !mainWindow.isDestroyed()) mainWindow.loadURL(TG_URL).catch(() => {});
         }, 50);
     }
     const WEB_A_ENTRY_TIMEOUT_MS = 8000;
@@ -323,15 +323,22 @@ function createWindow(state, onTelegramLink, options = {}) {
     // worker, and did-finish-load can fire on an intermediate load and miss the final page.
     // Verify the notification interceptor independently from the UI marker: a long-lived
     // page can keep our UI while Telegram restores browser notification globals underneath it.
+    // Hidden in the tray nobody sees a missing UI; the in-page health timers keep notification
+    // hooks alive, so a slower check only has to catch Telegram's own self-reload.
+    const WATCHDOG_VISIBLE_MS = 3000, WATCHDOG_HIDDEN_MS = 15000;
+    let lastWatchdogAt = 0;
     setInterval(() => {
         if (!mainWindow || mainWindow.isDestroyed() || mainWindow.webContents.isLoading() || injectPromise) return;
+        const visible = mainWindow.isVisible() && !mainWindow.isMinimized();
+        if (!visible && Date.now() - lastWatchdogAt < WATCHDOG_HIDDEN_MS) return;
+        lastWatchdogAt = Date.now();
         mainWindow.webContents.executeJavaScript(
             '!!window.__tgUIInjected && !!window.__tgNotifIntercept && !!window.__twdNotifHealthTimer && typeof window.__twdNotifRepair === "function"',
             true
         )
             .then(ok => { if (!ok) void injectAll(); })
             .catch(() => {});
-    }, 3000);
+    }, WATCHDOG_VISIBLE_MS);
 
     // Developer tools are a user-controlled capability. When disabled, consume every
     // common DevTools accelerator and also close any DevTools window opened through
@@ -400,7 +407,6 @@ function createWindow(state, onTelegramLink, options = {}) {
         menu.popup({ window: mainWindow });
     });
 
-    // Preload overrides Document.prototype.hidden/visibilityState/hasFocus once.
     // Wake Telegram explicitly when Electron shows/focuses the window: Web A can
     // otherwise keep body.in-background after auth even though the DOM is ready.
     const wakeTelegramForeground = () => {
@@ -484,7 +490,7 @@ function createWindow(state, onTelegramLink, options = {}) {
     const forceAVersion = (e) => {
         if (e) e.preventDefault();
         // Doesn't reload needlessly while already on /A — only loads when we'd actually land on /K.
-        mainWindow.loadURL(TG_URL);
+        mainWindow.loadURL(TG_URL).catch(() => {});
     };
 
     const isTrustedMainUrl = (url) => {
@@ -525,7 +531,7 @@ function createWindow(state, onTelegramLink, options = {}) {
         }
     });
     mainWindow.webContents.setWindowOpenHandler(({ url }) => {
-        if (isKVersionUrl(url)) { mainWindow.loadURL(TG_URL); return { action: 'deny' }; }
+        if (isKVersionUrl(url)) { mainWindow.loadURL(TG_URL).catch(() => {}); return { action: 'deny' }; }
         if (!isTrustedMainUrl(url)) openExternalWebUrl(url);
         return { action: 'deny' };
     });

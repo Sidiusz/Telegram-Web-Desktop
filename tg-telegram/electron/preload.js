@@ -2,7 +2,7 @@
 const { contextBridge, ipcRenderer } = require('electron');
 
 let _proxyBootstrap = { active: false, domains: [], revision: 0 };
-let _historyBootstrap = { showDeleted: false, showDisappearing: false, saveDeleted: false, saveDisappearing: false, editHistory: false, savePublic: false, scope: 'client' };
+let _historyBootstrap = { showDeleted: false, keepOwnDeleted: false, showDisappearing: false, saveDeleted: false, saveDisappearing: false, editHistory: false, savePublic: false, scope: 'client' };
 let _privacyBootstrap = {
     noReadReceipts: false, noTyping: false,
     noReadForceOn: [], noReadForceOff: [], noTypingForceOn: [], noTypingForceOff: [],
@@ -130,7 +130,7 @@ try {
                             break;
                         }
                     }
-                    return { chatId: String(chatId), messageId: String(messageId), text, timestamp: Date.now() };
+                    return { chatId: String(chatId), messageId: String(messageId), text, outgoing: node.classList.contains('own'), timestamp: Date.now() };
                 } catch (_) { return null; }
             }
             function historyRemember(item) {
@@ -282,7 +282,8 @@ try {
                         item = key ? historyTracked.get(key) || null : null;
                         if (!item && active) item = historyDomSnapshot(active, messageId);
                     }
-                    if (!item || !historyChatAllowed(item.chatId)) {
+                    // Own messages disappear like in stock Telegram unless the user keeps them.
+                    if (!item || !historyChatAllowed(item.chatId) || (item.outgoing === true && historyConfig.keepOwnDeleted !== true)) {
                         remaining.push(rawId);
                         return;
                     }
@@ -359,27 +360,13 @@ try {
     });
 } catch (_) {}
 
-// Keep Telegram's media/upload pipelines alive when window is blurred/minimized.
-// Document.hidden/visibilityState are overridden once at preload (document_start)
-// and never redefined — window.cjs only flips the backing variable.
-let _tgHidden = false;
-// BrowserWindow starts with show:false, so don't pretend the page is focused
-// until Electron actually shows/focuses the window.
+// Tracks Electron's window focus for the foreground observer below. This runs in the isolated
+// world, so it cannot (and must not) change what Telegram itself reads from document.hidden or
+// document.hasFocus(): a page that looks visible while minimized would mark chats as read.
+// BrowserWindow starts with show:false, so the window is not focused until Electron says so.
 let _tgHasFocus = false;
-try {
-    Object.defineProperty(Document.prototype, 'hidden', {
-        get: () => _tgHidden,
-        configurable: true,
-    });
-    Object.defineProperty(Document.prototype, 'visibilityState', {
-        get: () => (_tgHidden ? 'hidden' : 'visible'),
-        configurable: true,
-    });
-    Document.prototype.hasFocus = function() { return _tgHasFocus; };
-} catch (e) {}
 function _tgWakeForeground() {
     _tgHasFocus = true;
-    _tgHidden = false;
     try { document.dispatchEvent(new Event('visibilitychange')); } catch (e) {}
     try { window.dispatchEvent(new Event('focus')); } catch (e) {}
 }
@@ -428,7 +415,15 @@ function twdInvoke(cmd, args) {
     return ipcRenderer.invoke(cmd, args || {});
 }
 
+// The isolated world sees only real input (isTrusted); the page cannot fake it.
+const BLOB_SAVE_GESTURE_MS = 2 * 60 * 1000;
+let _lastTrustedInputAt = 0;
+for (const type of ['pointerdown', 'keydown']) {
+    window.addEventListener(type, (e) => { if (e.isTrusted) _lastTrustedInputAt = Date.now(); }, true);
+}
+
 async function twdSaveBlob(blobUrl, filename) {
+    const userInitiated = _lastTrustedInputAt > 0 && Date.now() - _lastTrustedInputAt < BLOB_SAVE_GESTURE_MS;
     const url = String(blobUrl || '');
     if (!url.startsWith('blob:')) return { error: 'invalid-url' };
 
@@ -445,6 +440,7 @@ async function twdSaveBlob(blobUrl, filename) {
     const begin = await ipcRenderer.invoke('begin_blob_save', {
         filename: String(filename || 'file'),
         total,
+        userInitiated,
     });
     if (!begin || begin.error || !begin.streamId) return begin || { error: 'stream-start-failed' };
 

@@ -7,6 +7,12 @@ const FLOWSEAL_DOMAIN_LIST_URL =
     'https://raw.githubusercontent.com/Flowseal/tg-ws-proxy/main/.github/cfproxy-domains.txt';
 const DOMAIN_REFRESH_MS = 60 * 60 * 1000;
 const STALL_ROTATE_COOLDOWN_MS = 45 * 1000;
+// Auto mode latches the proxy after a direct failure; re-test the direct route so one network
+// hiccup does not route all traffic through third-party relays forever. Back off while it keeps failing.
+const DIRECT_RETEST_MIN_MS = 30 * 60 * 1000;
+const DIRECT_RETEST_MAX_MS = 24 * 60 * 60 * 1000;
+const RELATCH_AFTER_UNLATCH_MS = 10 * 60 * 1000;
+const DIRECT_PROBE_DCS = [2, 4];
 const DEFAULT_CF_BASE_DOMAINS = [
     'pclead.co.uk', 'offshor.co.uk', 'cakeisalie.co.uk', 'noskomnadzor.co.uk',
     'lovetrue.co.uk', 'sorokdva.co.uk', 'pyatdesyatdva.co.uk', 'kartoshka.co.uk',
@@ -31,6 +37,7 @@ const state = {
     lastRoute: 'direct', lastDomain: '', lastError: '', lastDc: 0,
     refreshTimer: null, revision: 0, reconnectEpoch: 0, bridgePort: 0, bridgeToken: '',
     avoidControlDomain: '', avoidControlUntil: 0,
+    retestTimer: null, retestDelay: DIRECT_RETEST_MIN_MS, unlatchedAt: 0,
 };
 
 function normalizeMode(mode) { return mode === 'always' || mode === 'off' ? mode : 'auto'; }
@@ -203,6 +210,7 @@ function applySettings(s) {
     state.dcIps = normalizeDcIps(s.proxy_dc_ips);
     if (!Object.keys(state.dcIps).length) state.dcIps = { ...DC_IPS };
     if (!state.autoLatched) state.autoReason = '';
+    ensureDirectRetest();
 }
 function configureProxySettings(settings) {
     applySettings(settings || loadSettings());
@@ -275,6 +283,9 @@ function updateProxyOptions(options) {
 }
 function persistAutoLatch(reason) {
     if (state.mode !== 'auto' || state.autoLatched) return false;
+    // Direct broke again soon after the last unlatch: it is really blocked, so probe less often.
+    state.retestDelay = state.unlatchedAt && Date.now() - state.unlatchedAt < RELATCH_AFTER_UNLATCH_MS
+        ? Math.min(DIRECT_RETEST_MAX_MS, state.retestDelay * 2) : DIRECT_RETEST_MIN_MS;
     state.autoLatched = true;
     state.autoReason = reason || 'direct-ws-failed';
     state.lastRoute = 'cf';
@@ -282,7 +293,39 @@ function persistAutoLatch(reason) {
     console.warn(`[TG-PROXY] auto switched to embedded proxy (${state.autoReason})`);
     broadcastProxyState();
     kickDomainRefresh();
+    ensureDirectRetest();
     return true;
+}
+function ensureDirectRetest() {
+    const wanted = state.installed && state.mode === 'auto' && state.autoLatched;
+    if (!wanted) {
+        if (state.retestTimer) { clearTimeout(state.retestTimer); state.retestTimer = null; }
+        return;
+    }
+    if (state.retestTimer) return;
+    state.retestTimer = setTimeout(retestDirectRoute, state.retestDelay);
+    if (state.retestTimer.unref) state.retestTimer.unref();
+}
+async function retestDirectRoute() {
+    state.retestTimer = null;
+    if (state.mode !== 'auto' || !state.autoLatched) return;
+    // Node's WebSocket in main is not subject to the session's proxy-mode block on direct sockets.
+    const results = await Promise.all(DIRECT_PROBE_DCS.map(dc => testWs(`wss://kws${dc}.web.telegram.org/apiws`, 8000)));
+    if (state.mode !== 'auto' || !state.autoLatched) return;
+    if (!results.every(r => r.ok)) {
+        state.retestDelay = Math.min(DIRECT_RETEST_MAX_MS, state.retestDelay * 2);
+        ensureDirectRetest();
+        return;
+    }
+    state.autoLatched = false;
+    state.autoReason = '';
+    state.directFailures = [];
+    state.lastRoute = 'direct';
+    state.unlatchedAt = Date.now();
+    state.reconnectEpoch++;
+    saveSettings({ proxy_auto_latched: false });
+    console.log('[TG-PROXY] direct Telegram route works again; auto mode left the embedded proxy');
+    broadcastProxyState();
 }
 function recordDirectFailure(details) {
     if (state.mode !== 'auto' || state.autoLatched) return;
@@ -420,6 +463,7 @@ function installFlowsealWsRoute(ses, initialSettings) {
         if (state.refreshTimer.unref) state.refreshTimer.unref();
     }
     kickDomainRefresh();
+    ensureDirectRetest();
     console.log(`[TG-PROXY] route installed; mode=${state.mode}; active=${isProxyActive()}`);
     return getProxyStatus();
 }

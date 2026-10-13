@@ -8,6 +8,8 @@ function downloadsPath() {
 }
 
 const VALID_STATUSES = new Set(['downloading', 'completed', 'failed', 'cancelled']);
+const MAX_RECORDS = 5000;
+const SAVE_DELAY_MS = 500;
 
 function normalizeDownloadRecord(raw, fromDisk) {
     if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return null;
@@ -42,7 +44,7 @@ function normalizeDownloadRecord(raw, fromDisk) {
 function normalizeDownloads(downloads, fromDisk) {
     if (!Array.isArray(downloads)) return [];
     // A corrupted file must not create an unbounded renderer/main-process payload.
-    return downloads.slice(-5000).map(d => normalizeDownloadRecord(d, fromDisk)).filter(Boolean);
+    return downloads.slice(-MAX_RECORDS).map(d => normalizeDownloadRecord(d, fromDisk)).filter(Boolean);
 }
 
 function loadDownloads() {
@@ -54,7 +56,15 @@ function loadDownloads() {
     }
 }
 
-function saveDownloads(downloads) {
+// Every add/patch used to rewrite the whole list synchronously; a burst of downloads now
+// coalesces into one write. flushDownloads() runs on quit so nothing is lost.
+let pendingSave = null;
+let saveTimer = null;
+function flushDownloads() {
+    if (saveTimer) { clearTimeout(saveTimer); saveTimer = null; }
+    if (!pendingSave) return;
+    const downloads = pendingSave;
+    pendingSave = null;
     try {
         const p = downloadsPath();
         const tmp = p + '.tmp';
@@ -62,12 +72,26 @@ function saveDownloads(downloads) {
         fs.renameSync(tmp, p);
     } catch (e) {}
 }
+function saveDownloads(downloads) {
+    pendingSave = downloads;
+    if (saveTimer) return;
+    saveTimer = setTimeout(flushDownloads, SAVE_DELAY_MS);
+    saveTimer.unref?.();
+}
+
+// Keep memory in line with what is persisted: drop the oldest finished records.
+function trimDownloads(state) {
+    let excess = state.downloads.length - MAX_RECORDS;
+    if (excess <= 0) return;
+    state.downloads = state.downloads.filter(d => excess <= 0 || d.status === 'downloading' || excess-- <= 0);
+}
 
 // Appends an in-progress record to the shared list and returns its id.
 function addDownloadRecord(state, { url = '', filename, path: filePath, total = 0 }) {
     state.downloadCounter += 1;
     const id = state.downloadCounter;
     state.downloads.push({ id, url, filename, path: filePath, status: 'downloading', recv: 0, total });
+    trimDownloads(state);
     saveDownloads(state.downloads);
     return id;
 }
@@ -105,6 +129,6 @@ function deleteDownload(downloads, id) {
 }
 
 module.exports = {
-    loadDownloads, saveDownloads, deleteDownload, addDownloadRecord, patchDownloadRecord,
+    loadDownloads, saveDownloads, flushDownloads, deleteDownload, addDownloadRecord, patchDownloadRecord,
     trackActive, untrackActive, cancelActive,
 };

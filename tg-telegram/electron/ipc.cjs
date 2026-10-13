@@ -1,10 +1,10 @@
 'use strict';
-const { ipcMain, shell, dialog, app, Menu, MenuItem } = require('electron');
+const { ipcMain, shell, dialog, app, Menu, MenuItem, BrowserWindow } = require('electron');
 const { init: initNotifications, queueNotification } = require('./notification.cjs');
 const { loadSettings, saveSettings } = require('./settings.cjs');
 const { configureProxySettings, setProxyMode, forceProxyReconnect, updateProxyOptions, getProxyStatus, getProxyBootstrap, refreshFlowsealDomains, testProxyConnectivity } = require('./tg-flowseal-route.cjs');
 const { getFallbackInfo } = require('./telegram-web-fallback.cjs');
-const { loadDownloads, saveDownloads, deleteDownload, addDownloadRecord, patchDownloadRecord, cancelActive } = require('./downloads.cjs');
+const { loadDownloads, saveDownloads, flushDownloads, deleteDownload, addDownloadRecord, patchDownloadRecord, cancelActive } = require('./downloads.cjs');
 const { getAddons, deleteAddon, openAddonsFolder, toggleAddon } = require('./addons.cjs');
 const { uniquePath, reservePath, sanitizeFilename, markFromInternet } = require('./utils.cjs');
 const { historyConfig, privacyConfig } = require('./renderer-config.cjs');
@@ -49,6 +49,10 @@ const NTR = {
     read:          { ru: 'Прочитано',                 en: 'Read' },
     anon:          { ru: 'Анонимный пользователь',    en: 'Anonymous user' },
     new_msg_hidden:{ ru: 'Вам пришло новое сообщение', en: 'You have a new message' },
+    save_ask:      { ru: 'Сохранить файл из Telegram?', en: 'Save a file from Telegram?' },
+    save_ask_detail:{ ru: 'Сохранение начато без вашего клика.', en: 'The save started without a click from you.' },
+    save:          { ru: 'Сохранить',                 en: 'Save' },
+    cancel:        { ru: 'Отмена',                    en: 'Cancel' },
 };
 const ntr = (k) => { const e = NTR[k]; return (e && (e[_uiLang] || e.en)) || k; };
 
@@ -67,8 +71,9 @@ function initState() {
     }
     state.downloads = loadDownloads();
     if (state.downloads.length > 0) {
-        state.downloadCounter = Math.max(...state.downloads.map(d => d.id));
+        state.downloadCounter = state.downloads.reduce((max, d) => Math.max(max, d.id), 0);
     }
+    app.on('will-quit', flushDownloads);
 }
 
 function getState() { return state; }
@@ -280,14 +285,14 @@ function registerIpc(getWindow) {
     // 'completed' status can be stale; exists===false tells the renderer to skip the checkmark (see restoreForChat).
     // Renderer only needs presentation/binding metadata. Do not expose absolute
     // local paths or source URLs from the desktop filesystem to the Telegram page.
-    handle('get_downloads', () => state.downloads.map(d => {
-        const exists = d.path ? fs.existsSync(d.path) : false;
+    // Thousands of records: stat them off the main thread instead of one sync call each.
+    handle('get_downloads', () => Promise.all(state.downloads.map(async d => {
+        const stat = d.path ? await fs.promises.stat(d.path).catch(() => null) : null;
+        const exists = !!stat;
         let recv = Number.isSafeInteger(d.recv) && d.recv >= 0 ? d.recv : 0;
         let total = Number.isSafeInteger(d.total) && d.total >= 0 ? d.total : 0;
         // Backfill old completed records created before byte counts were persisted.
-        if (exists && d.status === 'completed' && !total) {
-            try { total = Math.max(0, Number(fs.statSync(d.path).size) || 0); } catch (_) {}
-        }
+        if (exists && d.status === 'completed' && !total) total = Math.max(0, Number(stat.size) || 0);
         if (d.status === 'completed' && total && !recv) recv = total;
         return {
             id: d.id,
@@ -299,7 +304,7 @@ function registerIpc(getWindow) {
             peerId: d.peerId,
             exists,
         };
-    }));
+    })));
 
     // Bind a download to a message (to restore status after restart).
     handle('bind_download', (e, { id, mid, peerId } = {}) => {
@@ -382,7 +387,7 @@ function registerIpc(getWindow) {
                 storages: ['appcache', 'filesystem', 'shadercache', 'cachestorage'],
             });
             await win.webContents.session.clearCache();
-            win.loadURL(TG_URL);
+            win.loadURL(TG_URL).catch(() => {});
         }
     });
 
@@ -569,8 +574,23 @@ function registerIpc(getWindow) {
         return failBlobSave(blobSaves.get(streamId), 'cancelled');
     }
 
-    handle('begin_blob_save', async (event, { filename, total } = {}) => {
+    const MAX_BLOB_SAVES_PER_SENDER = 8;
+    handle('begin_blob_save', async (event, { filename, total, userInitiated } = {}) => {
         const safeName = sanitizeFilename(filename || 'file');
+        let live = 0;
+        blobSaves.forEach(item => { if (item.senderId === event.sender.id) live++; });
+        if (live >= MAX_BLOB_SAVES_PER_SENDER) return { error: 'too-many-saves' };
+        // Telegram saves a long download when it finishes, so a missing click alone is legitimate;
+        // ask instead of writing silently, so a page cannot drop files into Downloads unseen.
+        if (userInitiated !== true) {
+            const win = BrowserWindow.fromWebContents(event.sender);
+            const opts = {
+                type: 'question', buttons: [ntr('save'), ntr('cancel')], defaultId: 0, cancelId: 1, noLink: true,
+                message: ntr('save_ask'), detail: safeName + '\n\n' + ntr('save_ask_detail'),
+            };
+            const answer = await (win ? dialog.showMessageBox(win, opts) : dialog.showMessageBox(opts)).catch(() => ({ response: 1 }));
+            if (answer.response !== 0) return { error: 'cancelled' };
+        }
         const declaredTotal = Number(total);
         const expectedTotal = Number.isSafeInteger(declaredTotal) && declaredTotal >= 0 ? declaredTotal : 0;
         const settings = state.settings || loadSettings();
