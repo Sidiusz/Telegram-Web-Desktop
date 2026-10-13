@@ -917,6 +917,9 @@ test('startup surface follows the persisted Telegram theme and its splash never 
     assert.match(html, /input\[type=password\]/, 'a passcode screen is never hidden for long');
     assert.ok(MAX_SPLASH_MS <= 15000);
     assert.match(html, /prefers-reduced-motion/);
+    const icon = fs.readFileSync(path.join(root, 'electron', 'icons', 'icon.svg'), 'utf8');
+    assert.ok(html.includes(icon.slice(icon.indexOf('<defs>'), icon.indexOf('</svg>'))), 'the splash draws the app icon itself');
+    assert.doesNotMatch(icon, /ellipse|stroke=/, 'the app icon has no orbit line');
     assert.match(win, /backgroundColor: startupBackground\(startupTheme\(initialSettings\)\)/);
     assert.match(win, /injectStartupSurface\(body, startupTheme\(settings\)\)/);
     assert.match(bootstrap, /function installStartupThemeSync\(\)/);

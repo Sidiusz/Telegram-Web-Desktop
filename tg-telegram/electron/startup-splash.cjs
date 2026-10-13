@@ -1,4 +1,6 @@
 'use strict';
+const fs = require('fs');
+const path = require('path');
 
 // Startup splash drawn into Telegram's own HTML, so it is on screen from the very first paint.
 // It never blocks the page: pointer-events are off, it fades out as soon as Telegram shows the
@@ -7,20 +9,10 @@ const SPLASH_ID = 'twd-splash';
 const MAX_SPLASH_MS = 15000;
 const MAIN_SETTLE_MS = 4000;
 
-// The app icon (globe and plane, see icon.svg), with the continents drifting across the globe.
-const CONTINENTS = '<path d="M30 25c9-3 17 1 19 6s-5 8-9 8 1 6-6 9-14 3-15-6 3-15 11-17Z"/><path d="M72 66c8-3 16 1 17 7s-6 13-14 14-12-6-11-11 3-8 8-10Z"/>' +
-    '<path d="M63 26c5-1 10 2 9 6s-6 3-9 1-4-6 0-7Z"/><path d="M24 70c6-2 11 2 11 6s-4 8-9 7-7-11-2-13Z"/>';
-const LOGO_SVG = `<svg class="twd-splash-logo" viewBox="17 18.5 74 74" aria-hidden="true">
-<defs><radialGradient id="twd-splash-globe-fill" cx="38%" cy="32%" r="75%"><stop offset="0" stop-color="#86c2f8"/><stop offset="1" stop-color="#5aa3ef"/></radialGradient>
-<clipPath id="twd-splash-globe"><circle cx="54" cy="55.5" r="34"/></clipPath></defs>
-<circle cx="54" cy="55.5" r="34" fill="url(#twd-splash-globe-fill)"/>
-<g clip-path="url(#twd-splash-globe)" fill="#a3d0fb" fill-opacity=".7"><g class="twd-splash-land">${CONTINENTS}<g transform="translate(-68 0)">${CONTINENTS}</g></g></g>
-<g class="twd-splash-plane" stroke-linejoin="round" stroke-width="1.6">
-<path d="M27.5 57.6 77.6 38.6 38.6 62.6Z" fill="#fff" stroke="#fff"/>
-<path d="M38.6 62.6 77.6 38.6 46.8 67 43 77.4Z" fill="#d6e7fa" stroke="#d6e7fa"/>
-<path d="M43 77.4 46.8 67 52.4 71.2Z" fill="#b4d1f1" stroke="#b4d1f1"/>
-<path d="M77.6 38.6 68.4 79.2 46.8 67Z" fill="#fff" stroke="#fff"/></g>
-</svg>`;
+// The app icon itself (electron/icons/icon.svg), so the splash and the icon never drift apart.
+const LOGO_SVG = fs.readFileSync(path.join(__dirname, 'icons', 'icon.svg'), 'utf8')
+    .replace(/<svg\b[^>]*>/, '<svg class="twd-splash-logo" viewBox="0 0 108 108" aria-hidden="true">')
+    .trim();
 
 function splashMarkup(theme) {
     const dark = theme !== 'light';
@@ -32,15 +24,13 @@ function splashMarkup(theme) {
 background:${bg};pointer-events:none;opacity:1;transition:opacity .35s ease;font-family:Roboto,-apple-system,"Segoe UI",sans-serif;}
 #${SPLASH_ID}.twd-splash-out{opacity:0;}
 #${SPLASH_ID} .twd-splash-logo{width:112px;height:112px;filter:drop-shadow(0 8px 26px rgba(56,140,232,.4));animation:twd-splash-in .5s cubic-bezier(.2,.9,.3,1.2) both;}
-#${SPLASH_ID} .twd-splash-plane{animation:twd-splash-float 2.6s ease-in-out infinite;}
-#${SPLASH_ID} .twd-splash-land{animation:twd-splash-spin 9s linear infinite;}
+#${SPLASH_ID} .twd-icon-plane{animation:twd-splash-float 2.6s ease-in-out infinite;}
 #${SPLASH_ID} .twd-splash-name{margin-top:22px;font-size:15px;letter-spacing:.2px;color:${text};animation:twd-splash-fade .6s .15s ease both;}
 #${SPLASH_ID} .twd-splash-bar{position:relative;width:132px;height:3px;margin-top:16px;border-radius:2px;overflow:hidden;background:${track};animation:twd-splash-fade .6s .3s ease both;}
 #${SPLASH_ID} .twd-splash-bar::after{content:"";position:absolute;top:0;bottom:0;width:40%;border-radius:2px;background:#3390ec;animation:twd-splash-run 1.25s cubic-bezier(.45,0,.55,1) infinite;}
 @keyframes twd-splash-in{from{opacity:0;transform:scale(.86);}to{opacity:1;transform:none;}}
 @keyframes twd-splash-fade{from{opacity:0;}to{opacity:1;}}
 @keyframes twd-splash-float{0%,100%{transform:translate(0,0);}50%{transform:translate(1.5px,-2.5px);}}
-@keyframes twd-splash-spin{from{transform:translateX(0);}to{transform:translateX(68px);}}
 @keyframes twd-splash-run{from{left:-40%;}to{left:100%;}}
 @media (prefers-reduced-motion:reduce){#${SPLASH_ID} *,#${SPLASH_ID} .twd-splash-bar::after{animation:none!important;}}
 </style>`;
