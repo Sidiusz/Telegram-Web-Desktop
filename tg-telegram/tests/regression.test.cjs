@@ -899,14 +899,24 @@ test('manual launch maximizes while autostart stays hidden', () => {
     assert.match(win, /if \(settings\.minimize_to_tray\) \{[\s\S]*e\.preventDefault\(\);[\s\S]*mainWindow\.hide\(\)/);
 });
 
-test('startup surface follows the persisted Telegram theme without a blocking overlay', () => {
+test('startup surface follows the persisted Telegram theme and its splash never blocks the page', () => {
     const win = read('electron/window.cjs');
     const bootstrap = read('electron/inject/ui/bootstrap.js');
     const settings = read('electron/settings.cjs');
     assert.match(settings, /appearance_startup_theme:\s*'dark'/);
     assert.match(settings, /STARTUP_THEMES = new Set\(\['light','dark'\]\)/);
     assert.match(win, /function injectStartupSurface\(body, theme\)/);
-    assert.doesNotMatch(win, /twd-startup-loader/);
+    assert.match(win, /injectStartupSplash\(body, startupTheme\(settings\)\)/);
+    const { injectStartupSplash, MAX_SPLASH_MS } = require('../electron/startup-splash.cjs');
+    const html = injectStartupSplash('<html><head></head><body id="root"></body></html>', 'dark');
+    assert.equal(injectStartupSplash(html, 'dark'), html, 'injected once');
+    assert.match(html, /<style id="twd-splash-style">[\s\S]*pointer-events:none[\s\S]*<\/style><\/head>/, 'clicks always reach Telegram');
+    assert.match(html, /<body id="root"><div id="twd-splash"/);
+    assert.match(html, /#auth-qr-form/);
+    assert.match(html, /#LeftColumn \.chat-list \.ListItem/);
+    assert.match(html, /input\[type=password\]/, 'a passcode screen is never hidden for long');
+    assert.ok(MAX_SPLASH_MS <= 15000);
+    assert.match(html, /prefers-reduced-motion/);
     assert.match(win, /backgroundColor: startupBackground\(startupTheme\(initialSettings\)\)/);
     assert.match(win, /injectStartupSurface\(body, startupTheme\(settings\)\)/);
     assert.match(bootstrap, /function installStartupThemeSync\(\)/);
@@ -930,12 +940,16 @@ test('custom UI stays inside Telegram Settings and keeps native navigation seman
     const baseLayout = read('electron/features/desktop_like_base.js');
     const wide = read('electron/features/desktop_like_wide.js');
     const standard = read('electron/features/desktop_like_standard.js');
-    const largeIcons = ['settings','messages','notifications','proxy','data','info','download','addons','trash_bin'];
+    const largeIcons = ['twd','download','addons','reload','trash_bin','link'];
     largeIcons.forEach(name => assert.equal(fs.existsSync(path.join(root, 'electron', 'assets', 'icons', name + '.svg')), true));
     assert.match(scripts, /LARGE_ICON_NAMES/);
     assert.match(scripts, /__twdLargeSvgIcons/);
     assert.match(settings, /function _largeSvgGlyph\(/);
     assert.match(settings, /__twdLargeSvgIcons\[icon\]/);
+    // Tiles without an own glyph use Telegram's filled icons, never thin outline ones.
+    ['settings-filled','notifications-filled','support-filled','web-filled','piechart-filled','note-filled','clock-filled','info-filled']
+        .forEach(name => assert.ok(settings.includes("'" + name + "'"), name));
+    largeIcons.forEach(name => assert.doesNotMatch(fs.readFileSync(path.join(root, 'electron', 'assets', 'icons', name + '.svg'), 'utf8'), /stroke/));
     assert.doesNotMatch(twd, /'visual_interface'/);
     assert.match(twd, /'messages'/);
     assert.match(twd, /'proxy'/);

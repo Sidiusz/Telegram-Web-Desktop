@@ -133,7 +133,7 @@ function injectSettingsRows(){
     if(oldProxy)oldProxy.remove();
 
     if(!twd){
-        twd=row('_tgst_twd_','settings','Telegram Web Desktop',T('twd_settings_desc'),'blue',function(){openTwdNative('root');});
+        twd=row('_tgst_twd_','twd','Telegram Web Desktop',T('twd_settings_desc'),'blue',function(){openTwdNative('root');});
         nativeGeneral.after(twd);
     }else{
         if(twd._title)twd._title.textContent='Telegram Web Desktop';

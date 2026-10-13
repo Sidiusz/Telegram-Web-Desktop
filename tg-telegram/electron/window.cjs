@@ -18,6 +18,7 @@ const { injectTelegramWorkerProxy } = require('./tg-flowseal-worker.cjs');
 const { injectTelegramExtendedPins, injectExtendedPinsPrelude } = require('./tg-extended-pins.cjs');
 const { injectTelegramMediaCache } = require('./tg-media-cache.cjs');
 const { injectTelegramNotifications } = require('./tg-notification-patch.cjs');
+const { injectStartupSplash } = require('./startup-splash.cjs');
 
 const TG_URL = 'https://web.telegram.org/a/';
 const WEBSYNC_HOSTS = new Set(['t.me', 'telegram.me', 'telegram.dog']);
@@ -196,6 +197,7 @@ function createWindow(state, onTelegramLink, options = {}) {
             body = body.replace(/<meta[^>]*http-equiv=["']content-security-policy["'][^>]*>/gi, '');
             body = body.replace(/<meta[^>]*http-equiv=["']content-security-policy-report-only["'][^>]*>/gi, '');
             body = injectStartupSurface(body, startupTheme(settings));
+            body = injectStartupSplash(body, startupTheme(settings));
             const headers = new Headers(resp.headers);
             for (const name of ['content-security-policy', 'content-security-policy-report-only', 'x-frame-options', 'content-length']) headers.delete(name);
             return new Response(body, { status: resp.status, statusText: resp.statusText, headers });

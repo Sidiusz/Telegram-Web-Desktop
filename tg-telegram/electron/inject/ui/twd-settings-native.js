@@ -684,13 +684,13 @@ function _twdAppendUpdates(content,ctx,s){
     var cur=s.update_check_interval||'24h';
     card.appendChild(_twdStaticRow(ctx,T('st_auto_check'),' ',T(lbl[cur]||'iv_24h'),function(v){
         pickModal({title:T('st_auto_check'),current:cur,options:keys.map(function(k){return{value:k,label:T(lbl[k])};}),onSave:function(x){cur=x;v.textContent=T(lbl[x]);_twdSave({update_check_interval:x});}});
-    },'reload','green'));
+    },'schedule','green'));
     card.appendChild(_twdStaticRow(ctx,T('st_check_now'),' ','',async function(){
         toast(T('upd_checking'),'icon-reload');
         try{var r=await INV('check_update_manual');if(!r||r.upToDate)toast(T('st_uptodate'),'icon-check');else if(r.error)toast(T('error')+': '+r.error,'icon-close');}
         catch(e){toast(T('st_check_err'),'icon-close');}
     },'reload','green'));
-    card.appendChild(_twdStaticRow(ctx,T('changelog'),T('twd_changelog_desc'),' ',function(){openChangelogNative('about');},'info','blue'));
+    card.appendChild(_twdStaticRow(ctx,T('changelog'),T('twd_changelog_desc'),' ',function(){openChangelogNative('about');},'changelog','blue'));
     ctx.section(T('sec_updates'),card);
 }
 function _twdRenderData(content,ctx,s){

@@ -350,3 +350,36 @@ test('tg:// links open inside the running page without a reload or maximize', ()
     assert.match(main, /if \(seq === linkSeq\) reloadWithLink\(win, tgUrl\);/, 'reload is only the fallback');
     assert.match(main, /loadURL\(internalUrl\)\.catch\(\(\) => \{\}\)/);
 });
+
+test('startup splash fades out once Telegram shows its UI, or after the hard cap', () => {
+    const { splashMarkup, MAX_SPLASH_MS } = require('../electron/startup-splash.cjs');
+    const script = splashMarkup('dark').body.match(/<script>([\s\S]*)<\/script>/)[1];
+    function run(present) {
+        let now = 0, removed = false;
+        const ticks = [], timeouts = [];
+        const splash = { classList: { add(c) { splash.cls = c; } }, parentNode: { removeChild() { removed = true; } } };
+        const document = {
+            getElementById: id => id === 'twd-splash' ? splash : (id === 'Main' ? (present.main ? {} : null) : null),
+            querySelector: sel => (present.auth && sel.includes('#auth-qr-form')) || (present.chats && sel.includes('.chat-list')) ? {} : null,
+        };
+        new Function('document', 'Date', 'setInterval', 'clearInterval', 'setTimeout', script)(
+            document, { now: () => now }, fn => { ticks.push(fn); return 1; }, () => { ticks.length = 0; }, fn => timeouts.push(fn));
+        return {
+            advance(ms) { now += ms; ticks.slice().forEach(fn => fn()); timeouts.splice(0).forEach(fn => fn()); },
+            get faded() { return splash.cls === 'twd-splash-out'; },
+            get removed() { return removed; },
+        };
+    }
+    const waiting = run({});
+    waiting.advance(1000);
+    assert.equal(waiting.faded, false, 'stays while Telegram is still loading');
+    waiting.advance(MAX_SPLASH_MS);
+    assert.equal(waiting.faded, true, 'never outlives the hard cap');
+    assert.equal(waiting.removed, true);
+    const login = run({ auth: true });
+    login.advance(120);
+    assert.equal(login.faded, true, 'the login screen is shown right away');
+    const chats = run({ chats: true });
+    chats.advance(120);
+    assert.equal(chats.faded, true);
+});

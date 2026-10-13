@@ -193,7 +193,10 @@ function _nativeDecoratedTemplate(tone,multiline){
         return multiline?!!r.querySelector('.multiline-item'):!r.querySelector('.multiline-item');
     })||null;
 }
-function _filledIconName(icon){var map={info:'info-filled',user:'account-filled',mention:'mention-filled',delete:'delete-filled',folder:'folder-filled'};return map[icon]||icon;}
+// Settings tiles use Telegram's own filled glyphs: white shapes with cut-outs, no thin outlines.
+function _filledIconName(icon){var map={info:'info-filled',user:'account-filled',mention:'mention-filled',folder:'folder-filled',
+    settings:'settings-filled',notifications:'notifications-filled',messages:'support-filled',proxy:'web-filled',
+    data:'piechart-filled',changelog:'note-filled',schedule:'clock-filled'};return map[icon]||icon;}
 // Filled Material Icons (round, Apache-2.0) used only where Telegram has no semantic glyph.
 // extension = add-ons; device_hub = proxy/network route. The native colored tile is still cloned from Telegram.
 var _TWD_FILLED_GLYPHS={
@@ -203,6 +206,7 @@ var _TWD_FILLED_GLYPHS={
     'twd-update':'M12.35 15.65l2.79-2.79a.5.5 0 0 0-.35-.85H13V4c0-.55-.45-1-1-1s-1 .45-1 1v8H9.21c-.45 0-.67.54-.35.85l2.79 2.79c.19.2.51.2.7.01zM21 3h-5.01c-.54 0-.99.45-.99.99c0 .55.45.99.99.99H20c.55 0 1 .45 1 1v12.03c0 .55-.45 1-1 1H4c-.55 0-1-.45-1-1V5.99c0-.55.45-1 1-1h4.01c.54 0 .99-.45.99-.99a1 1 0 0 0-.99-1H3c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h18c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2z'
 };
 function _largeSvgGlyph(icon){
+    if(icon==='delete')icon='trash_bin';
     var raw=window.__twdLargeSvgIcons&&window.__twdLargeSvgIcons[icon];
     if(!raw)return null;
     try{

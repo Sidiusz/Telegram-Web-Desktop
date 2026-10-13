@@ -6,7 +6,9 @@ const path = require('path');
 const { app } = require('electron');
 
 const rd = p => fs.readFileSync(path.join(__dirname, 'inject', p), 'utf8');
-const LARGE_ICON_NAMES = ['settings','messages','notifications','proxy','data','info','download','addons','trash_bin'];
+// Own glyphs only where Telegram's icon font has no filled equivalent; the rest use Telegram's
+// "-filled" glyphs (see _filledIconName) so the settings tiles match the native ones.
+const LARGE_ICON_NAMES = ['twd','download','addons','reload','trash_bin','link'];
 function readLargeIcons() {
     const dir = path.join(__dirname, 'assets', 'icons');
     const out = {};
