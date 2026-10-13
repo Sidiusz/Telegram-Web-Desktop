@@ -4,7 +4,8 @@
 
     var SHORT=['bit.ly','gg.gg','clck.ru','cutt.ly','kutt.it','rebrand.ly','tinyurl.com','t.co','is.gd','rb.gy','goo.su','vk.cc','tiny.cc','shorturl.at','lnkd.in'];
     var REF=['ali.pub','alii.pub','lite.al','lite.bz','aliclick.link','aliclick.shop','dea.ls','alitems.co','s.click.aliexpress.com','ad.admitad.com','fas.st','epn.bz','redirect.appmetrica.yandex.com','go.redirectingat.com'];
-    var STANDARD=['на правах рекламы','партнерский материал','партнёрский материал','рекламный пост','рекламная интеграция','рекламная публикация','промокод','по промокоду','розыгрыш','разыгрываем','разыграем','выиграй','спонсорский материал','sponsored','advertisement','self-promotion'];
+    // Phrases only: a bare word such as "реклама" or "advertisement" also appears in ordinary talk about ads.
+    var STANDARD=['на правах рекламы','партнерский материал','партнёрский материал','рекламный пост','рекламная интеграция','рекламная публикация','промокод','по промокоду','розыгрыш','разыгрываем','разыграем','выиграй','спонсорский материал','self-promotion'];
     var HIDDEN_KINDS=['bots','invites','external'];
     var TG_HOSTS=['t.me','telegram.me','telegram.dog'];
     var cfg=Object.assign({enabled:false,standard:true,hashtags:true,shortLinks:true,refLinks:true,hiddenLinks:true,includePrivate:false,markOnly:false,ignoreSymbols:false,shortDisabled:[],refDisabled:[],hiddenDisabled:['external'],custom:[]},window.__twdMessageFilterConfig||{});
@@ -70,7 +71,7 @@
         var off=(cfg.hiddenDisabled||[]).map(String);
         return hiddenLinks(msg).some(function(t){return off.indexOf(t.kind)<0&&!(signature&&signature.has(t.key));});
     }
-    function matches(msg,signature){var text=String(msg.innerText||'');if(cfg.hiddenLinks!==false&&hasHiddenAdLink(msg,signature))return true;if(!text.trim())return false;if(cfg.standard!==false){if(STANDARD.some(function(p){return phraseMatch(text,p);}))return true;if(/(?<![\p{L}\p{N}_])реклам(?:а|ы|е|у|ой|ный|ная|ное|ные)(?![\p{L}\p{N}_])/iu.test(lower(text)))return true;}if(cfg.hashtags!==false&&/(^|\s)#(?:реклама|ad|ads|advertisement|advertising|sponsored|promo)(?![\p{L}\p{N}_])/iu.test(lower(text)))return true;if(cfg.shortLinks!==false&&hasDomain(msg,activeDomains(SHORT,cfg.shortDisabled)))return true;if(cfg.refLinks!==false&&hasDomain(msg,activeDomains(REF,cfg.refDisabled)))return true;if((cfg.custom||[]).some(function(p){return phraseMatch(text,p);}))return true;return false;}
+    function matches(msg,signature){var text=String(msg.innerText||'');if(cfg.hiddenLinks!==false&&hasHiddenAdLink(msg,signature))return true;if(!text.trim())return false;if(cfg.standard!==false){if(STANDARD.some(function(p){return phraseMatch(text,p);}))return true;if(/(?<![\p{L}\p{N}_])erid\s*[:=]?\s*[a-z0-9]{6,}/iu.test(lower(text)))return true;}if(cfg.hashtags!==false&&/(^|\s)#(?:реклама|ad|ads|advertisement|advertising|sponsored|promo)(?![\p{L}\p{N}_])/iu.test(lower(text)))return true;if(cfg.shortLinks!==false&&hasDomain(msg,activeDomains(SHORT,cfg.shortDisabled)))return true;if(cfg.refLinks!==false&&hasDomain(msg,activeDomains(REF,cfg.refDisabled)))return true;if((cfg.custom||[]).some(function(p){return phraseMatch(text,p);}))return true;return false;}
     function clearMessage(msg){msg.classList.remove('_twd-filter-hidden_','_twd-filter-marked_');msg.removeAttribute('data-twd-filtered');}
     function paintMessage(msg,hit){clearMessage(msg);if(!hit)return;msg.setAttribute('data-twd-filtered','1');msg.classList.add(cfg.markOnly===true?'_twd-filter-marked_':'_twd-filter-hidden_');}
     function clearAll(){document.querySelectorAll('#MiddleColumn .Message._twd-filter-hidden_,#MiddleColumn .Message._twd-filter-marked_').forEach(clearMessage);}

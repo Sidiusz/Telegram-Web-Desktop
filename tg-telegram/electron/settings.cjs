@@ -55,6 +55,7 @@ const DEFAULTS = {
     appearance_hide_ads: true,
     appearance_startup_theme: 'dark',
     messages_show_deleted: false,
+    messages_keep_own_deleted: false,
     messages_show_disappearing: false,
     messages_save_deleted: false,
     messages_save_disappearing: false,
@@ -149,7 +150,7 @@ function loadSettings() {
 const BOOL_KEYS = new Set([
     'minimize_to_tray','popup_notifications','notif_sound','notif_cat_private',
     'notif_cat_group','notif_cat_channel','notif_hide_text','notif_hide_sender','notif_hide_avatar',
-    'devtools_enabled','appearance_hide_ads','messages_show_deleted','messages_show_disappearing',
+    'devtools_enabled','appearance_hide_ads','messages_show_deleted','messages_keep_own_deleted','messages_show_disappearing',
     'messages_save_deleted','messages_save_disappearing','messages_edit_history','messages_save_public','messages_extended_pins',
     'message_filter_enabled','message_filter_standard','message_filter_hashtags','message_filter_short_links','message_filter_ref_links','message_filter_hidden_links',
     'message_filter_private','message_filter_mark_only','message_filter_ignore_symbols',

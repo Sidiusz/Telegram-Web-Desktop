@@ -214,7 +214,7 @@ function _twdClearMessageHistory(){
 }
 function _twdConfigureHistory(patch){
     var map={
-        messages_show_deleted:'showDeleted',messages_show_disappearing:'showDisappearing',
+        messages_show_deleted:'showDeleted',messages_keep_own_deleted:'keepOwnDeleted',messages_show_disappearing:'showDisappearing',
         messages_save_deleted:'saveDeleted',messages_save_disappearing:'saveDisappearing',
         messages_edit_history:'editHistory',messages_save_public:'savePublic',messages_history_scope:'scope'
     };
@@ -512,6 +512,9 @@ function _twdRenderMessages(content,ctx,s){
     var visibility=ctx.card();
     visibility.appendChild(_twdSwitchRow(ctx,T('twd_show_deleted'),'',!!s.messages_show_deleted,function(v){
         _twdConfigureHistory({messages_show_deleted:v});
+    }));
+    visibility.appendChild(_twdSwitchRow(ctx,T('twd_keep_own_deleted'),T('twd_keep_own_deleted_desc'),s.messages_keep_own_deleted===true,function(v){
+        _twdConfigureHistory({messages_keep_own_deleted:v});
     }));
     visibility.appendChild(_twdSwitchRow(ctx,T('twd_show_disappearing'),'',!!s.messages_show_disappearing,function(v){
         _twdConfigureHistory({messages_show_disappearing:v});

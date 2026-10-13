@@ -4,6 +4,7 @@
 function historyConfig(s) {
     return {
         showDeleted: s.messages_show_deleted === true,
+        keepOwnDeleted: s.messages_keep_own_deleted === true,
         showDisappearing: s.messages_show_disappearing === true,
         saveDeleted: s.messages_save_deleted === true,
         saveDisappearing: s.messages_save_disappearing === true,

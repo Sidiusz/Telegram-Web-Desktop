@@ -91,12 +91,18 @@
         }
         return rec;
     }
-    function recordShouldShow(rec) {
-        if (!rec || !rec.deleted) return false;
+    function ownDeletedDropped(rec) {
+        return rec.outgoing === true && cfg.keepOwnDeleted !== true;
+    }
+    function showEnabledFor(rec) {
+        if (!rec || ownDeletedDropped(rec)) return false;
         return rec.ephemeral ? cfg.showDisappearing === true : cfg.showDeleted === true;
     }
+    function recordShouldShow(rec) {
+        return !!(rec && rec.deleted) && showEnabledFor(rec);
+    }
     function saveEnabledFor(rec) {
-        if (!rec) return false;
+        if (!rec || ownDeletedDropped(rec)) return false;
         return rec.ephemeral ? cfg.saveDisappearing === true : cfg.saveDeleted === true;
     }
     function shouldPersistEvent(chatId) {
@@ -357,19 +363,24 @@
             if(oldest){var map=deletedSnapshotMap(oldest.chatId,false);if(map){map.delete(String(oldest.messageId));if(!map.size)deletedDomSnapshotsByChat.delete(String(oldest.chatId));}}
         }
     }
-    function captureDeletingMessage(msg) {
+    function captureDeletingMessage(msg, removed) {
         if (!msg || !msg.matches || !msg.matches('.Message[data-message-id]')) return;
         if (msg.classList.contains('_twd-deleted-clone_')) return;
-        if (!msg.classList.contains('is-deleting') && !msg.classList.contains('is-dissolving')) return;
         var chatId = currentChatId();
         var messageId = String(msg.getAttribute('data-message-id') || '');
         if (!chatId || !messageId || !historyChatAllowed(chatId) || !isServerMessageId(messageId)) return;
+        if (!msg.classList.contains('is-deleting') && !msg.classList.contains('is-dissolving')) {
+            // A refetch after reconnect drops an already-deleted row without the delete animation;
+            // keep its rendered look instead of falling back to a text-only stub.
+            var known = getRecord(chatId, messageId);
+            if (!removed || !known || !known.deleted || deletedDomSnapshots.has(keyOf(chatId, messageId))) return;
+        }
         var rec = getRecord(chatId,messageId) || ensureRecord(chatId, messageId, visibleMessageText(msg), Date.now());
-        var show = rec.ephemeral ? cfg.showDisappearing === true : cfg.showDeleted === true;
         rec.text = rec.text || visibleMessageText(msg);
         rec.outgoing = msg.classList.contains('own');
+        var show = showEnabledFor(rec);
         rec.deleted = true;
-        rec.deletedAt = Date.now();
+        rec.deletedAt = rec.deletedAt || Date.now();
         if (show) {
             var clone = msg.cloneNode(true);
             prepareDeletedClone(clone, rec);
@@ -400,8 +411,13 @@
         var existing = document.querySelector(selector);
         var rec = getRecord(snapshot.chatId, messageId);
         if (!rec || !recordShouldShow(rec)) return;
-        if (existing) { markNodeDeleted(existing, rec); return; }
         var list = document.querySelector('#MiddleColumn .MessageList .messages-container') || document.querySelector('#MiddleColumn .MessageList');
+        if (existing) {
+            markNodeDeleted(existing, rec);
+            // Our copy sits among Telegram's rows; new messages can land on either side of it.
+            if (list && existing.classList.contains('_twd-deleted-clone_')) placeDeletedNode(list, existing, messageId);
+            return;
+        }
         if (!list) return;
         var node=null;
         if(snapshot.html){
@@ -412,17 +428,33 @@
         }
         if(!node)node=createDeletedNode(rec);
         prepareDeletedClone(node, rec);
-        var numericId = Number(messageId);
+        placeDeletedNode(list, node, messageId);
+    }
+    // Keep a restored copy in message-id order. Appending it to the end of the container put it
+    // outside Telegram's last sender group, so every newer message rendered above it and the
+    // deleted message looked like it kept jumping to the bottom of the chat.
+    function placeDeletedNode(list, node, messageId) {
+        var id = Number(messageId);
         var rows = Array.from(list.querySelectorAll('.Message[data-message-id]'));
-        var before = null;
-        if (Number.isFinite(numericId)) {
-            for (var i = 0; i < rows.length; i++) {
-                var rowId = Number(rows[i].getAttribute('data-message-id'));
-                if (Number.isFinite(rowId) && rowId > numericId) { before = rows[i]; break; }
-            }
+        var at = rows.indexOf(node);
+        if (!Number.isFinite(id)) { if (at < 0) list.appendChild(node); return; }
+        var rowId = function (row) { return Number(row && row.getAttribute('data-message-id')); };
+        if (at >= 0) {
+            var prev = rows[at - 1], next = rows[at + 1];
+            var prevOk = !prev || !(rowId(prev) > id), nextOk = !next || !(rowId(next) < id);
+            if (prevOk && nextOk) return;
+        }
+        var before = null, after = null;
+        for (var i = 0; i < rows.length; i++) {
+            if (rows[i] === node) continue;
+            var other = rowId(rows[i]);
+            if (!Number.isFinite(other)) continue;
+            if (other > id) { before = rows[i]; break; }
+            after = rows[i];
         }
         if (before && before.parentNode) before.parentNode.insertBefore(node, before);
-        else list.appendChild(node);
+        else if (after && after.parentNode) after.parentNode.insertBefore(node, after.nextSibling);
+        else if (at < 0) list.appendChild(node);
     }
     function restoreDeletedForCurrentChat() {
         if (!cfg.showDeleted && !cfg.showDisappearing) return;
@@ -447,9 +479,9 @@
     }
     function inspectRemoved(node) {
         if (!(node instanceof Element)) return;
-        if (node.matches && node.matches('.Message[data-message-id]')) captureDeletingMessage(node);
+        if (node.matches && node.matches('.Message[data-message-id]')) captureDeletingMessage(node, true);
         if (node.querySelectorAll) {
-            node.querySelectorAll('.Message[data-message-id]').forEach(captureDeletingMessage);
+            node.querySelectorAll('.Message[data-message-id]').forEach(function (msg) { captureDeletingMessage(msg, true); });
         }
     }
     function closeContextMenu() {
