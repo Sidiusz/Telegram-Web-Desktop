@@ -29,6 +29,7 @@ const UI_PARTS = [
     'settings-render.js',        // shared native Settings builders
     'twd-settings-native.js',    // Telegram Web Desktop native Settings hierarchy
     'notif-ui.js',               // corner notifications, update progress, download indicator
+    'long-messages.js',          // split text over Telegram's message limit into several messages
     'ui-lab.js',                 // hidden service-only native component laboratory
     'inject.js',                 // injectMenu / injectSettingsRows
     'bootstrap.js',              // tryInject / waitBody / start observers

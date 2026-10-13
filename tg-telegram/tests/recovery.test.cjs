@@ -464,3 +464,44 @@ test('desktop layout keeps media square where a caption or header touches it', (
     assert.match(base, /#MiddleColumn \.MessageList:not\(\.no-avatars\) \.Message \.message-content\.media\.has-footer/);
     assert.match(base, /:is\(\.has-subheader,\.force-sender-name\):not\(\.custom-shape\) :is\(\.media-inner,\.full-media,\.Album\)/);
 });
+
+test('text over the message limit is sent as ordered parts with their formatting', async () => {
+    const sent = [];
+    let pending = 0;
+    const state = { appConfig: { limits: { messageLength: [4096, 8192] } }, currentUserId: '1', users: { byId: { 1: { isPremium: false } } },
+        messages: { byChatId: { 5: { byId: { get a() { return pending ? { sendingState: 'messageSendingStatePending' } : {}; } } } } } };
+    const actions = { sendMessage(payload) { sent.push(payload); pending = 1; setTimeout(() => { pending = 0; }, 30); } };
+    const context = { setTimeout, setInterval: () => 1, Promise, Date };
+    context.window = context;
+    context.__twdTelegramRuntime = { getGlobal: () => state, getActions: () => actions };
+    vm.createContext(context);
+    vm.runInContext(read('inject/ui/long-messages.js'), context);
+    const api = context._twdLongMessages;
+    assert.equal(api.install(), true);
+    assert.equal(actions.sendMessage.__twdLongMessages, true);
+    assert.equal(api.install(), true, 'installs once');
+
+    const para = 'Слово '.repeat(400).trim();                      // 2399 chars
+    const text = para + '\n\n' + para + '\n\n' + 'tail';
+    const bold = { type: 'MessageEntityBold', offset: para.length - 10, length: 20 };   // crosses the first cut
+    actions.sendMessage({ messageList: { chatId: '5', threadId: -1, type: 'thread' }, text, entities: [bold], isSilent: true });
+    await new Promise(r => setTimeout(r, 1200));
+    assert.equal(sent.length, 2, 'only as many parts as the limit needs');
+    assert.deepEqual(sent.map(p => p.text), [para, para + '\n\ntail'], 'cut at the paragraph break, whitespace trimmed');
+    assert.ok(sent.every(p => p.text.length <= 4096 && p.isSilent === true && p.messageList.chatId === '5'));
+    const plain = v => JSON.parse(JSON.stringify(v));
+    assert.deepEqual(plain(sent[0].entities), [{ type: 'MessageEntityBold', offset: para.length - 10, length: 10 }], 'formatting is clamped to each part');
+    assert.deepEqual(plain(sent[1].entities), [{ type: 'MessageEntityBold', offset: 0, length: 8 }], 'and continues in the next part');
+
+    sent.length = 0;
+    actions.sendMessage({ messageList: { chatId: '5' }, text: 'short' });
+    actions.sendMessage({ messageList: { chatId: '5' }, text: 'x'.repeat(5000), attachments: [{}] });
+    assert.deepEqual(sent.map(p => p.text.length), [5, 5000], 'short text and media captions keep Telegram handling');
+
+    const hard = api.split('a'.repeat(9000), [], 4096);
+    assert.deepEqual(Array.from(hard, p => p.text.length), [4096, 4096, 808], 'text without breaks is cut at the limit');
+    const emoji = api.split('😀'.repeat(3000), [], 4096);
+    assert.ok(emoji.every(p => !/[\uD800-\uDBFF]$/.test(p.text)), 'never splits a surrogate pair');
+    state.users.byId[1].isPremium = true;
+    assert.equal(api.messageLimit(state), 8192, 'Premium limit comes from Telegram app config');
+});
