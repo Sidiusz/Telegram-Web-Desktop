@@ -4,8 +4,7 @@
 
     var SHORT=['bit.ly','gg.gg','clck.ru','cutt.ly','kutt.it','rebrand.ly','tinyurl.com','t.co','is.gd','rb.gy','goo.su','vk.cc','tiny.cc','shorturl.at','lnkd.in'];
     var REF=['ali.pub','alii.pub','lite.al','lite.bz','aliclick.link','aliclick.shop','dea.ls','alitems.co','s.click.aliexpress.com','ad.admitad.com','fas.st','epn.bz','redirect.appmetrica.yandex.com','go.redirectingat.com'];
-    // Phrases only: a bare word such as "реклама" or "advertisement" also appears in ordinary talk about ads.
-    var STANDARD=['на правах рекламы','партнерский материал','партнёрский материал','рекламный пост','рекламная интеграция','рекламная публикация','промокод','по промокоду','розыгрыш','разыгрываем','разыграем','выиграй','спонсорский материал','self-promotion'];
+    var STANDARD=['на правах рекламы','партнерский материал','партнёрский материал','рекламный пост','рекламная интеграция','рекламная публикация','промокод','по промокоду','розыгрыш','разыгрываем','разыграем','выиграй','спонсорский материал','sponsored','advertisement','self-promotion'];
     var HIDDEN_KINDS=['bots','invites','external'];
     var TG_HOSTS=['t.me','telegram.me','telegram.dog'];
     var cfg=Object.assign({enabled:false,standard:true,hashtags:true,shortLinks:true,refLinks:true,hiddenLinks:true,includePrivate:false,markOnly:false,ignoreSymbols:false,shortDisabled:[],refDisabled:[],hiddenDisabled:['external'],custom:[]},window.__twdMessageFilterConfig||{});

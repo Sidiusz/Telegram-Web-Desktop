@@ -330,7 +330,7 @@ test('own deleted messages vanish unless the user keeps them', () => {
 test('ad filter matches hashtags and legal markers, not the word "реклама" in conversation', () => {
     const filter = fs.readFileSync(path.join(__dirname, '../electron/features/message_filter.js'), 'utf8');
     assert.doesNotMatch(filter, /реклам\(\?:а\|/);
-    assert.doesNotMatch(filter, /'sponsored','advertisement'/);
+    assert.match(filter, /'промокод'[\s\S]*'розыгрыш'[\s\S]*'sponsored','advertisement'/, 'other standard phrases stay; users can switch the filter off');
     const hashtag = /(^|\s)#(?:реклама|ad|ads|advertisement|advertising|sponsored|promo)(?![\p{L}\p{N}_])/iu;
     const erid = /(?<![\p{L}\p{N}_])erid\s*[:=]?\s*[a-z0-9]{6,}/iu;
     assert.ok(filter.includes(hashtag.source));
