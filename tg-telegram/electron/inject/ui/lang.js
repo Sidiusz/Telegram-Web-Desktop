@@ -323,5 +323,7 @@ var L={
     cancel:         {ru:'ОТМЕНА',                    en:'CANCEL'},
     del_upper:      {ru:'УДАЛИТЬ',                   en:'DELETE'},
     save_upper:     {ru:'СОХРАНИТЬ',                 en:'SAVE'},
+    save_ask:       {ru:'Сохранить файл из Telegram?', en:'Save a file from Telegram?'},
+    save_ask_detail:{ru:'Сохранение началось без вашего клика.', en:'The save started without a click from you.'},
 };
 function T(k){ var e=L[k]; if(!e) return k; return e[curLang()]||e.en||k; }

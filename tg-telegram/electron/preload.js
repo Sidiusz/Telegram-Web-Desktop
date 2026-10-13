@@ -422,8 +422,27 @@ for (const type of ['pointerdown', 'keydown']) {
     window.addEventListener(type, (e) => { if (e.isTrusted) _lastTrustedInputAt = Date.now(); }, true);
 }
 
+// Asks through the in-app modal; a page-faked click cannot confirm, only trusted input after it opened.
+let _saveAskSeq = 0;
+function askSaveInApp(filename) {
+    return new Promise(resolve => {
+        const id = ++_saveAskSeq, askedAt = Date.now();
+        let shown = false;
+        const onShown = e => { if (e.detail && e.detail.id === id) shown = true; };
+        const onAnswer = e => {
+            if (!e.detail || e.detail.id !== id) return;
+            done(e.detail.ok === true && _lastTrustedInputAt > askedAt ? 'save' : 'cancel');
+        };
+        const done = v => { window.removeEventListener('__twd_save_ask_shown', onShown); window.removeEventListener('__twd_save_answer', onAnswer); resolve(v); };
+        window.addEventListener('__twd_save_ask_shown', onShown);
+        window.addEventListener('__twd_save_answer', onAnswer);
+        try { window.dispatchEvent(new CustomEvent('__twd_save_ask', { detail: { id, filename: String(filename || 'file') } })); } catch (_) {}
+        setTimeout(() => { if (!shown) done('unavailable'); }, 1500);
+    });
+}
+
 async function twdSaveBlob(blobUrl, filename) {
-    const userInitiated = _lastTrustedInputAt > 0 && Date.now() - _lastTrustedInputAt < BLOB_SAVE_GESTURE_MS;
+    let userInitiated = _lastTrustedInputAt > 0 && Date.now() - _lastTrustedInputAt < BLOB_SAVE_GESTURE_MS;
     const url = String(blobUrl || '');
     if (!url.startsWith('blob:')) return { error: 'invalid-url' };
 
@@ -434,6 +453,12 @@ async function twdSaveBlob(blobUrl, filename) {
         return { error: e && e.message ? e.message : 'blob-fetch-failed' };
     }
     if (!response || !response.ok || !response.body) return { error: 'blob-fetch-failed' };
+
+    if (!userInitiated) {
+        const answer = await askSaveInApp(filename);
+        if (answer === 'cancel') { try { response.body.cancel(); } catch (_) {} return { error: 'cancelled' }; }
+        userInitiated = answer === 'save';
+    }
 
     const totalHeader = Number(response.headers.get('content-length'));
     const total = Number.isSafeInteger(totalHeader) && totalHeader >= 0 ? totalHeader : 0;

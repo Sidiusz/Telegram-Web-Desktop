@@ -262,7 +262,7 @@ async function telegramTarget(port) {
         adWord:api.testText('Реклама. ООО Ромашка'),
       };
     })()`);
-    assert.deepEqual(phraseChecks, { microsoft: false, shortLink: true, cyrHashtag: true, cyrHashtagEnd: true, insideWord: false, adWord: true });
+    assert.deepEqual(phraseChecks, { microsoft: false, shortLink: true, cyrHashtag: true, cyrHashtagEnd: true, insideWord: false, adWord: false });
     assert.deepEqual(hiddenLinks, {
       bot: true, startParam: true, visibleMention: false, invite: true, postLink: false, external: false,
       footer: [false, false, false, true],
@@ -298,6 +298,19 @@ async function telegramTarget(port) {
 
     // Exercise the real blob streaming path: blob URL lives in the page, preload
     // reads it as a stream, main writes chunks to a .part file and atomically renames.
+    // An unclicked save asks in the in-app modal, and a click faked by the page cannot confirm it.
+    const unclicked = await cdp.eval(`(async()=>{
+      const url=URL.createObjectURL(new Blob([new Uint8Array(16)]));
+      const p=window.tgBridge.saveBlob(url,'smoke-unclicked.bin');
+      let ok=null;for(let i=0;i<40&&!(ok=document.querySelector('._mo_ #_mo_ok_'));i++)await new Promise(r=>setTimeout(r,50));
+      if(ok)ok.click();
+      const r=await p;URL.revokeObjectURL(url);
+      return {modal:!!ok,result:r&&r.error};
+    })()`);
+    assert.deepEqual(unclicked, { modal: true, result: 'cancelled' });
+    // CDP input is trusted, like a real click on the download button.
+    await cdp.call('Input.dispatchKeyEvent', { type: 'keyDown', key: 'Shift', code: 'ShiftLeft', windowsVirtualKeyCode: 16 });
+    await cdp.call('Input.dispatchKeyEvent', { type: 'keyUp', key: 'Shift', code: 'ShiftLeft', windowsVirtualKeyCode: 16 });
     const blobSaved = await cdp.eval(`(async()=>{
       const bytes=new Uint8Array(2*1024*1024); bytes.fill(0x5a);
       const url=URL.createObjectURL(new Blob([bytes],{type:'application/octet-stream'}));

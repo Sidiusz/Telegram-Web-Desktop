@@ -28,6 +28,12 @@ function showModal({title,msg,msgHtml,url,checkLabel,okText,okDanger,cancelText,
     mo.addEventListener('click',e=>{if(e.target===mo){close();if(onCancel)onCancel();}});
 }
 
+window.addEventListener('__twd_save_ask',function(e){
+    var d=e.detail||{},id=d.id,answer=function(ok){window.dispatchEvent(new CustomEvent('__twd_save_answer',{detail:{id:id,ok:ok}}));};
+    showModal({title:T('save_ask'),msgHtml:'<b>'+_escHtml(d.filename||'')+'</b><br><br>'+_escHtml(T('save_ask_detail')),okText:T('save_upper'),onOk:function(){answer(true);},onCancel:function(){answer(false);}});
+    window.dispatchEvent(new CustomEvent('__twd_save_ask_shown',{detail:{id:id}}));
+});
+
 // Нативный «выпадающий список» как попап (как «Автоудаление аккаунта»): радио-
 // список вариантов + ОТМЕНА/СОХРАНИТЬ. Использует те же классы, что и TG
 // (.modal-dialog/.Radio), поэтому выглядит 1-в-1 родным.
