@@ -1,5 +1,5 @@
 'use strict';
-const { app, Menu } = require('electron');
+const { app, Menu, powerMonitor } = require('electron');
 const path = require('path');
 
 // Do not grant CSP-bypass privileges to the global http/https schemes.
@@ -27,7 +27,8 @@ if (devProfile && (!app.isPackaged || process.env.TWD_ALLOW_MULTI_INSTANCE === '
 const { createWindow, getWindow } = require('./electron/window.cjs');
 const { createTray } = require('./electron/tray.cjs');
 const { initState, getState, registerIpc } = require('./electron/ipc.cjs');
-const { startEmbeddedFlowsealBridge, stopEmbeddedFlowsealBridge } = require('./electron/tg-flowseal-bridge.cjs');
+const { startEmbeddedFlowsealBridge, stopEmbeddedFlowsealBridge, resetUpstreamHealth } = require('./electron/tg-flowseal-bridge.cjs');
+const { reconnectAfterWake } = require('./electron/tg-flowseal-route.cjs');
 const { normalizeToTg, getTgUrlFromArgs } = require('./electron/deep-links.cjs');
 
 // Register tg:// only from an installed build. `app.isPackaged` is also true for
@@ -114,6 +115,12 @@ if (gotLock) {
 app.whenReady().then(async () => {
     initState();
     try { await startEmbeddedFlowsealBridge(); } catch (e) { console.error('[TG-PROXY-BRIDGE] startup failed:', e); }
+    const wake = reason => { resetUpstreamHealth(); reconnectAfterWake(reason); };
+    let lockedAt = 0;
+    powerMonitor.on('resume', () => wake('system resume'));
+    powerMonitor.on('lock-screen', () => { lockedAt = Date.now(); });
+    // A short lock keeps the network up; only a long one is treated like sleep.
+    powerMonitor.on('unlock-screen', () => { if (lockedAt && Date.now() - lockedAt > 5 * 60 * 1000) wake('long screen lock'); lockedAt = 0; });
     const state = getState();
     registerIpc(getWindow);
     createWindow(

@@ -377,6 +377,12 @@ function handleLocalConnection(local, request) {
     });
 }
 
+// Failures recorded while the network was down say nothing about the routes after wake-up.
+function resetUpstreamHealth() {
+    controlUpstreamHealth.clearCooldowns();
+    mediaUpstreamHealth.clearCooldowns();
+}
+
 async function startEmbeddedFlowsealBridge() {
     if (server && bridgePort) return { port: bridgePort, token: bridgeToken };
     bridgeToken = crypto.randomBytes(16).toString('hex');
@@ -429,4 +435,4 @@ async function stopEmbeddedFlowsealBridge() {
     }
 }
 
-module.exports = { startEmbeddedFlowsealBridge, stopEmbeddedFlowsealBridge };
+module.exports = { startEmbeddedFlowsealBridge, stopEmbeddedFlowsealBridge, resetUpstreamHealth };

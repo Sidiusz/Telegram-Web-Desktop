@@ -37,6 +37,10 @@ class UpstreamHealth {
         return until;
     }
 
+    clearCooldowns() {
+        this.cooldowns.clear();
+    }
+
     isCooling(domain) {
         this._prune();
         return (this.cooldowns.get(String(domain || '')) || 0) > this.now();

@@ -39,6 +39,20 @@ function patchTelegramMediaSenders(body) {
     return { body: body.slice(0, match.index) + hooked + body.slice(match.index + all.length), patched: true };
 }
 
+// Web A drops to its HTTP transport after one failed WebSocket attempt and then retries only over
+// HTTP, which proxy mode blocks, so one bad reconnect left Telegram offline until a restart.
+// Reads of the flag (never its assignments) also honour the relay's switch.
+const HTTP_TRANSPORT_READ = /this\._shouldAllowHttpTransport(?!\s*=(?!=))/g;
+
+function patchTelegramHttpFallback(body) {
+    let count = 0;
+    const out = body.replace(HTTP_TRANSPORT_READ, () => {
+        count++;
+        return '(this._shouldAllowHttpTransport&&!globalThis.__twdBlockHttpTransport)';
+    });
+    return { body: out, patched: count > 0, count };
+}
+
 function workerProxyChannel(urlString) {
     try {
         const u = new URL(urlString);
@@ -63,7 +77,10 @@ async function injectTelegramWorkerProxy(response, urlString) {
     const source = await response.text();
     const privacyPatch = patchTelegramPrivacy(source);
     const senderPatch = patchTelegramMediaSenders(privacyPatch.body);
-    const body = senderPatch.body;
+    const httpPatch = patchTelegramHttpFallback(senderPatch.body);
+    const body = httpPatch.body;
+    if (httpPatch.patched) console.log(`[TG-PROXY] HTTP fallback gated by proxy mode (${httpPatch.count} reads)`);
+    else if (/_shouldAllowHttpTransport/.test(source)) console.warn('[TG-PROXY] HTTP fallback flag was not found in the MTProto worker');
     if (!senderPatch.patched && /upload\.GetFile/.test(source)) {
         console.warn('[TG-PROXY] media sender hook was not found in the MTProto worker');
     }
@@ -95,4 +112,5 @@ module.exports = {
     workerProxyChannel,
     patchTelegramPrivacy,
     patchTelegramMediaSenders,
+    patchTelegramHttpFallback,
 };

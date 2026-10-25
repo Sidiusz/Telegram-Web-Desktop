@@ -1,5 +1,6 @@
 ;(() => {
     let cfg = __TWD_PROXY_BOOTSTRAP__;
+    globalThis.__twdBlockHttpTransport = !!cfg.active;
     let privacy = {
         noReadReceipts: false, noTyping: false,
         noReadForceOn: new Set(), noReadForceOff: new Set(),
@@ -139,6 +140,7 @@
         if (!next || typeof next !== 'object') return;
         const changed = signature(cfg) !== signature(next);
         cfg = next;
+        globalThis.__twdBlockHttpTransport = !!cfg.active;
         if (!changed) return;
         console.log('[TG-PROXY-WORKER] route update');
         for (const ws of Array.from(live)) {

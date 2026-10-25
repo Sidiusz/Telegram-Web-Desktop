@@ -505,3 +505,45 @@ test('text over the message limit is sent as ordered parts with their formatting
     state.users.byId[1].isPremium = true;
     assert.equal(api.messageLimit(state), 8192, 'Premium limit comes from Telegram app config');
 });
+
+test('one failed reconnect in proxy mode keeps Telegram on WebSocket instead of the blocked HTTP fallback', () => {
+    const { patchTelegramHttpFallback } = require('../electron/tg-flowseal-worker.cjs');
+    // MTProtoSender's connect loop as shipped in Web A's worker (only identifiers shortened).
+    const sample = 'class S{constructor(r){this._shouldAllowHttpTransport=r.shouldAllowHttpTransport;this._retriesToFallback=1;this._isFallback=!1}' +
+        'setAllow(e){this._shouldAllowHttpTransport=e}attempt(e){e>=this._retriesToFallback&&this._shouldAllowHttpTransport&&(this._isFallback=!0)}' +
+        'child(){return{shouldAllowHttpTransport:this._shouldAllowHttpTransport}}}globalThis.S=S;';
+    const patched = patchTelegramHttpFallback(sample);
+    assert.equal(patched.count, 2, 'reads are gated, assignments are left alone');
+    assert.match(patched.body, /this\._shouldAllowHttpTransport=r\.shouldAllowHttpTransport;/);
+    assert.match(patched.body, /setAllow\(e\)\{this\._shouldAllowHttpTransport=e\}/);
+    assert.match(read('tg-flowseal-worker.cjs'), /HTTP fallback flag was not found in the MTProto worker/);
+
+    const fellBack = active => {
+        const context = { WebSocket: function () {}, URL, URLSearchParams, console: { log() {} } };
+        context.globalThis = context;
+        vm.createContext(context);
+        vm.runInContext(read('tg-flowseal-relay-runtime.js')
+            .replace('__TWD_PROXY_BOOTSTRAP__', JSON.stringify({ active, bridgePort: 1234, bridgeToken: 'test' }))
+            .replace('__TWD_PROXY_CHANNEL__', '"test"'), context);
+        vm.runInContext(patched.body, context);
+        const sender = new context.S({ shouldAllowHttpTransport: true });
+        sender.attempt(0);
+        sender.attempt(1);
+        return sender._isFallback;
+    };
+    assert.equal(fellBack(true), false, 'proxy mode blocks HTTP, so the sender keeps retrying WebSocket');
+    assert.equal(fellBack(false), true, 'without the proxy Telegram keeps its normal HTTP fallback');
+});
+
+test('waking from sleep reconnects relayed sockets and forgets failures from the dead network', () => {
+    const main = fs.readFileSync(path.join(__dirname, '../main.cjs'), 'utf8');
+    assert.match(main, /powerMonitor\.on\('resume', \(\) => wake\('system resume'\)\)/);
+    assert.match(main, /resetUpstreamHealth\(\); reconnectAfterWake\(reason\);/);
+    const route = read('tg-flowseal-route.cjs');
+    assert.match(route, /function reconnectAfterWake\(reason\) \{\n    if \(!isProxyActive\(\)\) return false;\n    state\.reconnectEpoch\+\+;/);
+    const { UpstreamHealth } = require('../electron/tg-flowseal-health.cjs');
+    const health = new UpstreamHealth();
+    health.markFailure('a.example');
+    health.clearCooldowns();
+    assert.equal(health.isCooling('a.example'), false);
+});

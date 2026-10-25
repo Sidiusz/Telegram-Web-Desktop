@@ -259,6 +259,15 @@ function forceProxyReconnect(reason = 'renderer-network-stall') {
     broadcastProxyState();
     return getProxyStatus();
 }
+// After sleep every relayed socket may be dead without an error yet; reconnect instead of waiting it out.
+function reconnectAfterWake(reason) {
+    if (!isProxyActive()) return false;
+    state.reconnectEpoch++;
+    state.lastError = '';
+    console.warn(`[TG-PROXY] reconnecting Telegram sockets after ${reason}`);
+    broadcastProxyState();
+    return true;
+}
 function updateProxyOptions(options) {
     const o = options || {};
     const patch = {};
@@ -407,11 +416,15 @@ async function testProxyConnectivity() {
         } else {
             for (const domain of cfg.domains) attempts.push({ domain, url: `wss://kws${dc}.${domain}/apiws` });
         }
+        // Batches keep a dead network from taking 20 domains x 4.5 s per DC.
         let final = { dc, ok: false, error: 'no routes', domain: '', url: '' };
-        for (const attempt of attempts) {
-            const r = await testWs(attempt.url, 4500);
-            final = { dc, domain: attempt.domain, url: attempt.url, ok: r.ok, error: r.error };
-            if (r.ok) break;
+        for (let i = 0; i < attempts.length; i += 5) {
+            const batch = attempts.slice(i, i + 5);
+            const results = await Promise.all(batch.map(a => testWs(a.url, 4500)));
+            const okAt = results.findIndex(x => x.ok);
+            const pick = okAt >= 0 ? okAt : results.length - 1;
+            final = { dc, domain: batch[pick].domain, url: batch[pick].url, ok: okAt >= 0, error: results[pick].error };
+            if (final.ok) break;
         }
         return final;
     }));
@@ -480,7 +493,7 @@ function noteTelegramLoadFailure(error) {
 }
 
 module.exports = {
-    installFlowsealWsRoute, configureProxySettings, setProxyMode, forceProxyReconnect,
+    installFlowsealWsRoute, configureProxySettings, setProxyMode, forceProxyReconnect, reconnectAfterWake,
     updateProxyOptions, getProxyStatus, getProxyBootstrap, noteTelegramLoadFailure,
     refreshFlowsealDomains, testProxyConnectivity, isWebFallbackEnabled, clearWebFallbackLatch, shouldBlockDirectTelegram,
     dcFromTelegramWsHost, DEFAULT_CF_BASE_DOMAINS, DC_IPS,
