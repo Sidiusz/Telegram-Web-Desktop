@@ -409,9 +409,28 @@ function testWs(url, timeoutMs = 6000) {
         ws.addEventListener('error', () => finish(false, 'connection failed'), { once: true });
     });
 }
+// The ws package (unlike Node's built-in WebSocket) can pin Telegram's front by IP and front the SNI.
+function testTelegramWs(candidate, timeoutMs = 6000) {
+    const { openTelegramWs } = require('./tg-flowseal-upstream.cjs');
+    return new Promise(resolve => {
+        let ws;
+        try { ws = openTelegramWs(candidate, { handshakeTimeout: timeoutMs }); }
+        catch (e) { resolve({ ok: false, error: e.message }); return; }
+        ws.on('error', () => {});
+        ws.once('open', () => { try { ws.close(1000, 'test'); } catch (_) {} resolve({ ok: true, error: '' }); });
+        ws.once('close', () => resolve({ ok: false, error: 'connection failed' }));
+    });
+}
 async function testProxyConnectivity() {
     const cfg = getProxyBootstrap();
+    const { telegramCandidates } = require('./tg-flowseal-upstream.cjs');
     return Promise.all([1, 2, 3, 4, 5].map(async (dc) => {
+        const direct = telegramCandidates(cfg, dc, false);
+        if (direct.length) {
+            const results = await Promise.all(direct.map(c => testTelegramWs(c, 4500)));
+            const okAt = results.findIndex(x => x.ok);
+            if (okAt >= 0) return { dc, ok: true, error: '', domain: direct[okAt].domain, url: direct[okAt].url };
+        }
         const attempts = [];
         if (cfg.workerEnabled && cfg.dcIps[dc]) {
             for (const domain of cfg.workerDomains) {

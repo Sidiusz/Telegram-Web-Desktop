@@ -11,6 +11,9 @@ const {
     reportBridgeRoute, reportBridgeError,
     reportBridgePreferredDomain, clearBridgePreferredDomain,
 } = require('./tg-flowseal-route.cjs');
+const {
+    telegramCandidates, tcpCandidates, noteTelegramSuccess, openTelegramWs, TcpUpstream, TelegramWsPool,
+} = require('./tg-flowseal-upstream.cjs');
 
 let server = null;
 let wss = null;
@@ -93,34 +96,39 @@ function buildCrypto(clientInit, relayInit) {
     return { clientOut, clientIn, relayOut, relayIn };
 }
 
-function telegramCandidates(cfg, dc, media) {
-    const ip = cfg.tgWsIps && cfg.tgWsIps[dc];
-    if (!ip) return [];
-    const host = `kws${dc}${media ? '-1' : ''}.web.telegram.org`;
-    return [{ kind: 'tg', domain: 'web.telegram.org', ip, url: `wss://${host}/apiws` }];
-}
-function upstreamCandidates(cfg, dc, media) {
-    const direct = telegramCandidates(cfg, dc, media);
-    if (cfg.workerEnabled && cfg.workerDomains?.length && cfg.dcIps?.[dc]) {
-        return direct.concat(cfg.workerDomains.map(domain => ({
+// Same order as Flowseal's tg-ws-proxy: Telegram's own WebSocket front (pooled), Cloudflare
+// Worker, Cloudflare relay domains, then raw TCP to the DC.
+function upstreamGroups(cfg, dc, media) {
+    const worker = cfg.workerEnabled && cfg.workerDomains?.length && cfg.dcIps?.[dc]
+        ? cfg.workerDomains.map(domain => ({
             kind: 'worker', domain,
             url: `wss://${domain}/apiws?dst=${encodeURIComponent(cfg.dcIps[dc])}&dc=${dc}&media=${media ? 1 : 0}`,
-        })));
-    }
-    return direct.concat((cfg.domains || []).map(domain => ({
+        }))
+        : [];
+    const relays = (cfg.domains || []).map(domain => ({
         kind: 'cf', domain,
         url: `wss://kws${dc}.${domain}/apiws`,
-    })));
+    }));
+    return [telegramCandidates(cfg, dc, media), worker, relays, tcpCandidates(cfg, dc)];
 }
-// Pins the socket to the candidate's IP while the URL keeps the real name for SNI and Host.
-function pinnedLookup(ip) {
-    return (hostname, options, callback) => {
-        if (typeof options === 'function') { callback = options; options = {}; }
-        if (options && options.all) callback(null, [{ address: ip, family: 4 }]);
-        else callback(null, ip, 4);
-    };
+function connectCandidate(candidate) {
+    if (candidate.kind === 'tg') return openTelegramWs(candidate);
+    if (candidate.kind === 'tcp') return new TcpUpstream(candidate.ip, candidate.port);
+    const upstream = new WebSocket(candidate.url, 'binary', {
+        handshakeTimeout: 4500,
+        perMessageDeflate: false,
+    });
+    upstream.binaryType = 'arraybuffer';
+    return upstream;
+}
+// Only relay domains carry a remembered "last good" preference; Telegram and TCP routes keep their place.
+function isRelayKind(candidate) {
+    return !!candidate && (candidate.kind === 'cf' || candidate.kind === 'worker');
 }
 
+const telegramPool = new TelegramWsPool({
+    isActive: () => !!(server && bridgePort && getProxyBootstrap().active),
+});
 const controlUpstreamHealth = new UpstreamHealth();
 const mediaUpstreamHealth = new UpstreamHealth();
 const CONTROL_RESPONSE_TIMEOUT_MS = 8_000;
@@ -133,6 +141,17 @@ let mediaSpreadCursor = 0;
 
 function healthFor(media) {
     return media ? mediaUpstreamHealth : controlUpstreamHealth;
+}
+function noteUpstreamSuccess(candidate, media) {
+    if (!candidate) return;
+    const health = healthFor(media);
+    if (isRelayKind(candidate)) {
+        health.markSuccess(candidate.domain);
+        return true;
+    }
+    health.clearFailure(candidate.domain);
+    noteTelegramSuccess(candidate);
+    return false;
 }
 function noteUpstreamFailure(candidate, reason, media = false) {
     const domain = candidate && candidate.domain;
@@ -148,26 +167,29 @@ function openUpstream(cfg, dc, media) {
     if (!media && cfg.avoidControlDomain && Number(cfg.avoidControlUntil) > Date.now()) {
         health.markFailure(cfg.avoidControlDomain);
     }
-    let candidates = health.rank(upstreamCandidates(cfg, dc, media));
+    const groups = upstreamGroups(cfg, dc, media);
+    // As in Flowseal, a Telegram front that keeps failing to connect is skipped rather than waited on.
+    if (groups[0].length && telegramPool.isBackingOff(dc, media) && groups.slice(1).some(g => g.length)) groups[0] = [];
+    const ranked = health.rankGroups(groups);
     // Telegram opens several media sockets at once; spreading them avoids piling every
-    // download onto one Cloudflare hostname and its WebSocket limits. Telegram's own front stays first.
-    if (media) {
-        const lead = candidates[0] && candidates[0].kind === 'tg' ? candidates.splice(0, 1) : [];
-        candidates = lead.concat(rotateCandidates(candidates, mediaSpreadCursor++, MEDIA_SPREAD_WIDTH));
+    // download onto one Cloudflare hostname and its WebSocket limits.
+    if (media) ranked.healthy[2] = rotateCandidates(ranked.healthy[2], mediaSpreadCursor++, MEDIA_SPREAD_WIDTH);
+    const healthy = ranked.healthy.flat();
+    const candidates = healthy.length ? healthy : ranked.cooling;
+    const telegram = ranked.healthy[0];
+    if (telegram.length && candidates[0] === telegram[0]) {
+        const pooled = telegramPool.take(dc, media, telegram);
+        if (pooled) {
+            console.log(`[TG-PROXY-BRIDGE] upstream ${pooled.candidate.domain} taken from the pool`);
+            return Promise.resolve(pooled);
+        }
     }
     // A route is not considered healthy merely because the WebSocket handshake
     // succeeded; domains earn preference only after they return MTProto data.
-    return hedgedOpen(candidates, candidate => {
-        const upstream = new WebSocket(candidate.url, 'binary', {
-            handshakeTimeout: 4500,
-            perMessageDeflate: false,
-            ...(candidate.ip ? { lookup: pinnedLookup(candidate.ip) } : {}),
-        });
-        upstream.binaryType = 'arraybuffer';
-        return upstream;
-    }, {
+    return hedgedOpen(candidates, connectCandidate, {
         hedgeMs: UPSTREAM_HEDGE_MS,
-        maxInFlight: 2,
+        // Telegram's plain and fronted variants plus the first relay can all be in flight.
+        maxInFlight: 3,
         timeoutMs: 5000,
         onFailure: (candidate, message) => noteUpstreamFailure(candidate, message, media),
     }).then(opened => {
@@ -257,8 +279,7 @@ function handleLocalConnection(local, request) {
         if (media || controlProbeDone || !upstreamCandidate) return;
         clearControlProbe();
         controlProbeDone = true;
-        controlUpstreamHealth.markSuccess(upstreamCandidate.domain);
-        reportBridgePreferredDomain(upstreamCandidate.domain, false);
+        if (noteUpstreamSuccess(upstreamCandidate, false)) reportBridgePreferredDomain(upstreamCandidate.domain, false);
         console.log(`[TG-PROXY-BRIDGE] ${upstreamCandidate.domain} control route returned MTProto data`);
     };
     const armMediaProbe = () => {
@@ -285,9 +306,10 @@ function handleLocalConnection(local, request) {
             noteUpstreamFailure(upstreamCandidate, `slow media first response ${responseMs}ms`, true);
             console.warn(`[TG-PROXY-BRIDGE] ${upstreamCandidate.domain} media response slow: ${responseMs}ms`);
         } else {
-            mediaUpstreamHealth.markSuccess(upstreamCandidate.domain);
             // Media sockets rotate across domains; persist only a fallback seed, not every rotation.
-            if (!getProxyBootstrap().preferredMediaDomain) reportBridgePreferredDomain(upstreamCandidate.domain, true);
+            if (noteUpstreamSuccess(upstreamCandidate, true) && !getProxyBootstrap().preferredMediaDomain) {
+                reportBridgePreferredDomain(upstreamCandidate.domain, true);
+            }
             console.log(`[TG-PROXY-BRIDGE] ${upstreamCandidate.domain} media first response ${responseMs}ms`);
         }
     };
@@ -400,6 +422,8 @@ function handleLocalConnection(local, request) {
 function resetUpstreamHealth() {
     controlUpstreamHealth.clearCooldowns();
     mediaUpstreamHealth.clearCooldowns();
+    // Pooled sockets did not survive the sleep either.
+    telegramPool.reset();
 }
 
 async function startEmbeddedFlowsealBridge() {
@@ -435,6 +459,7 @@ async function startEmbeddedFlowsealBridge() {
     return { port: bridgePort, token: bridgeToken };
 }
 async function stopEmbeddedFlowsealBridge() {
+    telegramPool.reset();
     setBridgeEndpoint(0, '');
     bridgePort = 0;
     bridgeToken = '';

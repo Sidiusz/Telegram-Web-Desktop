@@ -37,6 +37,11 @@ class UpstreamHealth {
         return until;
     }
 
+    // Clears a cooldown without making the route the preferred one.
+    clearFailure(domain) {
+        this.cooldowns.delete(String(domain || ''));
+    }
+
     clearCooldowns() {
         this.cooldowns.clear();
     }
@@ -63,6 +68,28 @@ class UpstreamHealth {
         // A cooldown must actually suppress retries while there are healthy routes.
         // Only fall back to cooling candidates when every known route is cooling.
         return healthy.length ? healthy : cooling.map(x => x.candidate);
+    }
+
+    // Ranks route groups that must keep their order (e.g. Telegram, Worker, Cloudflare, TCP):
+    // the preferred domain only moves up inside its own group. Returns the healthy part of each
+    // group, plus every cooling candidate (soonest first) for when no group has a healthy route.
+    rankGroups(groups) {
+        const now = this.now();
+        this._prune(now);
+        const cooling = [];
+        const healthy = (groups || []).map(group => {
+            const ok = [];
+            for (const candidate of group || []) {
+                const until = this.cooldowns.get(candidate.domain) || 0;
+                if (until > now) cooling.push({ candidate, until });
+                else ok.push(candidate);
+            }
+            return ok.sort((a, b) =>
+                (b.domain === this.preferredDomain ? 1 : 0) -
+                (a.domain === this.preferredDomain ? 1 : 0));
+        });
+        cooling.sort((a, b) => a.until - b.until);
+        return { healthy, cooling: cooling.map(x => x.candidate) };
     }
 
 }

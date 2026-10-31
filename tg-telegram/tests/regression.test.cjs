@@ -515,15 +515,95 @@ test('proxy bridge decodes Telegram transport errors and logs per-socket traffic
     assert.match(bridge, /Telegram transport error \$\{transportError\}/);
 });
 
-test('proxy bridge tries Telegram\'s own WebSocket front by IP before Cloudflare relays', () => {
+test('proxy bridge follows Flowseal route order: Telegram front, Worker, Cloudflare, TCP', () => {
     const bridge = read('electron/tg-flowseal-bridge.cjs');
     const route = read('electron/tg-flowseal-route.cjs');
     assert.match(route, /TG_WS_IPS = Object\.freeze\(\{ 2: '149\.154\.167\.220', 4: '149\.154\.167\.220' \}\)/);
     assert.match(route, /tgWsIps: \{ \.\.\.TG_WS_IPS \}/);
-    assert.match(bridge, /kws\$\{dc\}\$\{media \? '-1' : ''\}\.web\.telegram\.org/);
-    assert.match(bridge, /return direct\.concat\(/);
-    assert.match(bridge, /lookup: pinnedLookup\(candidate\.ip\)/);
-    assert.match(bridge, /candidates\[0\]\.kind === 'tg' \? candidates\.splice\(0, 1\)/);
+    assert.match(bridge, /return \[telegramCandidates\(cfg, dc, media\), worker, relays, tcpCandidates\(cfg, dc\)\]/);
+    assert.match(bridge, /telegramPool\.take\(dc, media, telegram\)/);
+    assert.match(bridge, /telegramPool\.reset\(\)/);
+
+    const { UpstreamHealth } = require('../electron/tg-flowseal-health.cjs');
+    const health = new UpstreamHealth({ cooldownMs: 1000, now: () => 0 });
+    health.markSuccess('b');
+    health.markFailure('tg');
+    const ranked = health.rankGroups([[{ domain: 'tg' }], [{ domain: 'a' }, { domain: 'b' }], [{ domain: 'tcp' }]]);
+    assert.deepEqual(ranked.healthy.map(g => g.map(c => c.domain)), [[], ['b', 'a'], ['tcp']]);
+    assert.deepEqual(ranked.cooling.map(c => c.domain), ['tg']);
+});
+
+test('Telegram front candidates use kws hosts by IP and keep the mode that worked first', () => {
+    const up = require('../electron/tg-flowseal-upstream.cjs');
+    const cfg = { tgWsIps: { 2: '149.154.167.220' }, dcIps: { 2: '149.154.167.51' } };
+    const control = up.telegramCandidates(cfg, 2, false);
+    assert.deepEqual(control.map(c => [c.domain, c.front, c.url]), [
+        ['web.telegram.org', false, 'wss://kws2.web.telegram.org/apiws'],
+        ['sprinthost.ru', true, 'wss://kws2.web.telegram.org/apiws'],
+    ]);
+    assert.equal(up.telegramCandidates(cfg, 2, true)[0].url, 'wss://kws2-1.web.telegram.org/apiws');
+    assert.deepEqual(up.telegramCandidates(cfg, 1, false), []);
+    up.noteTelegramSuccess(control[1]);
+    assert.equal(up.telegramCandidates(cfg, 2, false)[0].front, true);
+    up.noteTelegramSuccess(control[0]);
+    assert.deepEqual(up.tcpCandidates(cfg, 2), [{ kind: 'tcp', domain: '149.154.167.51', ip: '149.154.167.51', port: 443 }]);
+    const lookup = up.pinnedLookup('1.2.3.4');
+    lookup('kws2.web.telegram.org', { all: true }, (err, list) => assert.deepEqual(list, [{ address: '1.2.3.4', family: 4 }]));
+    lookup('kws2.web.telegram.org', {}, (err, ip, family) => assert.deepEqual([ip, family], ['1.2.3.4', 4]));
+});
+
+test('Telegram WS pool hands out fresh sockets, refills, expires old ones and backs off', async () => {
+    const { EventEmitter } = require('node:events');
+    const { TelegramWsPool } = require('../electron/tg-flowseal-upstream.cjs');
+    let clock = 0;
+    let fail = false;
+    const opened = [];
+    const open = () => {
+        const ws = new EventEmitter();
+        ws.readyState = 0;
+        ws.terminate = () => { ws.readyState = 3; ws.emit('close'); };
+        opened.push(ws);
+        setImmediate(() => { if (fail) ws.terminate(); else { ws.readyState = 1; ws.emit('open'); } });
+        return ws;
+    };
+    const pool = new TelegramWsPool({ size: 2, maxAgeMs: 100, open, now: () => clock });
+    const cand = [{ kind: 'tg', domain: 'web.telegram.org', front: false }];
+    assert.equal(pool.take(2, false, cand), null);
+    await new Promise(r => setTimeout(r, 10));
+    assert.equal(opened.length, 2);
+    const hit = pool.take(2, false, cand);
+    assert.equal(hit.upstream, opened[0]);
+    assert.equal(hit.latencyMs, 0);
+    await new Promise(r => setTimeout(r, 10));
+    assert.equal(opened.length, 3);
+    clock = 1000;
+    fail = true;
+    assert.equal(pool.take(2, false, cand), null, 'sockets past max age are not handed out');
+    assert.equal(opened[1].readyState, 3);
+    await new Promise(r => setTimeout(r, 10));
+    assert.ok(pool.retryAt.get('2:0') > clock, 'a failed refill backs off');
+    const before = opened.length;
+    pool.take(2, false, cand);
+    assert.equal(opened.length, before, 'no refill during backoff');
+    pool.reset();
+    assert.equal(pool.buckets.size, 0);
+});
+
+test('TCP upstream looks like a ws socket to the bridge', async () => {
+    const net = require('node:net');
+    const { TcpUpstream } = require('../electron/tg-flowseal-upstream.cjs');
+    const server = net.createServer(sock => sock.on('data', d => { sock.write(Buffer.concat([Buffer.from('re:'), d])); sock.end(); }));
+    await new Promise(r => server.listen(0, '127.0.0.1', r));
+    const up = new TcpUpstream('127.0.0.1', server.address().port);
+    await new Promise(r => up.once('open', r));
+    assert.equal(up.readyState, 1);
+    const got = new Promise(r => up.once('message', r));
+    const closed = new Promise(r => up.once('close', (code, reason) => r([code, String(reason)])));
+    up.send(Buffer.from('init'));
+    assert.equal(String(await got), 're:init');
+    assert.deepEqual(await closed, [1006, 'tcp connection closed']);
+    assert.equal(up.readyState, 3);
+    server.close();
 });
 
 test('proxy health does not add heartbeat traffic and validates routes by MTProto response', () => {
@@ -534,7 +614,7 @@ test('proxy health does not add heartbeat traffic and validates routes by MTProt
     assert.match(bridge, /const mediaUpstreamHealth = new UpstreamHealth\(\)/);
     assert.match(bridge, /health\.seedPreferred\(media \? cfg\.preferredMediaDomain : cfg\.preferredControlDomain\)/);
     assert.match(bridge, /CONTROL_RESPONSE_TIMEOUT_MS = 8_000/);
-    assert.match(bridge, /controlUpstreamHealth\.markSuccess\(upstreamCandidate\.domain\)/);
+    assert.match(bridge, /noteUpstreamSuccess\(upstreamCandidate, false\)/);
     assert.match(bridge, /reportBridgePreferredDomain\(upstreamCandidate\.domain, false\)/);
     assert.match(bridge, /reportBridgePreferredDomain\(upstreamCandidate\.domain, true\)/);
     assert.match(bridge, /clearBridgePreferredDomain\(domain, media\)/);
@@ -546,12 +626,12 @@ test('proxy health does not add heartbeat traffic and validates routes by MTProt
     assert.match(bridge, /watchFrameStall\(upstream,/);
     assert.match(bridge, /hedgedOpen\(candidates,/);
     assert.doesNotMatch(bridge, /index \* 75/);
-    assert.match(bridge, /rotateCandidates\(candidates, mediaSpreadCursor\+\+, MEDIA_SPREAD_WIDTH\)/);
+    assert.match(bridge, /rotateCandidates\(ranked\.healthy\[2\], mediaSpreadCursor\+\+, MEDIA_SPREAD_WIDTH\)/);
     assert.match(bridge, /finishControlProbe\(\)/);
     assert.match(bridge, /control first response timeout/);
     assert.match(bridge, /cfg\.avoidControlDomain/);
     assert.match(bridge, /finishMediaProbe\(\)/);
-    assert.match(bridge, /mediaUpstreamHealth\.markSuccess\(upstreamCandidate\.domain\)/);
+    assert.match(bridge, /noteUpstreamSuccess\(upstreamCandidate, true\)/);
     assert.match(bridge, /slow media first response/);
     assert.match(bridge, /media first response timeout/);
     const route = read('electron/tg-flowseal-route.cjs');
@@ -565,7 +645,7 @@ test('proxy health does not add heartbeat traffic and validates routes by MTProt
     assert.match(route, /clearBridgePreferredDomain/);
     // electron-store rewrites the file per key; proxy bookkeeping must save only changed keys.
     assert.doesNotMatch(route, /saveSettings\(Object\.assign\(\{\}, (?:s|loadSettings\(\))/);
-    assert.match(bridge, /if \(!getProxyBootstrap\(\)\.preferredMediaDomain\) reportBridgePreferredDomain/);
+    assert.match(bridge, /noteUpstreamSuccess\(upstreamCandidate, true\) && !getProxyBootstrap\(\)\.preferredMediaDomain/);
     assert.match(ipc, /proxyConfigChanged/);
     assert.match(ipc, /if \(proxyConfigChanged\) configureProxySettings/);
 });
