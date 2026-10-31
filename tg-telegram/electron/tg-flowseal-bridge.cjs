@@ -131,7 +131,7 @@ const telegramPool = new TelegramWsPool({
 });
 const controlUpstreamHealth = new UpstreamHealth();
 const mediaUpstreamHealth = new UpstreamHealth();
-const CONTROL_RESPONSE_TIMEOUT_MS = 8_000;
+const CONTROL_RESPONSE_TIMEOUT_MS = 6_000;
 const MEDIA_SLOW_RESPONSE_MS = 3_000;
 const MEDIA_RESPONSE_TIMEOUT_MS = 10_000;
 const FRAME_STALL_MS = 12_000;

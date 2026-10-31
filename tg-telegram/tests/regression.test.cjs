@@ -613,7 +613,7 @@ test('proxy health does not add heartbeat traffic and validates routes by MTProt
     assert.match(bridge, /const controlUpstreamHealth = new UpstreamHealth\(\)/);
     assert.match(bridge, /const mediaUpstreamHealth = new UpstreamHealth\(\)/);
     assert.match(bridge, /health\.seedPreferred\(media \? cfg\.preferredMediaDomain : cfg\.preferredControlDomain\)/);
-    assert.match(bridge, /CONTROL_RESPONSE_TIMEOUT_MS = 8_000/);
+    assert.match(bridge, /CONTROL_RESPONSE_TIMEOUT_MS = 6_000/);
     assert.match(bridge, /noteUpstreamSuccess\(upstreamCandidate, false\)/);
     assert.match(bridge, /reportBridgePreferredDomain\(upstreamCandidate\.domain, false\)/);
     assert.match(bridge, /reportBridgePreferredDomain\(upstreamCandidate\.domain, true\)/);
