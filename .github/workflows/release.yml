@@ -66,8 +66,10 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
+          # A missing tag is the expected 404 here; it must not abort the step as a native-command error.
+          $ErrorActionPreference = 'Continue'
           $version = $env:RELEASE_VERSION
-          gh api "repos/$env:GITHUB_REPOSITORY/git/ref/tags/$version" --silent 2>$null
+          gh api "repos/$env:GITHUB_REPOSITORY/git/ref/tags/$version" --silent 2>&1 | Out-Null
           if ($LASTEXITCODE -eq 0) { throw "Tag $version already exists; push the tag instead of dispatching" }
           gh api --method POST "repos/$env:GITHUB_REPOSITORY/git/refs" -f "ref=refs/tags/$version" -f "sha=$env:GITHUB_SHA" | Out-Null
           if ($LASTEXITCODE -ne 0) { throw "Failed to create tag $version" }
