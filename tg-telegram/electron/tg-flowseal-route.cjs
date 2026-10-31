@@ -24,6 +24,9 @@ const DC_IPS = Object.freeze({
     1: '149.154.175.50', 2: '149.154.167.51', 3: '149.154.175.100',
     4: '149.154.167.91', 5: '149.154.171.5', 203: '91.105.192.100',
 });
+// Flowseal's primary route: Telegram's own WebSocket front reached by IP with the kws* name as
+// TLS SNI/Host, so a poisoned or blocked *.web.telegram.org DNS answer does not matter.
+const TG_WS_IPS = Object.freeze({ 2: '149.154.167.220', 4: '149.154.167.220' });
 const NAMED_DC = Object.freeze({ pluto: 1, venus: 2, aurora: 3, vesta: 4, flora: 5 });
 
 const state = {
@@ -95,6 +98,7 @@ function getProxyBootstrap() {
         preferredMediaDomain: state.preferredMediaDomain,
         workerEnabled: state.workerEnabled && state.workerDomains.length > 0,
         workerDomains: state.workerDomains.slice(), dcIps: { ...state.dcIps },
+        tgWsIps: { ...TG_WS_IPS },
         bridgePort: state.bridgePort, bridgeToken: state.bridgeToken,
     };
 }
@@ -496,7 +500,7 @@ module.exports = {
     installFlowsealWsRoute, configureProxySettings, setProxyMode, forceProxyReconnect, reconnectAfterWake,
     updateProxyOptions, getProxyStatus, getProxyBootstrap, noteTelegramLoadFailure,
     refreshFlowsealDomains, testProxyConnectivity, isWebFallbackEnabled, clearWebFallbackLatch, shouldBlockDirectTelegram,
-    dcFromTelegramWsHost, DEFAULT_CF_BASE_DOMAINS, DC_IPS,
+    dcFromTelegramWsHost, DEFAULT_CF_BASE_DOMAINS, DC_IPS, TG_WS_IPS,
     setBridgeEndpoint, reportBridgeRoute, reportBridgeError,
     reportBridgePreferredDomain, clearBridgePreferredDomain,
 };

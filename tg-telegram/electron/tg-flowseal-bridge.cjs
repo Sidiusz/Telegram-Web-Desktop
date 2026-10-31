@@ -93,17 +93,32 @@ function buildCrypto(clientInit, relayInit) {
     return { clientOut, clientIn, relayOut, relayIn };
 }
 
+function telegramCandidates(cfg, dc, media) {
+    const ip = cfg.tgWsIps && cfg.tgWsIps[dc];
+    if (!ip) return [];
+    const host = `kws${dc}${media ? '-1' : ''}.web.telegram.org`;
+    return [{ kind: 'tg', domain: 'web.telegram.org', ip, url: `wss://${host}/apiws` }];
+}
 function upstreamCandidates(cfg, dc, media) {
+    const direct = telegramCandidates(cfg, dc, media);
     if (cfg.workerEnabled && cfg.workerDomains?.length && cfg.dcIps?.[dc]) {
-        return cfg.workerDomains.map(domain => ({
+        return direct.concat(cfg.workerDomains.map(domain => ({
             kind: 'worker', domain,
             url: `wss://${domain}/apiws?dst=${encodeURIComponent(cfg.dcIps[dc])}&dc=${dc}&media=${media ? 1 : 0}`,
-        }));
+        })));
     }
-    return (cfg.domains || []).map(domain => ({
+    return direct.concat((cfg.domains || []).map(domain => ({
         kind: 'cf', domain,
         url: `wss://kws${dc}.${domain}/apiws`,
-    }));
+    })));
+}
+// Pins the socket to the candidate's IP while the URL keeps the real name for SNI and Host.
+function pinnedLookup(ip) {
+    return (hostname, options, callback) => {
+        if (typeof options === 'function') { callback = options; options = {}; }
+        if (options && options.all) callback(null, [{ address: ip, family: 4 }]);
+        else callback(null, ip, 4);
+    };
 }
 
 const controlUpstreamHealth = new UpstreamHealth();
@@ -135,14 +150,18 @@ function openUpstream(cfg, dc, media) {
     }
     let candidates = health.rank(upstreamCandidates(cfg, dc, media));
     // Telegram opens several media sockets at once; spreading them avoids piling every
-    // download onto one Cloudflare hostname and its WebSocket limits.
-    if (media) candidates = rotateCandidates(candidates, mediaSpreadCursor++, MEDIA_SPREAD_WIDTH);
+    // download onto one Cloudflare hostname and its WebSocket limits. Telegram's own front stays first.
+    if (media) {
+        const lead = candidates[0] && candidates[0].kind === 'tg' ? candidates.splice(0, 1) : [];
+        candidates = lead.concat(rotateCandidates(candidates, mediaSpreadCursor++, MEDIA_SPREAD_WIDTH));
+    }
     // A route is not considered healthy merely because the WebSocket handshake
     // succeeded; domains earn preference only after they return MTProto data.
     return hedgedOpen(candidates, candidate => {
         const upstream = new WebSocket(candidate.url, 'binary', {
             handshakeTimeout: 4500,
             perMessageDeflate: false,
+            ...(candidate.ip ? { lookup: pinnedLookup(candidate.ip) } : {}),
         });
         upstream.binaryType = 'arraybuffer';
         return upstream;

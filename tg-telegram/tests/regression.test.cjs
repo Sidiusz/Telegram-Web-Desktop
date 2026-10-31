@@ -515,6 +515,17 @@ test('proxy bridge decodes Telegram transport errors and logs per-socket traffic
     assert.match(bridge, /Telegram transport error \$\{transportError\}/);
 });
 
+test('proxy bridge tries Telegram\'s own WebSocket front by IP before Cloudflare relays', () => {
+    const bridge = read('electron/tg-flowseal-bridge.cjs');
+    const route = read('electron/tg-flowseal-route.cjs');
+    assert.match(route, /TG_WS_IPS = Object\.freeze\(\{ 2: '149\.154\.167\.220', 4: '149\.154\.167\.220' \}\)/);
+    assert.match(route, /tgWsIps: \{ \.\.\.TG_WS_IPS \}/);
+    assert.match(bridge, /kws\$\{dc\}\$\{media \? '-1' : ''\}\.web\.telegram\.org/);
+    assert.match(bridge, /return direct\.concat\(/);
+    assert.match(bridge, /lookup: pinnedLookup\(candidate\.ip\)/);
+    assert.match(bridge, /candidates\[0\]\.kind === 'tg' \? candidates\.splice\(0, 1\)/);
+});
+
 test('proxy health does not add heartbeat traffic and validates routes by MTProto response', () => {
     const bridge = read('electron/tg-flowseal-bridge.cjs');
     assert.doesNotMatch(bridge, /\.ping\s*\(/);
