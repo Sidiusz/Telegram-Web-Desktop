@@ -1,6 +1,7 @@
 'use strict';
 const { transformedJsResponse } = require('./tg-bundle-patch.cjs');
-const NOTIFY_CHUNK_RE = /\/assets\/lock-[^/]+\.js$/i;
+// Web A moved the notification module from the lock chunk to useMultiaccountInfo; accept both.
+const NOTIFY_CHUNK_RE = /\/assets\/(?:lock|useMultiaccountInfo)-[^/]+\.js$/i;
 const NOTIFY_MARKER = 'showMessageNotification';
 const ICON_WAIT_MS = 1500;
 

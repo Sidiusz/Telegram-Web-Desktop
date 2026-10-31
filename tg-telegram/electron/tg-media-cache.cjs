@@ -22,13 +22,14 @@ function patchTelegramMediaCache(body) {
     if (setterCount < 2) return { body: source, patched: false };
 
     const unloadPattern = new RegExp(
-        `async function ([A-Za-z_$][\\w$]*)\\(e\\)\\{${escapeRegex(cacheVar)}\\.delete\\(e\\);`
+        `async function ([A-Za-z_$][\\w$]*)\\(e\\)\\{${escapeRegex(cacheVar)}\\.delete\\(e\\)([;,])`
     );
     if (!unloadPattern.test(source)) return { body: source, patched: false };
 
     let out = source.replace(setPattern, '__twdMediaCacheSet(');
-    out = out.replace(unloadPattern, (match, fn) =>
-        `async function ${fn}(e){__twdMediaCacheDrop(e);`
+    // Newer builds join the next statement with a comma instead of a semicolon.
+    out = out.replace(unloadPattern, (match, fn, sep) =>
+        `async function ${fn}(e){__twdMediaCacheDrop(e)${sep}`
     );
 
     const getterNeedle = `function ${getterFn}(e){return ${cacheVar}.get(e)}`;

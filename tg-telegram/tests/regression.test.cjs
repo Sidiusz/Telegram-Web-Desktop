@@ -1511,6 +1511,23 @@ test('detached Telegram media releases decoder and canvas backing resources', ()
     assert.match(feature, /__twdDetachedMediaStats/);
 });
 
+test('Telegram media cache patch accepts the Vite build that joins the unload statements with a comma', () => {
+    const sample = 'var ln=new Map;function hn(e){return ln.get(e)}' +
+        'async function xn(e){let n=`blob:a`;ln.set(e,n);if(!n)throw Error(`Failed to fetch media ${e}`);' +
+        'let c=`blob:b`;return ln.set(e,c),c}async function Sn(e){ln.delete(e),await Promise.resolve()}';
+    const patched = patchTelegramMediaCache(sample);
+    assert.equal(patched.patched, true);
+    assert.match(patched.body, /async function Sn\(e\)\{__twdMediaCacheDrop\(e\),await/);
+    assert.doesNotThrow(() => new Function(patched.body));
+});
+
+test('Telegram notification patch is applied to the chunk it lives in after the Vite move', () => {
+    const notif = read('electron/tg-notification-patch.cjs');
+    const re = new RegExp(/NOTIFY_CHUNK_RE = \/(.*)\/i;/.exec(notif)[1], 'i');
+    assert.ok(re.test('/a/assets/useMultiaccountInfo-ccGOZzds.js'));
+    assert.ok(re.test('/a/assets/lock-Du-DGzKa.js'));
+});
+
 test('Telegram media cache patch evicts only unreferenced blob URLs and keeps diagnostics', () => {
     const sample = 'var vt=new Map,yt=new Map;function Ct(e){return vt.get(e)}' +
         'async function Ot(e){let n=`blob:a`;vt.set(e,n);if(!n)throw Error(`Failed to fetch media ${e}`);' +
