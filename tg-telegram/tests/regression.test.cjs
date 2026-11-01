@@ -2180,3 +2180,22 @@ test('notification flags are repaired in memory through Web A, with the IndexedD
     assert.match(src, /if \(!repairLiveNotificationFlags\(\)\) repairTelegramNotificationFlags\(\);/);
     assert.match(src, /try \{ repairLiveNotificationFlags\(\); \} catch \(_\) \{\}\s*\}, 30000\);/);
 });
+
+test('app log mirrors the console to logs/main.log and keeps recent proxy lines for diagnostics', () => {
+    const os = require('node:os');
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'twd-log-'));
+    const { spawnSync } = require('node:child_process');
+    const script = `const l=require(${JSON.stringify(path.join(__dirname, '..', 'electron', 'app-log.cjs'))});` +
+        `l.installAppLog(${JSON.stringify(dir)});for(let i=0;i<250;i++)console.log('[TG-PROXY-BRIDGE] line '+i);` +
+        `console.warn('[TWD-NOTIF] other');process.stdout.write(JSON.stringify(l.getProxyLogLines()));`;
+    const run = spawnSync(process.execPath, ['-e', script], { encoding: 'utf8' });
+    const lines = JSON.parse(run.stdout.slice(run.stdout.indexOf('["')));
+    assert.equal(lines.length, 200);
+    assert.match(lines[199], /INFO \[TG-PROXY-BRIDGE\] line 249$/);
+    assert.ok(lines.every(l => !l.includes('TWD-NOTIF')));
+    const file = fs.readFileSync(path.join(dir, 'main.log'), 'utf8');
+    assert.match(file, /\[TWD-LOG\] log started/);
+    assert.match(file, /WARN \[TWD-NOTIF\] other/);
+    assert.match(read('electron/preload.js'), /'open_logs_folder'/);
+    assert.match(read('electron/inject/ui/native-panels.js'), /INV\('open_logs_folder'\)/);
+});

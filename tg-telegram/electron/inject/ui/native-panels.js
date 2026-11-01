@@ -282,8 +282,13 @@ async function renderProxyNative(content){
             paintDiag();toast((rs||[]).every(x=>x.ok)?T('proxy_test_ok'):T('proxy_test_bad'));
         }finally{testing=false;testRow._title.textContent=T('proxy_test');}
     });
-    const copyRow=nativeRow(T('proxy_copy'),T('proxy_copy_desc'),'',()=>navigator.clipboard.writeText(diagLines().join('\n')).then(()=>toast(T('st_saved_short'))).catch(()=>{}));
-    diagCard.append(testRow,copyRow);
+    const copyRow=nativeRow(T('proxy_copy'),T('proxy_copy_desc'),'',async()=>{
+        try{st=await INV('get_proxy_status');}catch(_){}
+        const log=Array.isArray(st.log)&&st.log.length?['','log:'].concat(st.log):[];
+        navigator.clipboard.writeText(diagLines().concat(log).join('\n')).then(()=>toast(T('st_saved_short'))).catch(()=>{});
+    });
+    const logsRow=nativeRow(T('proxy_logs'),T('proxy_logs_desc'),'',()=>{INV('open_logs_folder').catch(()=>{});});
+    diagCard.append(testRow,copyRow,logsRow);
     addSection(T('proxy_diag'),diagCard);
 
     const liveTimer=setInterval(async()=>{

@@ -22,6 +22,11 @@ if (devProfile && (!app.isPackaged || process.env.TWD_ALLOW_MULTI_INSTANCE === '
     app.setPath('userData', path.join(app.getPath('appData'), 'Telegram Web Desktop'));
 }
 
+// The log goes to the final profile, so it is installed right after userData is settled.
+const { installAppLog } = require('./electron/app-log.cjs');
+installAppLog(path.join(app.getPath('userData'), 'logs'));
+console.log(`[TWD-LOG] Telegram Web Desktop ${app.getVersion()}`);
+
 // Modules that create electron-store instances must be loaded only after userData
 // is finalized, otherwise a dev instance silently reads/writes the installed profile.
 const { createWindow, getWindow } = require('./electron/window.cjs');

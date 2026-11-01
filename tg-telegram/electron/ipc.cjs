@@ -2,6 +2,7 @@
 const { ipcMain, shell, dialog, app, Menu, MenuItem, BrowserWindow } = require('electron');
 const { init: initNotifications, queueNotification } = require('./notification.cjs');
 const { loadSettings, saveSettings } = require('./settings.cjs');
+const { getLogDir, getProxyLogLines } = require('./app-log.cjs');
 const { configureProxySettings, setProxyMode, forceProxyReconnect, updateProxyOptions, getProxyStatus, getProxyBootstrap, refreshFlowsealDomains, testProxyConnectivity } = require('./tg-flowseal-route.cjs');
 const { getFallbackInfo } = require('./telegram-web-fallback.cjs');
 const { loadDownloads, saveDownloads, flushDownloads, deleteDownload, addDownloadRecord, patchDownloadRecord, cancelActive } = require('./downloads.cjs');
@@ -127,7 +128,13 @@ function registerIpc(getWindow) {
         } : { visible: false, minimized: true };
     });
 
-    handle('get_proxy_status', () => Object.assign(getProxyStatus(), { fallback: getFallbackInfo() }));
+    handle('get_proxy_status', () => Object.assign(getProxyStatus(), { fallback: getFallbackInfo(), log: getProxyLogLines() }));
+    handle('open_logs_folder', async () => {
+        const dir = getLogDir();
+        if (!dir) return { ok: false, error: 'log is not available' };
+        const error = await shell.openPath(dir);
+        return { ok: !error, error: error || '' };
+    });
     handle('set_proxy_mode', (e, { mode }) => {
         const status = setProxyMode(mode); state.settings = loadSettings(); return status;
     });
