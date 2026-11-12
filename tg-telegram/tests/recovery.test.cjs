@@ -321,6 +321,19 @@ test('a restored deleted copy does not shift Telegram fast-list inserts in priva
     assert.match(source, /placeDeletedNode\(list, node, messageId\);\n\s*shieldFastList\(node\.parentNode\);/);
 });
 
+test('forwarding to one chat sends in place like forwarding to several', () => {
+    const { patchTelegramForward } = require('../electron/tg-forward-patch.cjs');
+    const sample = 'let d=forwardToMultipleChats;ae=Z(()=>{if(C.length){if(C.length===1){let{peerId:e,topicId:n}=C[0];if(e===t){F();return}' +
+        'c({chatId:e,topicId:n});return}if(ee.totalStars>0&&!o){O();return}I()}});';
+    const patched = patchTelegramForward(sample);
+    assert.equal(patched.patched, true);
+    assert.match(patched.body, /if\(C\.length===1&&C\[0\]\.peerId===t\)\{F\(\);return\}if\(ee\.totalStars/);
+    assert.doesNotMatch(patched.body, /c\(\{chatId:e/);
+    assert.equal(patchTelegramForward(patched.body).patched, false, 'an already patched chunk is left alone');
+    const win = fs.readFileSync(path.join(__dirname, '../electron/window.cjs'), 'utf8');
+    assert.match(win, /ASSET_TRANSFORMS = \[[^\]]*injectTelegramForward/);
+});
+
 test('own deleted messages vanish unless the user keeps them', () => {
     const source = fs.readFileSync(path.join(__dirname, '../electron/features/message_history.js'), 'utf8');
     const make = cfg => new Function('cfg', extractFunctions(source, ['ownDeletedDropped', 'showEnabledFor', 'recordShouldShow', 'saveEnabledFor']) +

@@ -18,6 +18,7 @@ const { injectTelegramWorkerProxy } = require('./tg-flowseal-worker.cjs');
 const { injectTelegramExtendedPins, injectExtendedPinsPrelude } = require('./tg-extended-pins.cjs');
 const { injectTelegramMediaCache } = require('./tg-media-cache.cjs');
 const { injectTelegramNotifications } = require('./tg-notification-patch.cjs');
+const { injectTelegramForward } = require('./tg-forward-patch.cjs');
 const { injectStartupSplash } = require('./startup-splash.cjs');
 
 const TG_URL = 'https://web.telegram.org/a/';
@@ -178,7 +179,7 @@ function createWindow(state, onTelegramLink, options = {}) {
         } catch (_) { return false; }
     });
 
-    const ASSET_TRANSFORMS = [injectTelegramWorkerProxy, injectTelegramExtendedPins, injectTelegramMediaCache, injectTelegramNotifications];
+    const ASSET_TRANSFORMS = [injectTelegramWorkerProxy, injectTelegramExtendedPins, injectTelegramMediaCache, injectTelegramForward, injectTelegramNotifications];
     function makeTelegramHandler(protocol) {
         return async (request) => {
             const url = request.url;
