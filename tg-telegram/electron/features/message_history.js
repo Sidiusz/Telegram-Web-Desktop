@@ -415,7 +415,10 @@
         if (existing) {
             markNodeDeleted(existing, rec);
             // Our copy sits among Telegram's rows; new messages can land on either side of it.
-            if (list && existing.classList.contains('_twd-deleted-clone_')) placeDeletedNode(list, existing, messageId);
+            if (list && existing.classList.contains('_twd-deleted-clone_')) {
+                placeDeletedNode(list, existing, messageId);
+                shieldFastList(existing.parentNode);
+            }
             return;
         }
         if (!list) return;
@@ -429,6 +432,22 @@
         if(!node)node=createDeletedNode(rec);
         prepareDeletedClone(node, rec);
         placeDeletedNode(list, node, messageId);
+        shieldFastList(node.parentNode);
+    }
+    // Teact fast lists (.message-date-group in private chats) insert at parent.childNodes[index];
+    // our copy shifted that index, so later messages landed one row too early.
+    var nativeChildNodes = Object.getOwnPropertyDescriptor(Node.prototype, 'childNodes').get;
+    function shieldFastList(parent) {
+        if (!parent || parent.__twdFastListShield) return;
+        parent.__twdFastListShield = true;
+        Object.defineProperty(parent, 'childNodes', {
+            configurable: true,
+            get: function () {
+                return Array.prototype.filter.call(nativeChildNodes.call(this), function (n) {
+                    return !(n.classList && n.classList.contains('_twd-deleted-clone_'));
+                });
+            },
+        });
     }
     // Keep a restored copy in message-id order. Appending it to the end of the container put it
     // outside Telegram's last sender group, so every newer message rendered above it and the

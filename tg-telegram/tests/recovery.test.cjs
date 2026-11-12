@@ -307,6 +307,20 @@ test('a restored deleted message stays in id order while newer messages arrive',
     assert.equal(moves, 0, 'adjacent deleted copies do not reorder each other forever');
 });
 
+test('a restored deleted copy does not shift Telegram fast-list inserts in private chats', () => {
+    const source = fs.readFileSync(path.join(__dirname, '../electron/features/message_history.js'), 'utf8');
+    const row = (id, clone) => ({ id, classList: { contains: c => !!clone && c === '_twd-deleted-clone_' } });
+    const nodes = [row(1), row(2, true), row(3)];
+    const parent = { __nodes: nodes };
+    const nativeChildNodes = function () { return this.__nodes; };
+    const shieldFastList = new Function('nativeChildNodes', extractFunctions(source, ['shieldFastList']) + '\nreturn shieldFastList;')(nativeChildNodes);
+    shieldFastList(parent);
+    // Teact appends the next virtual child (index 2) before parent.childNodes[2].
+    assert.equal(parent.childNodes[2], undefined, 'a new last message is appended, not put before the last one');
+    assert.deepEqual(Array.from(parent.childNodes, n => n.id), [1, 3]);
+    assert.match(source, /placeDeletedNode\(list, node, messageId\);\n\s*shieldFastList\(node\.parentNode\);/);
+});
+
 test('own deleted messages vanish unless the user keeps them', () => {
     const source = fs.readFileSync(path.join(__dirname, '../electron/features/message_history.js'), 'utf8');
     const make = cfg => new Function('cfg', extractFunctions(source, ['ownDeletedDropped', 'showEnabledFor', 'recordShouldShow', 'saveEnabledFor']) +
