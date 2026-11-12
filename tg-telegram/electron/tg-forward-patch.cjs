@@ -5,7 +5,7 @@ const FORWARD_MARKER = 'forwardToMultipleChats';
 
 // The share picker opens the chat when exactly one recipient is selected, but sends in place for
 // two or more. Route a single recipient through the same in-place send (Saved Messages keeps its own path).
-const SINGLE_RE = /if\(([\w$]+)\.length===1\)\{let\{peerId:([\w$]+),topicId:([\w$]+)\}=\1\[0\];if\(\2===([\w$]+)\)\{([\w$]+)\(\);return\}[\w$]+\(\{chatId:\2,topicId:\3\}\);return\}/;
+const SINGLE_RE = /if\(([\w$]+)\.length===1\)\{let\{peerId:([\w$]+),topicId:([\w$]+)\}=\1\[0\];if\(\2===([\w$]+)\)\{([\w$]+)\(\);return\}[\w$]+\(\{chatId:\2,topicId:\3\}\)(?:;return\}|\}else )/;
 
 function patchTelegramForward(body) {
     const source = String(body || '');

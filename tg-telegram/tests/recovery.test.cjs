@@ -330,6 +330,11 @@ test('forwarding to one chat sends in place like forwarding to several', () => {
     assert.match(patched.body, /if\(C\.length===1&&C\[0\]\.peerId===t\)\{F\(\);return\}if\(ee\.totalStars/);
     assert.doesNotMatch(patched.body, /c\(\{chatId:e/);
     assert.equal(patchTelegramForward(patched.body).patched, false, 'an already patched chunk is left alone');
+    const live = 'let d=forwardToMultipleChats;pe=Z(()=>{if(k.length){if(k.length===1){let{peerId:e,topicId:n}=k[0];if(e===t){se();return}' +
+        'd({chatId:e,topicId:n})}else if(ie.totalStars>0&&!c)P();else{he()}}});';
+    assert.equal(patchTelegramForward(live).body,
+        'let d=forwardToMultipleChats;pe=Z(()=>{if(k.length){if(k.length===1&&k[0].peerId===t){se();return}if(ie.totalStars>0&&!c)P();else{he()}}});',
+        'the current Web A build (if/else shape) is patched too');
     const win = fs.readFileSync(path.join(__dirname, '../electron/window.cjs'), 'utf8');
     assert.match(win, /ASSET_TRANSFORMS = \[[^\]]*injectTelegramForward/);
 });
