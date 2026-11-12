@@ -1,7 +1,7 @@
 'use strict';
 const { transformedJsResponse } = require('./tg-bundle-patch.cjs');
-// Web A moved the notification module from the lock chunk to useMultiaccountInfo; accept both.
-const NOTIFY_CHUNK_RE = /\/assets\/(?:lock|useMultiaccountInfo)-[^/]+\.js$/i;
+// Web A keeps moving the notification module between chunks; accept every known home.
+const NOTIFY_CHUNK_RE = /\/assets\/(?:lock|useMultiaccountInfo|index)-[^/]+\.js$/i;
 const NOTIFY_MARKER = 'showMessageNotification';
 const ICON_WAIT_MS = 1500;
 
@@ -26,23 +26,26 @@ function patchTelegramNotifications(body) {
     if (fnStart < 0 || at - fnStart > 4000) return none;
     let segment = source.slice(fnStart, at);
 
-    const icon = /let ([A-Za-z_$][\w$]*)=await ([A-Za-z_$][\w$]*)\(([A-Za-z_$][\w$]*)\),\{title:/.exec(segment);
+    const icon = /let ([A-Za-z_$][\w$]*)=((?:[\w$]+\(\)\.passcode\.isScreenLocked\?void 0:)?)await ([A-Za-z_$][\w$]*)\(([A-Za-z_$][\w$]*)\),\{title:/.exec(segment);
     let iconPatched = false;
     if (icon) {
         segment = segment.slice(0, icon.index) +
-            `let ${icon[1]}=await __twdNotifyIcon(()=>${icon[2]}(${icon[3]})),{title:` +
+            `let ${icon[1]}=${icon[2]}await __twdNotifyIcon(()=>${icon[3]}(${icon[4]})),{title:` +
             segment.slice(icon.index + icon[0].length);
         iconPatched = true;
     }
 
     // Without an active service-worker controller Web A silently drops the notification.
-    const post = 'navigator.serviceWorker?.controller&&navigator.serviceWorker.controller.postMessage(';
-    const postAt = segment.lastIndexOf(post);
     let sinkPatched = false;
-    if (postAt >= 0 && segment.length - postAt <= post.length + 2) {
+    for (const post of ['navigator.serviceWorker?.controller&&navigator.serviceWorker.controller.postMessage(', 'navigator.serviceWorker.controller?.postMessage(']) {
+        const postAt = segment.lastIndexOf(post);
+        if (postAt < 0 || segment.length - postAt > post.length + 2) continue;
         segment = segment.slice(0, postAt) + '__twdNotifySink(' + segment.slice(postAt + post.length);
         sinkPatched = true;
+        break;
     }
+    // Newer builds return before the send when there is no controller; the sink handles that case.
+    if (sinkPatched) segment = segment.replace(/if\([\w$]+&&!navigator\.serviceWorker\?\.controller\)return;/, '');
     // Web A returns silently while its cached hasWebNotifications flag is false. A failed push
     // subscription or a stale account state flips it at any moment, so the notify gate must not
     // depend on it: the desktop popup_notifications setting owns enablement.

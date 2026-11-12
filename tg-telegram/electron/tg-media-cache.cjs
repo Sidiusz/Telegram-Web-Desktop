@@ -1,6 +1,6 @@
 const { transformedJsResponse } = require('./tg-bundle-patch.cjs');
 // Web A moved its media loader from the Checkbox chunk to the Transition chunk; accept both.
-const MEDIA_CHUNK_RE = /\/assets\/(?:Checkbox|Transition)-[^/]+\.js$/i;
+const MEDIA_CHUNK_RE = /\/assets\/(?:Checkbox|Transition|InputText)-[^/]+\.js$/i;
 const MEDIA_MARKER = 'Failed to fetch media';
 
 function escapeRegex(value) {

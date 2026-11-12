@@ -1545,9 +1545,26 @@ test('Telegram media cache patch evicts only unreferenced blob URLs and keeps di
 
     const win = read('electron/window.cjs');
     assert.match(win, /injectTelegramMediaCache/);
-    assert.match(win, /WEB_ASSET_PATCH_REVISION = 'media-notif-fwd-v11'/);
+    assert.match(win, /WEB_ASSET_PATCH_REVISION = 'media-notif-fwd-v12'/);
     assert.match(win, /clearStorageData\(\{ origin: 'https:\/\/web\.telegram\.org', storages: \['cachestorage'\] \}\)/);
     assert.doesNotMatch(win, /storages: \[[^\]]*(?:cookies|indexdb|localstorage)/);
+});
+
+test('Telegram notification and media patches follow the November Web A build', () => {
+    const { patchTelegramNotifications } = require('../electron/tg-notification-patch.cjs');
+    const sample = 'function L(){return globalThis.state}function B(){return globalThis.actions}function j(){return{hasWebNotifications:!0}}' +
+        'async function Iu({chat:e,message:t,isReaction:n=!1}){let r=L(),{hasWebNotifications:i}=j(r);if(!i)return;let l=xu();' +
+        'if(l&&!navigator.serviceWorker?.controller)return;let d=L().passcode.isScreenLocked?void 0:await Nu(e),{title:f,body:p}=Mu(e,t),' +
+        'm=l?await Fl().catch(()=>void 0):void 0;if(m)navigator.serviceWorker.controller?.postMessage({type:`showMessageNotification`,' +
+        'payload:{title:f,body:p,icon:d}});else{let r=B(),i={body:p,icon:d,badge:d,tag:String(t.id)};new Notification(f,i)}}export{Iu as t};';
+    const patched = patchTelegramNotifications(sample);
+    assert.deepEqual({ ...patched, body: undefined }, { body: undefined, iconPatched: true, sinkPatched: true, gatePatched: true, runtimeExposed: true });
+    assert.match(patched.body, /let d=L\(\)\.passcode\.isScreenLocked\?void 0:await __twdNotifyIcon\(\(\)=>Nu\(e\)\)/);
+    assert.match(patched.body, /if\(m\)__twdNotifySink\(\{type:`showMessageNotification`/);
+    assert.doesNotMatch(patched.body, /!navigator\.serviceWorker\?\.controller\)return/, 'a missing SW controller no longer drops the notification');
+    assert.equal(patchTelegramNotifications(patched.body).body, patched.body);
+    assert.match(read('electron/tg-notification-patch.cjs'), /\(\?:lock\|useMultiaccountInfo\|index\)/);
+    assert.match(read('electron/tg-media-cache.cjs'), /\(\?:Checkbox\|Transition\|InputText\)/);
 });
 
 test('Telegram notifications are not held hostage by avatar downloads or a missing SW controller', async () => {
