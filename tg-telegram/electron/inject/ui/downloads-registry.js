@@ -74,13 +74,21 @@ const DL = window.__tgdl = (function(){
         registry[mid] = Object.assign(prev, {mid, peer, filename, status:'pending', pendingAt});
         applyToMessage(mid);
         // No will-download followed (text selection, preview): drop the spinner instead of blocking the file.
-        setTimeout(function(){
-            const r = registry[mid];
-            if(!r || r.status!=='pending' || r.pendingAt!==pendingAt) return;
-            delete registry[mid];
-            if(pending[filename]) pending[filename] = pending[filename].filter(function(x){ return x!==mid; });
-            unpaint(mid);
-        }, 15000);
+        // Telegram hands a big file over only when it is fully loaded, so wait while its own progress is shown.
+        (function check(){
+            setTimeout(function(){
+                const r = registry[mid];
+                if(!r || r.status!=='pending' || r.pendingAt!==pendingAt) return;
+                if(telegramStillLoading(mid)) { check(); return; }
+                delete registry[mid];
+                if(pending[filename]) pending[filename] = pending[filename].filter(function(x){ return x!==mid; });
+                unpaint(mid);
+            }, 15000);
+        })();
+    }
+    function telegramStillLoading(mid){
+        const msg = document.querySelector('#MiddleColumn .Message[data-message-id="'+mid+'"]');
+        return !!(msg && msg.querySelector('.File .file-progress .ProgressSpinner'));
     }
 
     // Main шлёт download-event. Связываем filename→mid.

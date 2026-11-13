@@ -2216,3 +2216,9 @@ test('app log mirrors the console to logs/main.log and keeps recent proxy lines 
     assert.match(read('electron/preload.js'), /'open_logs_folder'/);
     assert.match(read('electron/inject/ui/native-panels.js'), /INV\('open_logs_folder'\)/);
 });
+
+test('the download spinner stays while Telegram is still loading a big file into memory', () => {
+    const registry = read('electron/inject/ui/downloads-registry.js');
+    assert.match(registry, /if\(telegramStillLoading\(mid\)\) \{ check\(\); return; \}/);
+    assert.match(registry, /function telegramStillLoading\(mid\)\{[\s\S]*?\.File \.file-progress \.ProgressSpinner/);
+});
