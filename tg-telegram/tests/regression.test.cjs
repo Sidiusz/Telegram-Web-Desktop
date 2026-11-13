@@ -2226,3 +2226,41 @@ test('the download spinner stays while Telegram is still loading a big file into
 test('only one download indicator shows while Telegram draws its own progress ring', () => {
     assert.match(read('electron/inject/ui/core.js'), /\.File:has\(\.file-progress \.ProgressSpinner\) \._tgdl_spinner_\{display:none;\}/);
 });
+
+test('moving to a shorter screen keeps the chat at the bottom and refreshes Web A scroll offset', () => {
+    const src = read('electron/inject/ui/bootstrap.js');
+    const start = src.indexOf('(function syncScrollOffsetOnResize(){');
+    const block = src.slice(start, src.indexOf('    bind();\n})();\n', start) + '    bind();\n})();\n'.length);
+    let roCallback = null;
+    const scrolls = [];
+    const list = {
+        scrollHeight: 5000, scrollTop: 4123, clientHeight: 877,
+        dispatchEvent(ev) { scrolls.push(ev.type); },
+    };
+    const listeners = {};
+    const context = {
+        WeakMap, WeakSet,
+        Event: class { constructor(type) { this.type = type; } },
+        ResizeObserver: class { constructor(cb) { roCallback = cb; } observe() {} },
+        MutationObserver: class { observe() {} },
+        requestAnimationFrame: fn => fn(),
+        document: {
+            documentElement: {},
+            addEventListener: (name, fn) => { listeners[name] = fn; },
+            querySelectorAll: () => [list],
+        },
+    };
+    vm.createContext(context);
+    vm.runInContext(block, context);
+    list.clientHeight = 697;
+    roCallback([{ target: list }]);
+    assert.equal(list.scrollTop, 5000 - 697, 'a chat that was at the bottom stays at the bottom');
+
+    listeners.scroll({ target: list });
+    list.scrollTop = 3000;
+    listeners.scroll({ target: list });
+    list.clientHeight = 877;
+    roCallback([{ target: list }]);
+    assert.equal(list.scrollTop, 3000, 'a chat scrolled up into history is not moved');
+    assert.deepEqual(scrolls, ['scroll'], 'Web A is told to re-read its offset');
+});
