@@ -71,6 +71,8 @@ html._tgreading_ .bubble.menu-container.shown{opacity:0 !important;pointer-event
 .File._tgdl_downloading_ .file-icon-container{position:relative;}
 ._tgdl_spinner_{position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);width:18px;height:18px;border:2px solid rgba(255,255,255,.25);border-top-color:#fff;border-radius:50%;animation:_tgdlSpin_ .7s linear infinite;pointer-events:none;z-index:2;}
 @keyframes _tgdlSpin_{to{transform:translate(-50%,-50%) rotate(360deg)}}
+/* Telegram shows its own progress ring while it loads the file; one indicator is enough. */
+.File:has(.file-progress .ProgressSpinner) ._tgdl_spinner_{display:none;}
 /* Просмотрщик медиа: зелёная галочка «скачано» на кнопке загрузки (как в чатах).
    У кнопки круглая маска (overflow:hidden под ripple) — она резала бейдж; снимаем
    обрезку только у кнопки с нашим бейджем, чтобы галочка была видна целиком. */

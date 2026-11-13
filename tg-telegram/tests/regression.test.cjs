@@ -2222,3 +2222,7 @@ test('the download spinner stays while Telegram is still loading a big file into
     assert.match(registry, /if\(telegramStillLoading\(mid\)\) \{ check\(\); return; \}/);
     assert.match(registry, /function telegramStillLoading\(mid\)\{[\s\S]*?\.File \.file-progress \.ProgressSpinner/);
 });
+
+test('only one download indicator shows while Telegram draws its own progress ring', () => {
+    assert.match(read('electron/inject/ui/core.js'), /\.File:has\(\.file-progress \.ProgressSpinner\) \._tgdl_spinner_\{display:none;\}/);
+});
