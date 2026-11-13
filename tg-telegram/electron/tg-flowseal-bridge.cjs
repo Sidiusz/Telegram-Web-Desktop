@@ -1,6 +1,7 @@
 'use strict';
 
 const http = require('http');
+const { createClientLoopWatch } = require('./tg-client-loop-watch.cjs');
 const crypto = require('crypto');
 const { WebSocketServer, WebSocket } = require('ws');
 const {
@@ -210,6 +211,15 @@ function closePeer(ws, code = 1011, reason = 'bridge closed') {
     } catch (_) {}
 }
 
+let clientLoopHandler = null;
+const clientLoopWatch = createClientLoopWatch({
+    onLoop: () => {
+        console.warn('[TG-PROXY-BRIDGE] Telegram keeps dropping its main connection every ~30 s; reloading Telegram');
+        if (clientLoopHandler) clientLoopHandler();
+    },
+});
+function setClientLoopHandler(fn) { clientLoopHandler = typeof fn === 'function' ? fn : null; }
+
 function handleLocalConnection(local, request) {
     const u = new URL(request.url, 'ws://127.0.0.1');
     const dc = Number(u.searchParams.get('dc'));
@@ -406,6 +416,7 @@ function handleLocalConnection(local, request) {
             console.log(`[TG-PROXY-BRIDGE] DC${dc}${media ? ' media' : ''} via ${upstreamCandidate.domain} closed by ${closedBy || `client (${code})`} after ${secs}s: ` +
                 `up ${formatBytes(traffic.upBytes)}/${traffic.upFrames}, down ${formatBytes(traffic.downBytes)}/${traffic.downFrames} (max ${formatBytes(traffic.maxDown)})`);
         }
+        if (!closed && !media) clientLoopWatch.noteMainClose({ lifetimeMs: Date.now() - traffic.openedAt, byClient: !closedBy && code === 1005 });
         closed = true;
         if (upstream) {
             try { upstream.close(1000, 'local closed'); } catch (_) {}
@@ -479,4 +490,4 @@ async function stopEmbeddedFlowsealBridge() {
     }
 }
 
-module.exports = { startEmbeddedFlowsealBridge, stopEmbeddedFlowsealBridge, resetUpstreamHealth };
+module.exports = { startEmbeddedFlowsealBridge, stopEmbeddedFlowsealBridge, resetUpstreamHealth, setClientLoopHandler };

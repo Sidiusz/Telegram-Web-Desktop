@@ -32,7 +32,7 @@ console.log(`[TWD-LOG] Telegram Web Desktop ${app.getVersion()}`);
 const { createWindow, getWindow } = require('./electron/window.cjs');
 const { createTray } = require('./electron/tray.cjs');
 const { initState, getState, registerIpc } = require('./electron/ipc.cjs');
-const { startEmbeddedFlowsealBridge, stopEmbeddedFlowsealBridge, resetUpstreamHealth } = require('./electron/tg-flowseal-bridge.cjs');
+const { startEmbeddedFlowsealBridge, stopEmbeddedFlowsealBridge, resetUpstreamHealth, setClientLoopHandler } = require('./electron/tg-flowseal-bridge.cjs');
 const { reconnectAfterWake } = require('./electron/tg-flowseal-route.cjs');
 const { normalizeToTg, getTgUrlFromArgs } = require('./electron/deep-links.cjs');
 
@@ -134,6 +134,10 @@ app.whenReady().then(async () => {
         { startHidden: initialAutostart }
     );
     createTray(getWindow);
+    setClientLoopHandler(() => {
+        const win = getWindow();
+        if (win && !win.isDestroyed()) win.webContents.reload();
+    });
 
     Menu.setApplicationMenu(null);
 

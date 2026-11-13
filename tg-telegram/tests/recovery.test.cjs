@@ -579,3 +579,26 @@ test('waking from sleep reconnects relayed sockets and forgets failures from the
     health.clearCooldowns();
     assert.equal(health.isCooling('a.example'), false);
 });
+
+test('a Telegram client stuck reopening its main connection every ~30 s is reloaded', () => {
+    const { createClientLoopWatch, LOOP_THRESHOLD } = require('../electron/tg-client-loop-watch.cjs');
+    let t = 0, reloads = 0;
+    const watch = createClientLoopWatch({ now: () => t, onLoop: () => reloads++ });
+    const short = { lifetimeMs: 30900, byClient: true };
+    for (let i = 0; i < LOOP_THRESHOLD - 1; i++) { t += 31000; watch.noteMainClose(short); }
+    assert.equal(reloads, 0);
+    watch.noteMainClose({ lifetimeMs: 8402000, byClient: true });
+    for (let i = 0; i < LOOP_THRESHOLD - 1; i++) { t += 31000; watch.noteMainClose(short); }
+    assert.equal(reloads, 0, 'a healthy long session resets the streak');
+    t += 31000; watch.noteMainClose(short);
+    assert.equal(reloads, 1);
+    for (let i = 0; i < LOOP_THRESHOLD; i++) { t += 31000; watch.noteMainClose(short); }
+    assert.equal(reloads, 1, 'no reload storm within the cooldown');
+    for (let i = 0; i < LOOP_THRESHOLD * 3; i++) { t += 31000; watch.noteMainClose({ lifetimeMs: 30900, byClient: false }); }
+    assert.equal(reloads, 1, 'closes made by the bridge or a route change do not count');
+
+    const bridge = fs.readFileSync(path.join(__dirname, '../electron/tg-flowseal-bridge.cjs'), 'utf8');
+    assert.match(bridge, /if \(!closed && !media\) clientLoopWatch\.noteMainClose\(\{ lifetimeMs: Date\.now\(\) - traffic\.openedAt, byClient: !closedBy && code === 1005 \}\)/);
+    const main = fs.readFileSync(path.join(__dirname, '../main.cjs'), 'utf8');
+    assert.match(main, /setClientLoopHandler\(\(\) => \{[\s\S]*?webContents\.reload\(\)/);
+});
