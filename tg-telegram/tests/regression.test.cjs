@@ -2264,3 +2264,10 @@ test('moving to a shorter screen keeps the chat at the bottom and refreshes Web 
     assert.equal(list.scrollTop, 3000, 'a chat scrolled up into history is not moved');
     assert.deepEqual(scrolls, ['scroll'], 'Web A is told to re-read its offset');
 });
+
+test('chat avatars follow Telegram renaming its avatar image class', () => {
+    const common = read('electron/features/desktop_like_common.js');
+    assert.equal((common.match(/img:is\(\.Avatar__media,\.avatar-media\)/g) || []).length, 3);
+    assert.doesNotMatch(common, /img\.Avatar__media'/);
+    assert.match(read('electron/inject/ui/bootstrap.js'), /:not\(\.Avatar__media\):not\(\.avatar-media\)/);
+});

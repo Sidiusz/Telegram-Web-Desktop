@@ -328,7 +328,7 @@ document.addEventListener('contextmenu', function(e) {
     if (!activeSlide) return;
 
     const img = activeSlide.querySelector(
-        'img:not([class*="sticker"]):not(.Avatar__media)'
+        'img:not([class*="sticker"]):not(.Avatar__media):not(.avatar-media)'
     );
     const hasVideo = !!activeSlide.querySelector('video');
     const dlId = (window.__tgdl && window.__tgdl.viewerDownloadId) ? window.__tgdl.viewerDownloadId() : null;
@@ -827,7 +827,7 @@ window.__tgMarkAllRead=function(){
             var link=rows[i].querySelector('a[href^="#"]');
             var chatId=link&&String(link.getAttribute('href')||'').replace(/^#/, '');
             if((chatId&&chatId===want)||(av&&av.getAttribute('data-peer-id')===want)){
-                var img=av&&av.querySelector('img.Avatar__media, img');
+                var img=av&&av.querySelector('img.Avatar__media, img.avatar-media, img');
                 return img&&img.src?img.src:'';
             }
         }

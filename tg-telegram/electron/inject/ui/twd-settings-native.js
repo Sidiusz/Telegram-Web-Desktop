@@ -106,7 +106,7 @@ function _twdPrivacyDomPeer(id){
     var h=document.querySelector('#MiddleColumn .MiddleHeader .Avatar[data-peer-id]');
     var host=row||(h&&String(h.getAttribute('data-peer-id')||'')===id?h.closest('.MiddleHeader'):null);
     if(!host)return null;
-    var av=host.querySelector('.Avatar[data-peer-id]'),img=av&&av.querySelector('img.Avatar__media,img');
+    var av=host.querySelector('.Avatar[data-peer-id]'),img=av&&av.querySelector('img.Avatar__media,img.avatar-media,img');
     var title=host.querySelector('.title,.fullName');
     return{name:(title&&title.textContent||'').trim(),avatar:img&&img.src||''};
 }

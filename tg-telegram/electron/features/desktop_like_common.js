@@ -30,11 +30,11 @@
         var now = Date.now();
         if (_myAvatar.src && _myAvatar.expires > now) return _myAvatar.src;
         if (_myAvatar.expires && _myAvatar.expires <= now) { _myAvatar.src = ''; _myAvatar.expires = 0; _mySrcMenu = ''; }
-        var profileImg = document.querySelector('#Settings .ProfileInfo .Avatar[data-peer-id] img.Avatar__media');
+        var profileImg = document.querySelector('#Settings .ProfileInfo .Avatar[data-peer-id] img:is(.Avatar__media,.avatar-media)');
         if (profileImg && profileImg.src && profileImg.src.startsWith('blob:')) { _myAvatar.src = profileImg.src; _myAvatar.expires = now + MY_TTL_MS; return _myAvatar.src; }
         var pid = findMyPeerId();
         if (pid) {
-            var any = document.querySelector('.Avatar[data-peer-id="' + pid + '"] img.Avatar__media');
+            var any = document.querySelector('.Avatar[data-peer-id="' + pid + '"] img:is(.Avatar__media,.avatar-media)');
             if (any && any.src && any.src.startsWith('blob:')) { _myAvatar.src = any.src; _myAvatar.expires = now + MY_TTL_MS; return _myAvatar.src; }
         }
         if (!_mySrcMenu) {
@@ -47,13 +47,14 @@
     function findPartnerSrc(peerId) {
         if (!peerId) return '';
         var now = Date.now(), entry = _partnerCache[peerId];
-        if (entry && entry.expires > now) return entry.src;
-        if (entry) delete _partnerCache[peerId];
-        var img = document.querySelector('.MiddleHeader .ChatInfo .Avatar[data-peer-id="' + peerId + '"] img.Avatar__media');
+        // Prefer the header's current picture: Telegram revokes a replaced avatar's blob URL.
+        var img = document.querySelector('.MiddleHeader .ChatInfo .Avatar[data-peer-id="' + peerId + '"] img:is(.Avatar__media,.avatar-media)');
         if (img && img.src && (img.src.startsWith('blob:') || img.src.startsWith('data:'))) {
             _partnerCache[peerId] = { src: img.src, expires: now + PARTNER_TTL_MS };
             return img.src;
         }
+        if (entry && entry.expires > now) return entry.src;
+        if (entry) delete _partnerCache[peerId];
         return '';
     }
     function _inject(msg, src) {
