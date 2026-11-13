@@ -602,3 +602,33 @@ test('a Telegram client stuck reopening its main connection every ~30 s is reloa
     const main = fs.readFileSync(path.join(__dirname, '../main.cjs'), 'utf8');
     assert.match(main, /setClientLoopHandler\(\(\) => \{[\s\S]*?webContents\.reload\(\)/);
 });
+
+test('the worker names the code path when Telegram drops its main socket within a minute', () => {
+    let now = 0;
+    const warnings = [];
+    class Socket extends EventEmitter {
+        constructor(url) { super(); this.url = url; this.closed = []; }
+        addEventListener(name, fn) { this.on(name, fn); }
+        close(code) { this.closed.push(code); this.emit('close'); }
+    }
+    const context = { WebSocket: Socket, URL, URLSearchParams, Error, console: { log() {}, warn: m => warnings.push(m) },
+        Date: { now: () => now }, setInterval() {}, clearInterval() {} };
+    vm.createContext(context);
+    vm.runInContext(read('tg-flowseal-relay-runtime.js')
+        .replace('__TWD_PROXY_BOOTSTRAP__', JSON.stringify({ active: true, bridgePort: 1234, bridgeToken: 'test' }))
+        .replace('__TWD_PROXY_CHANNEL__', '"test"'), context);
+    const main = new context.WebSocket('wss://zws2.web.telegram.org/apiws');
+    now = 30900;
+    (function gramjsDisconnect() { main.close(); })();
+    assert.deepEqual(main.closed, [undefined], 'the original close still runs');
+    assert.equal(warnings.length, 1);
+    assert.match(warnings[0], /Telegram closed DC2 main socket after 30\.9s: .*gramjsDisconnect/);
+    const again = new context.WebSocket('wss://zws2.web.telegram.org/apiws');
+    now += 31000; again.close();
+    assert.equal(warnings.length, 1, 'repeats are throttled');
+    const media = new context.WebSocket('wss://zws2-1.web.telegram.org/apiws');
+    now += 10 * 60 * 1000; media.close();
+    const routed = new context.WebSocket('wss://zws2.web.telegram.org/apiws');
+    routed.close(4001, 'proxy-route-changed');
+    assert.equal(warnings.length, 1, 'media sockets and our own coded closes are not traced');
+});

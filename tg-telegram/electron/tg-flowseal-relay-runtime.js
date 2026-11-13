@@ -223,9 +223,35 @@
                 if (mediaSockets.has(ws)) mediaSockets.set(ws, now);
             });
             ws.addEventListener('close', () => { live.delete(ws); mediaSockets.delete(ws); }, { once: true });
+            if (!info.media) traceMainClose(ws, info.id);
         } catch (_) {}
         return ws;
     }
+    // Diagnostics for Web A dropping its main socket every ~30 s: name the code path that closes it.
+    let lastCloseTraceAt = -Infinity;
+    function traceMainClose(ws, dc) {
+        const openedAt = Date.now();
+        const nativeClose = ws.close;
+        ws.close = function (...args) {
+            const lived = Date.now() - openedAt;
+            if (!args.length && lived < 60000 && Date.now() - lastCloseTraceAt > 5 * 60 * 1000) {
+                lastCloseTraceAt = Date.now();
+                const stack = String(new Error().stack || '').split('\n').slice(2, 14).map(s => s.trim()).join(' <- ');
+                console.warn(`[TG-PROXY-WORKER] Telegram closed DC${dc} main socket after ${(lived / 1000).toFixed(1)}s: ${stack}`);
+            }
+            return nativeClose.apply(this, args);
+        };
+    }
+    try {
+        let lastNetLogAt = 0;
+        const netLog = state => () => {
+            if (Date.now() - lastNetLogAt < 60000) return;
+            lastNetLogAt = Date.now();
+            console.warn(`[TG-PROXY-WORKER] worker saw the network go ${state}`);
+        };
+        self.addEventListener('offline', netLog('offline'));
+        self.addEventListener('online', netLog('online'));
+    } catch (_) {}
 
     const NativeWebSocket = globalThis.WebSocket;
     if (typeof NativeWebSocket === 'function') {
