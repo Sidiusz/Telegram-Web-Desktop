@@ -1545,7 +1545,7 @@ test('Telegram media cache patch evicts only unreferenced blob URLs and keeps di
 
     const win = read('electron/window.cjs');
     assert.match(win, /injectTelegramMediaCache/);
-    assert.match(win, /WEB_ASSET_PATCH_REVISION = 'media-notif-fwd-v12'/);
+    assert.match(win, /WEB_ASSET_PATCH_REVISION = 'composer-v13'/);
     assert.match(win, /clearStorageData\(\{ origin: 'https:\/\/web\.telegram\.org', storages: \['cachestorage'\] \}\)/);
     assert.doesNotMatch(win, /storages: \[[^\]]*(?:cookies|indexdb|localstorage)/);
 });
@@ -1627,10 +1627,46 @@ test('inline media load/cancel buttons never open a save-to-disk download card',
     assert.ok(exclusion > 0 && exclusion < trigger.indexOf('.icon-download'), 'media exclusion runs before icon matching');
 });
 
-test('desktop layouts keep Telegram composer wrap whenever a reply/edit/forward bar exists', () => {
+test('desktop layouts keep Telegram composer wrap for an embedded message or link preview', () => {
     const base = read('electron/features/desktop_like_base.js');
-    assert.match(base, /\.Composer:not\(\.with-embedded\):not\(:has\(\.ComposerEmbeddedMessage\)\) \{\s*flex-wrap: nowrap !important;/);
-    assert.doesNotMatch(base, /\.Composer:not\(\.with-embedded\) \{/);
+    assert.match(base, /\.Composer:not\(\.with-embedded\):not\(:has\(\.ComposerEmbeddedMessage, \.twd-composer-link-preview\)\) \{\s*flex-wrap: nowrap !important;/);
+});
+
+test('composing an edit uses the caption limit and preserves oversized captions for correction', () => {
+    const { patchTelegramComposer } = require('../electron/tg-composer-patch.cjs');
+    const source = [
+        'const markers=[`RemoveRichFormattingTitle`,`ComposerEmbeddedMessage`];',
+        'function isMedia(message){return Boolean(message.content.photo||message.content.video)}',
+        'function submit(t,n,valid,send,clear){n&&(!t&&!isMedia(n)?null:(!t||valid(t))&&(send({messageList:n,text:t}),clear()))}',
+        'function input({editingMessage:m,chatId:id,isCurrentUserPremium:p,captionLimit:limit,maxMessageLength:max}){',
+        'let hasText=true,plain=true,over=true,richMax=32768,full=!!(hasText&&(!plain||p&&over));',
+        'return {isRichOnlyContent:full,maxLength:p||full?richMax:max}}',
+        '({submit,input});',
+    ].join('');
+    const { submit, input } = vm.runInNewContext(patchTelegramComposer(source));
+    const photo = { content: { photo: {} } };
+    const link = { content: { webPage: {} } };
+    const limits = { captionLimit: 1024, maxMessageLength: 4096 };
+    const valid = (text, hasCaption = false) => text.length <= (hasCaption ? limits.captionLimit : limits.maxMessageLength);
+    let saved;
+    let draft;
+    const edit = (message, length) => {
+        saved = undefined;
+        draft = 'x'.repeat(length);
+        submit(draft, message, valid, ({ text }) => { saved = text; }, () => { draft = ''; });
+    };
+
+    assert.equal(input({ ...limits, editingMessage: photo }).maxLength, 1024);
+    assert.equal(input({ ...limits, editingMessage: photo, isCurrentUserPremium: true }).isRichOnlyContent, false);
+    assert.equal(input({ ...limits, editingMessage: link }).maxLength, 4096);
+    edit(photo, 1025);
+    assert.equal(saved, undefined);
+    assert.equal(draft.length, 1025);
+    edit(photo, 1024);
+    assert.equal(saved.length, 1024);
+    assert.equal(draft, '');
+    edit(link, 1025);
+    assert.equal(saved.length, 1025);
 });
 
 test('downloads never share a target path, never delete foreign files, and carry Mark-of-the-Web', () => {

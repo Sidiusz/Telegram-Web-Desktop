@@ -19,6 +19,7 @@ const { injectTelegramExtendedPins, injectExtendedPinsPrelude } = require('./tg-
 const { injectTelegramMediaCache } = require('./tg-media-cache.cjs');
 const { injectTelegramNotifications } = require('./tg-notification-patch.cjs');
 const { injectTelegramForward } = require('./tg-forward-patch.cjs');
+const { injectTelegramComposer } = require('./tg-composer-patch.cjs');
 const { injectStartupSplash } = require('./startup-splash.cjs');
 
 const TG_URL = 'https://web.telegram.org/a/';
@@ -42,7 +43,7 @@ function startupBackground(theme) {
     return theme === 'light' ? '#ffffff' : '#212121';
 }
 
-const WEB_ASSET_PATCH_REVISION = 'media-notif-fwd-v12';
+const WEB_ASSET_PATCH_REVISION = 'composer-v13';
 async function refreshPatchedTelegramAssetCache(ses) {
     const marker = path.join(app.getPath('userData'), '.twd-web-assets-revision');
     try {
@@ -179,7 +180,7 @@ function createWindow(state, onTelegramLink, options = {}) {
         } catch (_) { return false; }
     });
 
-    const ASSET_TRANSFORMS = [injectTelegramWorkerProxy, injectTelegramExtendedPins, injectTelegramMediaCache, injectTelegramForward, injectTelegramNotifications];
+    const ASSET_TRANSFORMS = [injectTelegramWorkerProxy, injectTelegramExtendedPins, injectTelegramMediaCache, injectTelegramForward, injectTelegramComposer, injectTelegramNotifications];
     function makeTelegramHandler(protocol) {
         return async (request) => {
             const url = request.url;

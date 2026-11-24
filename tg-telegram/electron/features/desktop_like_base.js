@@ -28,14 +28,11 @@
         }
         ._tg_right_open #MiddleColumn .middle-column-footer { transform: none !important; }
 
-        /* Reply/edit/forward bars are full-row flex children and need Telegram's native
-           wrap; forward mode does not set .with-embedded, so key off the bar itself. */
-        #MiddleColumn .Composer:not(.with-embedded):not(:has(.ComposerEmbeddedMessage)) {
+        /* Composer previews need Telegram's native wrapping to occupy a full row. */
+        #MiddleColumn .Composer:not(.with-embedded):not(:has(.ComposerEmbeddedMessage, .twd-composer-link-preview)) {
             flex-wrap: nowrap !important;
-            box-sizing: border-box !important;
         }
-        #MiddleColumn .Composer.with-embedded,
-        #MiddleColumn .Composer:has(.ComposerEmbeddedMessage) { box-sizing: border-box !important; }
+        #MiddleColumn .Composer { box-sizing: border-box !important; }
         #MiddleColumn .Composer .composer-wrapper { min-width: 0 !important; }
         #MiddleColumn .Composer #editable-message-text { min-width: 0 !important; }
 
