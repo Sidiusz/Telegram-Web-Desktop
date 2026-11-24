@@ -1545,7 +1545,7 @@ test('Telegram media cache patch evicts only unreferenced blob URLs and keeps di
 
     const win = read('electron/window.cjs');
     assert.match(win, /injectTelegramMediaCache/);
-    assert.match(win, /WEB_ASSET_PATCH_REVISION = 'composer-v13'/);
+    assert.match(win, /WEB_ASSET_PATCH_REVISION = 'viewer-download-v14'/);
     assert.match(win, /clearStorageData\(\{ origin: 'https:\/\/web\.telegram\.org', storages: \['cachestorage'\] \}\)/);
     assert.doesNotMatch(win, /storages: \[[^\]]*(?:cookies|indexdb|localstorage)/);
 });

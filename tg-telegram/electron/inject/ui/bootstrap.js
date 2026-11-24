@@ -336,9 +336,8 @@ document.addEventListener('contextmenu', function(e) {
     e.preventDefault();
     e.stopImmediatePropagation();
     if (!content.closest('.MediaViewerSlide--active') || target.closest('.MediaViewerFooter, .VideoPlayerControls')) return;
-    if (content.querySelector('.protector, .is-protected')) return;
-
     const isVideo = !!player || !!content.querySelector('.VideoPlayer, video');
+    if (!isVideo && content.querySelector('.protector, .is-protected')) return;
     const photo = !isVideo && image?.matches('.MediaViewerContent > img, .MediaViewerContent > div > img') &&
         !image.matches('.thumbnail, [class*="sticker"], .Avatar__media, .avatar-media');
     if (!isVideo && !photo) return;

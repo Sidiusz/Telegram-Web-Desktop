@@ -64,6 +64,7 @@ test('viewer context menus classify video posters and photos by the clicked medi
     };
     await clickMedia({ video: true });
     await clickMedia({ insidePlayer: true });
+    await clickMedia({ insidePlayer: true, protectedMedia: true });
     await clickMedia({ active: false });
     await clickMedia({ protectedMedia: true });
     await clickMedia({ photo: false });
@@ -71,9 +72,40 @@ test('viewer context menus classify video posters and photos by the clicked medi
     assert.deepEqual(menus, [
         ['Save video', 'separator', 'Open folder'],
         ['Save video', 'separator', 'Open folder'],
+        ['Save video', 'separator', 'Open folder'],
         ['Save image', 'Copy image', 'separator', 'Open folder'],
     ]);
-    assert.equal(clicks, 2, 'video saves use the active viewer download button');
+    assert.equal(clicks, 3, 'video saves use the active viewer download button');
+});
+
+test('viewer video downloads send the original media through Telegram on desktop and compact layouts', () => {
+    const { patchTelegramViewerDownload } = require('../electron/tg-viewer-download-patch.cjs');
+    const source = [
+        '(function toolbar({item:e,isVideo:n,isProtected:o,media:m,compact:t}){',
+        'let{downloadMedia:d,cancelMediaDownload:c}=actions,a=false,r=e?.message;',
+        'const click=()=>{m&&(a?c({media:m}):d({media:m,originMessage:r}))};',
+        'function option(){if(!(o||e?.type===`standalone`))return e?.type!==`sponsoredMessage`&&(n?{click}:{photo:true})}',
+        'if(t){let items=[];o||(n?items.push({click}):items.push({photo:true}));',
+        'return {className:`MediaViewerActions-mobile`,items}}return option()})',
+    ].join('');
+    const saved = [];
+    const patched = patchTelegramViewerDownload(source);
+    assert.equal(patchTelegramViewerDownload(patched), patched);
+    const actions = { downloadMedia: payload => saved.push(payload) };
+    const toolbar = vm.runInNewContext(patched, { actions });
+    const media = { id: 'video-file', size: 123456, mediaType: 'video' };
+    const message = { id: 4, noForwards: true };
+    const download = { item: { type: 'message', message }, isVideo: true, isProtected: true, media };
+    toolbar(download).click();
+    toolbar({ ...download, compact: true }).items[0].click();
+    toolbar({ ...download, item: { type: 'standalone' } }).click();
+    toolbar({ ...download, item: { type: 'sponsoredMessage' } }).click();
+    assert.equal(saved.length, 4);
+    assert.ok(saved.every(payload => payload.media === media));
+    assert.equal(saved[0].originMessage, message);
+    assert.equal(toolbar({ ...download, isVideo: false }), undefined);
+    assert.equal(toolbar({ ...download, isVideo: false, compact: true }).items.length, 0);
+    assert.equal(toolbar({ ...download, media: undefined }), undefined);
 });
 
 test('pending file RPC recovers a silent proxy socket even while another download progresses', async () => {
