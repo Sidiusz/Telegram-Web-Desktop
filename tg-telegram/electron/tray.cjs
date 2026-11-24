@@ -88,26 +88,19 @@ function buildMenu(count) {
     return Menu.buildFromTemplate(items);
 }
 
-// Electron does not rasterize SVG → nativeImage here, so the badge is drawn on a
-// canvas in the renderer and sent as a PNG data URL (createFromDataURL supports PNG).
-function setTrayImageFromDataURL(dataURL) {
-    if (!tray) return;
-    if (dataURL) {
-        try { const img = nativeImage.createFromDataURL(dataURL); if (!img.isEmpty()) tray.setImage(img); } catch (e) {}
-    } else {
-        tray.setImage(baseIcon);
-    }
-}
-
-function updateTrayBadge(count) {
+function updateTrayBadge(count, dataURL) {
+    if (!tray) return false;
+    const image = count > 0 ? nativeImage.createFromDataURL(dataURL || '') : baseIcon;
+    if (image.isEmpty()) return false;
+    tray.setImage(image);
     _lastCount = count;
-    if (!tray) return;
     tray.setToolTip(count > 0 ? ('Telegram Web Desktop (' + count + ')') : 'Telegram Web Desktop');
     tray.setContextMenu(buildMenu(count));
+    return true;
 }
 
 function getTrayBaseDataURL() {
     try { return baseIcon.isEmpty() ? null : baseIcon.toDataURL(); } catch (e) { return null; }
 }
 
-module.exports = { createTray, updateTrayBadge, setTrayLang, setTrayImageFromDataURL, getTrayBaseDataURL };
+module.exports = { createTray, updateTrayBadge, setTrayLang, getTrayBaseDataURL };

@@ -181,6 +181,10 @@
             align-self: flex-start !important;
             flex-direction: row !important;
         }
+        /* Telegram excludes adaptive reactions from intrinsic sizing. Use the media's resolved width. */
+        #MiddleColumn .Message .message-content-wrapper > .has-adaptive-width ~ .Reactions.is-outside {
+            width: 100% !important;
+        }
         #MiddleColumn.tgdl-private .MessageList.no-avatars .Message.own .message-action-buttons-container {
             left: auto !important;
             right: -3rem !important;

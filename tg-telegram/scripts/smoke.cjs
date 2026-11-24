@@ -211,6 +211,17 @@ async function telegramTarget(port) {
     })()`);
     assert.ok(composerLayout.plain > composerLayout.composer * 0.8, `plain composer input is full width: ${JSON.stringify(composerLayout)}`);
     assert.equal(composerLayout.withBar, composerLayout.plain, 'forward/reply bar must not shrink the input');
+    const reactions = await cdp.eval(`(()=>{
+      const message=document.createElement('div');message.className='Message';
+      message.innerHTML='<div class="message-content-wrapper"><div class="message-content media has-adaptive-width" style="width:255px;height:100px"></div>'
+        +'<div class="Reactions is-outside" style="display:flex;flex-wrap:wrap;contain:inline-size;gap:4px">'
+        +Array.from({length:12},()=>'<span style="flex:0 0 56px;height:28px"></span>').join('')+'</div></div>';
+      document.querySelector('#twd-smoke-chat #MiddleColumn').appendChild(message);
+      const media=message.querySelector('.media').getBoundingClientRect(),row=message.querySelector('.Reactions');
+      const rect=row.getBoundingClientRect(),chips=[...row.children].map(el=>el.getBoundingClientRect().top);
+      return {sameWidth:rect.width===media.width,below:rect.top>=media.bottom,rows:new Set(chips).size};
+    })()`);
+    assert.deepEqual(reactions, { sameWidth: true, below: true, rows: 3 }, 'outside reactions wrap across the adaptive media width');
     const inlineCards = await cdp.eval(`(async()=>{
       const count=()=>document.querySelectorAll('#_cnw_ .dl_card').length,before=count();
       for(const sel of ['#smoke-m11 .icon-download','#smoke-m11 .icon-close'])
@@ -353,6 +364,10 @@ async function telegramTarget(port) {
       assert.equal(privacyPreview.hasImage, false);
       assert.equal(Array.from(privacyPreview.avatar).length, 1);
     } finally { popupCdp.close(); }
+    await waitFor(async () => {
+      const list = await jsonGet(port, '/json/list');
+      return !list.some(x => x.id === popupTarget.id);
+    }, 10000, 'empty notification popup is released');
     await cdp.eval('window.tgBridge.invoke("show_notification",{title:"TWD smoke",body:"notification pipeline",peerId:"1"}).then(()=>true)');
     // Same entry point the patched Web A notifier uses when no service-worker controller exists.
     await cdp.eval('window.__twdConsumeSwNotification({type:"showMessageNotification",payload:{title:"TWD sink",body:"no controller path",chatId:"1",messageId:"99"}})');
@@ -360,12 +375,22 @@ async function telegramTarget(port) {
       const list = await jsonGet(port, '/json/list');
       const target = list.find(x => x.type === 'page' && /^data:text\/html/.test(x.url));
       if (!target) return null;
+      assert.notEqual(target.id, popupTarget.id, 'the post-idle notification uses a fresh window');
       const c = new Cdp(target.webSocketDebuggerUrl);
       await c.open();
       try { return await c.eval('[...document.querySelectorAll(".card .title")].some(n=>n.textContent==="TWD sink")'); }
       finally { c.close(); }
     }, 10000, 'notification delivered through SW-less sink');
     assert.equal(sinkPopup, true);
+    const badge = await cdp.eval(`(async()=>{
+      const invoke=window.tgBridge.invoke;
+      const missing=await invoke('set_notifications_count',{count:4});
+      const dataURL=await invoke('get_tray_base');
+      const applied=await invoke('set_notifications_count',{count:4,dataURL});
+      const cleared=await invoke('set_notifications_count',{count:0});
+      return {missing:missing.ok,applied:applied.ok,cleared:cleared.ok};
+    })()`);
+    assert.deepEqual(badge, { missing: false, applied: true, cleared: true });
 
     // Force the Telegram renderer to crash. window.cjs must recover it in-place.
     try { await cdp.call('Page.crash'); } catch (_) {}

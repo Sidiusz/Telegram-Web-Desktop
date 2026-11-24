@@ -594,8 +594,15 @@ function createWindow(state, onTelegramLink, options = {}) {
         mainWindow.show();
         mainWindow.focus();
     });
-    // Taskbar badge vanishes on cold start (button doesn't exist yet when setBadgeCount runs) and on restore from tray — reapplied on show/restore.
-    const reapplyBadge = () => { try { app.setBadgeCount(state.lastNotificationCount || 0); } catch (e) {} };
+    // Windows may create the taskbar button after Electron emits show or restore.
+    let badgeTimer;
+    const reapplyBadge = () => {
+        clearTimeout(badgeTimer);
+        badgeTimer = setTimeout(() => {
+            if (!mainWindow || mainWindow.isDestroyed() || !mainWindow.isVisible() || state.lastNotificationCount === null) return;
+            try { app.setBadgeCount(state.lastNotificationCount); } catch (_) {}
+        }, 220);
+    };
 
     // Chromium can occasionally keep a valid, fully rendered DOM while the Windows
     // compositor surface stays blank after a renderer reload. Force a few full paints
@@ -616,6 +623,7 @@ function createWindow(state, onTelegramLink, options = {}) {
 
     mainWindow.on('show', () => { reapplyBadge(); wakeTelegramForeground(); repaintWindowSurface(); emitWindowState(); });
     mainWindow.on('restore', () => { reapplyBadge(); wakeTelegramForeground(); repaintWindowSurface(); emitWindowState(); });
+    mainWindow.on('focus', reapplyBadge);
     mainWindow.on('minimize', emitWindowState);
 
     // TG's column layout caches window width via ResizeObserver and won't recompute after a
@@ -663,6 +671,7 @@ function createWindow(state, onTelegramLink, options = {}) {
         }
     });
     mainWindow.on('closed', () => {
+        clearTimeout(badgeTimer);
         mainWindow = null;
         // The notification popup is another BrowserWindow, so relying on
         // window-all-closed can leave the process/tray alive after the main window is

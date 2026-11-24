@@ -11,7 +11,7 @@ const { uniquePath, reservePath, sanitizeFilename, markFromInternet } = require(
 const { historyConfig, privacyConfig } = require('./renderer-config.cjs');
 const path = require('path');
 const fs = require('fs');
-const { updateTrayBadge, setTrayLang, setTrayImageFromDataURL, getTrayBaseDataURL } = require('./tray.cjs');
+const { updateTrayBadge, setTrayLang, getTrayBaseDataURL } = require('./tray.cjs');
 const { checkForUpdate, downloadPendingUpdate, scheduleChecks, init: initUpdater, fetchChangelog, fetchReleases } = require('./updater.cjs');
 
 const TG_URL = 'https://web.telegram.org/a/';
@@ -743,26 +743,19 @@ function registerIpc(getWindow) {
         setTrayLang(lang);
     });
 
-    // Tray icon PNG drawn on a canvas in the renderer (SVG→nativeImage fails here).
-    handle('set_tray_image', (e, { dataURL } = {}) => {
-        const raw = String(dataURL || '');
-        if (!raw) { setTrayImageFromDataURL(''); return { ok: true }; }
-        if (raw.length > 1024 * 1024 || !/^data:image\/png;base64,/i.test(raw)) return { error: 'invalid-image' };
-        setTrayImageFromDataURL(raw);
-        return { ok: true };
-    });
-
     // Base tray logo (PNG data URL) so the renderer can composite logo + badge.
     handle('get_tray_base', () => getTrayBaseDataURL());
 
-    handle('set_notifications_count', (e, { count } = {}) => {
+    handle('set_notifications_count', (e, { count, dataURL } = {}) => {
         const parsed = Number.parseInt(count, 10);
         const n = Number.isFinite(parsed) ? Math.max(0, Math.min(9999, parsed)) : 0;
         state.lastNotificationCount = n;
         // Electron's native taskbar badge (self-drawn, no "attention" flash). On cold start/
         // restore-from-tray the button doesn't exist yet — window.cjs reapplies it on show/restore.
+        const validImage = !n || (typeof dataURL === 'string' && dataURL.length <= 1024 * 1024 && /^data:image\/png;base64,/i.test(dataURL));
+        const trayUpdated = validImage && updateTrayBadge(n, dataURL);
         try { app.setBadgeCount(n); } catch (e) {}
-        updateTrayBadge(n);
+        return { ok: trayUpdated };
     });
 
 }

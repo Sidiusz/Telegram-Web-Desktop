@@ -1,16 +1,25 @@
 function tryInject(){ensureCSS();ensureCornerWrap();}
 
-// Иконка трея с числом непрочитанных: базовый логотип + небольшой красный бейдж
-// в правом-нижнем углу (≈половина размера иконки). SVG→nativeImage в main не
-// растеризуется — рисуем PNG на canvas. Базовый логотип берём из main один раз.
+// The tray keeps the app logo and draws its unread count on a PNG overlay.
 var _trayBaseImg=null;
-try{ INV('get_tray_base').then(function(d){ if(d){ var im=new Image(); im.onload=function(){_trayBaseImg=im;}; im.src=d; } }).catch(function(){}); }catch(e){}
+async function loadTrayBaseImage(){
+    if(_trayBaseImg)return;
+    var dataURL=await INV('get_tray_base').catch(()=>null);
+    if(!dataURL)return;
+    await new Promise(resolve=>{
+        var im=new Image();
+        im.onload=()=>{_trayBaseImg=im;resolve();};
+        im.onerror=resolve;
+        im.src=dataURL;
+    });
+}
 function makeTrayPng(count){
+    if(!_trayBaseImg)return null;
     try{
         var label=count>99?'99+':String(count);
         var S=64, c=document.createElement('canvas'); c.width=S; c.height=S;
         var x=c.getContext('2d');
-        if(_trayBaseImg) x.drawImage(_trayBaseImg,0,0,S,S);     // логотип на всю площадь
+        x.drawImage(_trayBaseImg,0,0,S,S);
         // Бейдж: круг радиусом ~30% иконки, прижат к правому-нижнему углу.
         var r=Math.round(S*0.30), cx=S-r-1, cy=S-r-1;
         x.beginPath(); x.arc(cx,cy,r+2,0,Math.PI*2); x.fillStyle='rgba(0,0,0,.55)'; x.fill();  // тонкая тёмная окантовка
@@ -143,38 +152,31 @@ waitBody(()=>{
 
     // «Что нового» — один раз на новую версию (ждём, пока UI прогрузится).
     setTimeout(()=>{ try{ showWhatsNewIfNeeded(); }catch(e){} },2500);
+});
 
-    // Счётчик для трея/таскбара: СУММА непрочитанных сообщений по НЕприглушённым
-    // неархивным чатам. ОСНОВНОЙ источник — состояние TG (getGlobal): unreadCount из
-    // messages.byChatId[id].threadsById['-1'].readState, архив отсекаем по
-    // chats.listIds.active, mute — по notifyExceptionById (иначе notifyDefaults по
-    // типу чата). Состояние точное и без «кадров-мерцаний», в отличие от DOM
-    // (при blur TG перерисовывает чат-лист → бейдж на кадр пустой → счётчик мигал).
-    // Сверено вживую: совпадает 1-в-1 с подсчётом по DOM. Фолбэк — старый DOM-путь
-    // с подтверждением снижения (_pendingDrop), если рантайм недоступен.
-    function nativeUnreadCount(){
-        var g=tgRuntime.getGlobal();
+waitBody(function installUnreadBadge(){
+    function nativeUnreadCount(g){
         if(!g||!g.chats||!g.chats.listIds||!g.chats.listIds.active||!g.messages||!g.messages.byChatId)return null;
         var now=Math.floor(Date.now()/1000);
         var active=g.chats.listIds.active, exc=g.chats.notifyExceptionById||{};
         var defs=(g.settings&&g.settings.notifyDefaults)||{}, byId=g.chats.byId||{}, count=0;
         for(var i=0;i<active.length;i++){
-            var id=active[i], mc=g.messages.byChatId[id];
-            var th=mc&&mc.threadsById&&mc.threadsById['-1'];
-            var unread=th&&th.readState?(th.readState.unreadCount||0):0;
-            // Forum main-thread counters go stale; Telegram shows the per-topic unread instead.
-            if(byId[id]&&byId[id].isForum){
-                var ti=g.chats.topicsInfoById&&g.chats.topicsInfoById[id];unread=0;
-                if(ti&&ti.topicsById)for(var tk in ti.topicsById)unread+=ti.topicsById[tk].unreadCount||0;
+            var id=active[i], chat=byId[id], threads=g.messages.byChatId[id]?.threadsById;
+            if(!threads)continue;
+            var key=chat?.type==='chatTypePrivate'?'users':chat?.type==='chatTypeChannel'?'channels':'groups';
+            var mutedUntil=exc[id]?.mutedUntil??defs[key]?.mutedUntil??0;
+            if(chat?.isForum){
+                // Topic metadata stores mute overrides. Unread counts live in the topic threads.
+                var topics=g.chats.topicsInfoById?.[id];
+                var topicIds=topics?.listedTopicIds?.length?topics.listedTopicIds:Object.keys(threads);
+                for(var topicId of topicIds){
+                    if(String(topicId)==='-1')continue;
+                    if((topics?.topicsById?.[topicId]?.notifySettings?.mutedUntil??mutedUntil)>now)continue;
+                    count+=threads[topicId]?.readState?.unreadCount||0;
+                }
+            }else if(mutedUntil<=now){
+                count+=threads['-1']?.readState?.unreadCount||0;
             }
-            if(unread<=0)continue;
-            var e=exc[id], muted;
-            if(e&&typeof e.mutedUntil!=='undefined') muted=e.mutedUntil>now;
-            else{ var c=byId[id], type=c&&c.type;
-                var dkey=(type==='chatTypePrivate')?'users':(type==='chatTypeChannel')?'channels':'groups';
-                var d=defs[dkey]; muted=d?(d.mutedUntil>now):false; }
-            if(muted)continue;
-            count+=unread;                               // сумма непрочитанных сообщений (не чатов)
         }
         return count;
     }
@@ -200,21 +202,25 @@ waitBody(()=>{
         for(var k in byPid)count+=byPid[k];              // сумма непрочитанных (раз на чат)
         return count;
     }
-    let _lastBadgeCount_=-1, _pendingChange=null;
-    setInterval(()=>{
-        var nat=nativeUnreadCount(), fromState=(nat!==null);
+    let lastBadgeCount=-1, pendingChange=null, publishing=false;
+    async function syncUnreadBadge(){
+        if(publishing)return;
+        var nat=nativeUnreadCount(tgRuntime.getGlobal()), fromState=(nat!==null);
         var count = fromState ? nat : domUnreadCount();
-        if(count===_lastBadgeCount_){ _pendingChange=null; return; }
+        if(count===lastBadgeCount){pendingChange=null;return;}
         // Стейт (getGlobal) точный → применяем сразу. DOM-фолбэк мерцает при
         // перерисовке чат-листа (иконки .icon-muted на кадр пропадают → мьюченные
         // чаты влетают в счёт → всплеск 99+). Любое изменение подтверждаем одним
         // повтором: разовый кадр-выброс не доживает до второго тика и не показывается.
-        if(!fromState && _lastBadgeCount_>=0 && _pendingChange!==count){ _pendingChange=count; return; }
-        _pendingChange=null;
-        _lastBadgeCount_=count;
-        INV('set_notifications_count',{count}).catch(()=>{});
-        INV('set_tray_image',{dataURL:count>0?makeTrayPng(count):null}).catch(()=>{});
-    },2000);
+        if(!fromState&&lastBadgeCount>=0&&pendingChange!==count){pendingChange=count;return;}
+        publishing=true;
+        try{
+            if(count>0)await loadTrayBaseImage();
+            var result=await INV('set_notifications_count',{count,dataURL:count>0?makeTrayPng(count):null});
+            if(result?.ok){lastBadgeCount=count;pendingChange=null;}
+        }catch(_){}finally{publishing=false;}
+    }
+    setInterval(syncUnreadBadge,2000);
 });
 
 // ── Drag-n-drop: блокируем переключение чатов при перетаскивании файла ───────
@@ -842,7 +848,8 @@ window.__tgMarkAllRead=function(){
                 if(timer)clearTimeout(timer);
                 res(value||'');
             }
-            if(!src||src.indexOf('blob:')!==0)return finish(src||'');
+            if(typeof src!=='string'||!src)return finish('');
+            if(!src.startsWith('blob:'))return finish(src);
             // Avatar loading is cosmetic. A stale blob: URL must never block the
             // actual popup: sound and popup are one notification event, not two
             // independently reliable paths.
@@ -912,7 +919,8 @@ window.__tgMarkAllRead=function(){
     function resolveChatCategory(pid){
         pid=String(pid||'');
         if(!pid)return Promise.resolve('');
-        var known=categoryFromType(chatTypeById[pid]);
+        var liveChat=tgRuntime.getGlobal()?.chats?.byId?.[pid];
+        var known=categoryFromType(liveChat?.type||chatTypeById[pid]);
         if(known)return Promise.resolve(known);
         if(pid.charAt(0)!=='-')return Promise.resolve('private');
         return loadChatTypes(true).then(function(){
@@ -936,7 +944,7 @@ window.__tgMarkAllRead=function(){
         var title=(p.title||'').trim()||'Telegram';
         var text=(p.body||'').replace(/\s+/g,' ').trim();
 
-        resolveChatCategory(pid).then(function(cat){
+        resolveChatCategory(pid).catch(()=>'').then(function(cat){
             if(cat && cfg['notif_cat_'+cat]===false)return;             // private/group/channel независимо
             // Иконку (blob:/data:) конвертим: main не достанет blob из рендерера. Нет иконки
             // в payload — берём аватар из строки чат-листа по peerId.
@@ -944,12 +952,6 @@ window.__tgMarkAllRead=function(){
                 INV('show_notification',{title:title,body:text,icon:icon,sender:title,peerId:pid,playSound:false}).catch(function(){});
             });
             if(!p.isSilent)playSound();                                 // звук только для разрешённой категории
-        }).catch(function(){
-            // Если IndexedDB временно недоступен, не теряем уведомление.
-            toDataUrl(p.icon||domAvatar(pid)).then(function(icon){
-                INV('show_notification',{title:title,body:text,icon:icon,sender:title,peerId:pid,playSound:false}).catch(function(){});
-            });
-            if(!p.isSilent)playSound();
         });
     }
     // Регистрируем приёмник и забираем то, что накопилось до старта UI_JS.

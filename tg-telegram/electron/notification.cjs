@@ -1,8 +1,8 @@
 'use strict';
-const { BrowserWindow, screen, ipcMain, powerMonitor } = require('electron');
+const { BrowserWindow, screen, ipcMain } = require('electron');
 
 let _getMainWindow = null;
-let _win = null;          // persistent stack window, reused
+let _win = null;          // one window per visible stack
 let _ready = false;
 let _pending = [];
 let _idSeq = 0;
@@ -15,8 +15,9 @@ function clearDeliveryTimer() {
     _deliveryTimer = null;
 }
 
-function recoverDelivery(win) {
+function recoverDelivery(win, reason) {
     if (_win !== win) return;
+    console.warn('[TWD-NOTIF] Replacing popup:', reason);
     clearDeliveryTimer();
     _inFlight = null;
     dropWin(win);
@@ -57,7 +58,14 @@ function init(getMainWindow) {
     _getMainWindow = getMainWindow;
 
     ipcMain.on('notif-presented', (event, { id } = {}) => {
-        if (!isPopupSender(event) || id !== _inFlight) return;
+        if (!isPopupSender(event) || _inFlight === null || id !== _inFlight) return;
+        const win = _win;
+        if (process.env.TWD_SMOKE_HIDDEN !== '1') {
+            try {
+                if (!win.isVisible()) win.showInactive();
+                if (!win.isVisible()) return recoverDelivery(win, 'card window stayed hidden');
+            } catch (_) { return recoverDelivery(win, 'card window could not be shown'); }
+        }
         clearDeliveryTimer();
         _pending = _pending.filter(item => item.id !== id);
         _attempts.delete(id);
@@ -68,37 +76,20 @@ function init(getMainWindow) {
     ipcMain.on('notif-shape', (event, { count } = {}) => {
         if (!isPopupSender(event)) return;
         const n = Math.max(0, Math.min(MAX_CARDS, Math.trunc(Number(count) || 0)));
+        if (!n) return;
+        const win = _win;
         try {
-            if (!n) {
-                _win.setShape([]);
-                return;
-            }
             const height = CARD_HEIGHT * n + CARD_GAP * (n - 1);
-            _win.setShape([{ x: 0, y: STACK_HEIGHT - height, width: WIDTH, height }]);
-            // A card queued behind the previous fade-out lands after notif-empty already hid the window.
-            if (!_win.isVisible() && process.env.TWD_SMOKE_HIDDEN !== '1') _win.showInactive();
-        } catch (_) {}
+            win.setShape([{ x: 0, y: STACK_HEIGHT - height, width: WIDTH, height }]);
+            if (!win.isVisible() && process.env.TWD_SMOKE_HIDDEN !== '1') win.showInactive();
+        } catch (_) { recoverDelivery(win, 'card window geometry or visibility failed'); }
     });
 
     ipcMain.on('notif-empty', (event) => {
-        if (!isPopupSender(event)) return;
-        _win.hide();
-        // A transparent always-on-top window that lived through sleep, a lock screen or a
-        // monitor change can keep acknowledging cards while Windows no longer paints it.
-        // Start long-lived idle popups fresh; the next notification rebuilds it in ~100ms.
-        if (Date.now() - _createdAt > MAX_IDLE_WIN_AGE_MS) recycleIdleWin();
+        if (!isPopupSender(event) || _inFlight !== null || _pending.length) return;
+        // A hidden transparent window can accept cards after idle even when Windows stops painting it.
+        dropWin(_win);
     });
-
-    const recycle = () => recycleIdleWin();
-    try {
-        powerMonitor.on('resume', recycle);
-        powerMonitor.on('unlock-screen', recycle);
-    } catch (_) {}
-    try {
-        screen.on('display-added', recycle);
-        screen.on('display-removed', recycle);
-        screen.on('display-metrics-changed', recycle);
-    } catch (_) {}
 
     ipcMain.on('notif-action', (event, { action, peerId } = {}) => {
         if (!isPopupSender(event)) return;
@@ -360,8 +351,8 @@ function buildHtml() {
         });
         await Promise.all(moves);
 
-        window.notifBridge.sendShape(order.length);
         if(cards.size===0)window.notifBridge.sendEmpty();
+        else window.notifBridge.sendShape(order.length);
     }
 
     window.notifBridge.onAdd(function(data){
@@ -380,30 +371,14 @@ function positionWin(win) {
     try { win.setPosition(wa.x + wa.width - WIDTH - MARGIN, wa.y + wa.height - STACK_HEIGHT - MARGIN, false); } catch (_) {}
 }
 const READY_TIMEOUT_MS = 10000;
-let _createdAt = 0;
-
-const MAX_IDLE_WIN_AGE_MS = 30 * 60 * 1000;
-
-// Destroy the popup only while nothing is queued, in flight or on screen.
-function recycleIdleWin() {
-    const win = _win;
-    if (!win || win.isDestroyed()) return;
-    if (!_ready || _inFlight !== null || _pending.length) return;
-    try { if (win.isVisible() && process.env.TWD_SMOKE_HIDDEN !== '1') return; } catch (_) {}
-    clearDeliveryTimer();
-    dropWin(win);
-}
 
 function dropWin(win) {
-    try { if (win && !win.isDestroyed()) win.destroy(); } catch (e) {}
     if (_win === win) { _win = null; _ready = false; }
+    try { if (win && !win.isDestroyed()) win.destroy(); } catch (e) {}
 }
 
 function ensureWin() {
-    // A popup whose page never finished loading would hold the queue forever.
-    if (_win && !_win.isDestroyed() && !_ready && Date.now() - _createdAt > READY_TIMEOUT_MS) dropWin(_win);
     if (_win && !_win.isDestroyed()) { positionWin(_win); return _win; }
-    _createdAt = Date.now();
     const wa = primaryWorkArea();
     const win = _win = new BrowserWindow({
         width: WIDTH,
@@ -443,21 +418,21 @@ function ensureWin() {
         _ready = true;
         flush();
     });
-    const html = buildHtml();
-    win.loadURL('data:text/html;charset=utf-8,' + encodeURIComponent(html)).catch(() => {});
     win.on('closed', () => {
-        // An old popup can finish closing after a replacement was already created.
-        // Never let the stale window clear the handle/ready state of the new one.
-        if (_win === win) { _win = null; _ready = false; }
+        if (_win !== win) return;
+        clearDeliveryTimer();
+        _inFlight = null;
+        _win = null;
+        _ready = false;
     });
-    // Renderer crash/hang leaves the BrowserWindow alive but blank. Destroy exactly
-    // the failed instance; the next queueNotification will build a fresh one.
-    const drop = () => recoverDelivery(win);
-    win.webContents.on('render-process-gone', drop);
-    win.on('unresponsive', drop);
-    win.webContents.on('did-fail-load', drop);
-    _deliveryTimer = setTimeout(drop, READY_TIMEOUT_MS);
+    // Retry the queued cards in a fresh window if the popup renderer fails.
+    win.webContents.on('render-process-gone', () => recoverDelivery(win, 'renderer exited'));
+    win.on('unresponsive', () => recoverDelivery(win, 'renderer hung'));
+    win.webContents.on('did-fail-load', () => recoverDelivery(win, 'page failed to load'));
+    _deliveryTimer = setTimeout(() => recoverDelivery(win, 'page load timed out'), READY_TIMEOUT_MS);
     _deliveryTimer.unref?.();
+    win.loadURL('data:text/html;charset=utf-8,' + encodeURIComponent(buildHtml()))
+        .catch(() => recoverDelivery(win, 'page failed to load'));
     return win;
 }
 
@@ -466,12 +441,11 @@ function flush() {
     const win = _win;
     const item = _pending[0];
     _inFlight = item.id;
-    _deliveryTimer = setTimeout(() => recoverDelivery(win), READY_TIMEOUT_MS);
+    _deliveryTimer = setTimeout(() => recoverDelivery(win, 'card acknowledgement timed out'), READY_TIMEOUT_MS);
     _deliveryTimer.unref?.();
     try {
         win.webContents.send('notif-add', item);
-        if (process.env.TWD_SMOKE_HIDDEN !== '1') win.showInactive();
-    } catch (_) { recoverDelivery(win); }
+    } catch (_) { recoverDelivery(win, 'card could not be sent'); }
 }
 
 function queueNotification(data) {

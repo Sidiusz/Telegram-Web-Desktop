@@ -56,7 +56,9 @@ test('popup retries an unacknowledged notification after a hang and ignores stal
         isDestroyed() { return !!this.dead; }
         destroy() { this.dead = true; this.emit('closed'); }
         loadURL() { return Promise.resolve(); }
-        setPosition() {} setAlwaysOnTop() {} setVisibleOnAllWorkspaces() {} setShape() {} showInactive() {}
+        isVisible() { return this.visible; }
+        showInactive() { this.visible = true; }
+        setPosition() {} setAlwaysOnTop() {} setVisibleOnAllWorkspaces() {} setShape() {}
     }
     const context = { module: { exports: {} }, __dirname, process: { env: {} }, console,
         require: name => name === 'electron' ? { BrowserWindow: Window, ipcMain,
@@ -143,8 +145,8 @@ test('Telegram notify gate survives a reset hasWebNotifications flag in the curr
     assert.equal(context.state.settings.byKey.hasWebNotifications, false, 'Telegram state itself is not mutated');
 });
 
-test('idle notification popup is rebuilt after sleep, unlock or a display change', () => {
-    const windows = [], ipcMain = new EventEmitter(), powerMonitor = new EventEmitter();
+test('the next notification gets a fresh popup after idle and a fade-out cannot drop an incoming card', () => {
+    const windows = [], ipcMain = new EventEmitter();
     const screen = new EventEmitter();
     screen.getPrimaryDisplay = () => ({ workArea: { x: 0, y: 0, width: 1920, height: 1080 } });
     class Window extends EventEmitter {
@@ -156,12 +158,11 @@ test('idle notification popup is rebuilt after sleep, unlock or a display change
         destroy() { this.dead = true; this.emit('closed'); }
         loadURL() { return Promise.resolve(); }
         isVisible() { return this.visible; }
-        hide() { this.visible = false; }
-        showInactive() { this.visible = true; }
-        setPosition() {} setAlwaysOnTop() {} setVisibleOnAllWorkspaces() {} setShape() {}
+        showInactive() { this.visible = !this.blockShow; }
+        setPosition() {} setAlwaysOnTop() {} setVisibleOnAllWorkspaces() {} setShape() { this.shaped = true; }
     }
     const context = { module: { exports: {} }, __dirname, process: { env: {} }, console, Date,
-        require: name => name === 'electron' ? { BrowserWindow: Window, ipcMain, powerMonitor, screen } : require(name),
+        require: name => name === 'electron' ? { BrowserWindow: Window, ipcMain, screen } : require(name),
         setTimeout: () => ({}), clearTimeout: () => {} };
     vm.createContext(context);
     vm.runInContext(read('notification.cjs'), context);
@@ -171,25 +172,71 @@ test('idle notification popup is rebuilt after sleep, unlock or a display change
     api.queueNotification({ title: 'First', peerId: '1' });
     const first = windows[0];
     first.webContents.emit('did-finish-load');
-    powerMonitor.emit('resume');
-    assert.equal(first.dead, undefined, 'a popup with a card in flight is kept');
+    assert.equal(first.isVisible(), false, 'the window waits for the card geometry');
+    ipcMain.emit('notif-shape', { sender: first.webContents }, { count: 1 });
+    assert.equal(first.shaped && first.isVisible(), true);
     ipcMain.emit('notif-presented', { sender: first.webContents }, { id: first.sent[0].id });
-    powerMonitor.emit('resume');
-    assert.equal(first.dead, undefined, 'a popup showing a card is kept');
+    api.queueNotification({ title: 'During fade-out', peerId: '1' });
     ipcMain.emit('notif-empty', { sender: first.webContents });
-    assert.equal(first.visible, false);
-    powerMonitor.emit('resume');
-    assert.equal(first.dead, true, 'an idle popup is dropped after resume');
+    assert.equal(first.dead, undefined, 'the card already in flight keeps its popup');
+    assert.equal(first.isVisible(), true);
+    ipcMain.emit('notif-presented', { sender: first.webContents }, { id: first.sent[1].id });
+    ipcMain.emit('notif-empty', { sender: first.webContents });
+    assert.equal(first.dead, true, 'the native window is retired before any wait or power event');
 
     api.queueNotification({ title: 'Second', peerId: '2' });
     const second = windows[1];
     assert.ok(second && second !== first, 'next notification builds a fresh popup');
     second.webContents.emit('did-finish-load');
     assert.equal(second.sent[0].title, 'Second');
+    second.blockShow = true;
     ipcMain.emit('notif-presented', { sender: second.webContents }, { id: second.sent[0].id });
-    ipcMain.emit('notif-empty', { sender: second.webContents });
-    screen.emit('display-removed');
-    assert.equal(second.dead, true, 'an idle popup is dropped after a display change');
+    assert.equal(second.dead, true, 'renderer acknowledgement cannot retire a card from a hidden window');
+    const retry = windows[2];
+    retry.webContents.emit('did-finish-load');
+    assert.equal(retry.sent[0].id, second.sent[0].id);
+});
+
+test('unread badges count forum threads and retry an unacknowledged update', async () => {
+    const source = read('inject/ui/bootstrap.js');
+    const start = source.indexOf('waitBody(function installUnreadBadge()');
+    const block = source.slice(start, source.indexOf('\n});', start) + 4);
+    const thread = unreadCount => ({ readState: { unreadCount } });
+    const mutedUntil = Math.floor(Date.now() / 1000) + 3600;
+    const state = {
+        chats: {
+            listIds: { active: ['forum', 'private'], archived: ['archive'] },
+            byId: { forum: { isForum: true }, private: { type: 'chatTypePrivate' } },
+            topicsInfoById: { forum: { listedTopicIds: [1, 9], topicsById: {
+                1: {}, 9: { notifySettings: { mutedUntil } },
+            } } },
+        },
+        messages: { byChatId: {
+            forum: { threadsById: { '-1': thread(99), 1: thread(4), 9: thread(6) } },
+            private: { threadsById: { '-1': thread(2) } },
+            archive: { threadsById: { '-1': thread(10) } },
+        } },
+    };
+    let sync;
+    const updates = [];
+    vm.runInNewContext(block, {
+        waitBody: install => install(), setInterval: fn => { sync = fn; },
+        tgRuntime: { getGlobal: () => state }, loadTrayBaseImage: async () => {},
+        makeTrayPng: count => `badge:${count}`,
+        INV: async (name, payload) => {
+            assert.equal(name, 'set_notifications_count');
+            updates.push([payload.count, payload.dataURL]);
+            return { ok: updates.length > 1 };
+        },
+    });
+    await sync();
+    await sync();
+    await sync();
+    assert.deepEqual(updates, [[6, 'badge:6'], [6, 'badge:6']]);
+    state.messages.byChatId.forum.threadsById[1] = thread(0);
+    state.messages.byChatId.private.threadsById['-1'] = thread(0);
+    await sync();
+    assert.deepEqual(updates.at(-1), [0, null]);
 });
 
 test('auto proxy latch is re-tested and released once direct Telegram works again', async () => {

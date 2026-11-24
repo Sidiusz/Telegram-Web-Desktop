@@ -1406,7 +1406,7 @@ test('desktop notification popup follows Telegram toast geometry and has no dead
     assert.match(notif, /height: STACK_HEIGHT/);
     assert.doesNotMatch(notif, /notif-resize|resizeWindow\(|contentHeight\(/);
     assert.match(notif, /ipcMain\.on\('notif-shape'/);
-    assert.match(notif, /_win\.setShape/);
+    assert.match(notif, /win\.setShape/);
     assert.match(notif, /async function addCard\(data\)/);
     assert.match(notif, /order\.push\(c\.id\)/);
     assert.match(notif, /if\(order\.length>MAX_CARDS\)evictedId=order\.shift\(\)/);
@@ -1487,7 +1487,7 @@ test('notification category filter distinguishes Telegram channels from groups',
     assert.match(bootstrap, /\^tt-global-state\(\?:_\\d\+\)\?\$/);
     assert.match(bootstrap, /type==='chatTypeChannel'.*return 'channel'/s);
     assert.match(bootstrap, /type==='chatTypeBasicGroup'\|\|type==='chatTypeSuperGroup'.*return 'group'/s);
-    assert.match(bootstrap, /resolveChatCategory\(pid\)\.then/);
+    assert.match(bootstrap, /resolveChatCategory\(pid\)[\s\S]{0,60}\.then/);
     assert.doesNotMatch(bootstrap, /var cat = \(pid\.charAt\(0\)==='-'\) \? 'group' : 'private'/);
 });
 
@@ -1600,7 +1600,6 @@ test('Telegram notifications are not held hostage by avatar downloads or a missi
     assert.ok(Date.now() - startedAt < 3000, 'a hung avatar download is bounded');
     const core = read('electron/inject/ui/core.js');
     assert.match(core, /var rt=window\.__twdTelegramRuntime/);
-    assert.match(read('electron/inject/ui/bootstrap.js'), /if\(byId\[id\]&&byId\[id\]\.isForum\)\{/);
     assert.equal(delivered.length, 1, 'notification is delivered without a service-worker controller');
     assert.equal(delivered[0].type, 'showMessageNotification');
     assert.equal(delivered[0].payload.icon, undefined);
@@ -1610,8 +1609,8 @@ test('Telegram notifications are not held hostage by avatar downloads or a missi
     assert.match(intercept, /function scheduleOrphanDrain\(\)/);
     const popup = read('electron/notification.cjs');
     assert.match(popup, /Promise\.race\(\[a\.finished\.catch\(function\(\)\{\}\),wait\(duration\+250\)\]\)/);
-    assert.match(popup, /win\.webContents\.on\('did-fail-load', drop\)/);
-    assert.match(popup, /!_ready && Date\.now\(\) - _createdAt > READY_TIMEOUT_MS/);
+    assert.match(popup, /win\.webContents\.on\('did-fail-load', \(\) => recoverDelivery\(win,/);
+    assert.match(popup, /setTimeout\(\(\) => recoverDelivery\(win, 'page load timed out'\), READY_TIMEOUT_MS\)/);
     const bootstrap = read('electron/inject/ui/bootstrap.js');
     assert.match(bootstrap, /chatTypeLoad=new Promise\(function\(resolve\)\{\s*\/\/[^\n]*\n\s*setTimeout\(resolve,3000\);/);
     const win = read('electron/window.cjs');
@@ -1782,9 +1781,9 @@ test('notification flag repair rewrites Telegram state only when a flag changed'
     assert.doesNotMatch(intercept, /needsReload=true; \}\s*try\{ c\.update\(v\); \}catch\(e\)\{\}\s*\}/);
 });
 
-test('a notification arriving during the last fade-out re-shows the popup', () => {
+test('a notification popup applies its card geometry before showing', () => {
     const popup = read('electron/notification.cjs');
-    assert.match(popup, /_win\.setShape\(\[\{ x: 0, y: STACK_HEIGHT - height, width: WIDTH, height \}\]\);[\s\S]{0,200}if \(!_win\.isVisible\(\) && process\.env\.TWD_SMOKE_HIDDEN !== '1'\) _win\.showInactive\(\);/);
+    assert.match(popup, /win\.setShape\(\[\{ x: 0, y: STACK_HEIGHT - height, width: WIDTH, height \}\]\);[\s\S]{0,200}if \(!win\.isVisible\(\) && process\.env\.TWD_SMOKE_HIDDEN !== '1'\) win\.showInactive\(\);/);
 });
 
 test('injected UI keeps one copy of privacy rules and chat-type lookups', () => {
