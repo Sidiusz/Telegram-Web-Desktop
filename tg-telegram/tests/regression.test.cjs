@@ -2304,5 +2304,5 @@ test('chat avatars follow Telegram renaming its avatar image class', () => {
     const common = read('electron/features/desktop_like_common.js');
     assert.equal((common.match(/img:is\(\.Avatar__media,\.avatar-media\)/g) || []).length, 3);
     assert.doesNotMatch(common, /img\.Avatar__media'/);
-    assert.match(read('electron/inject/ui/bootstrap.js'), /:not\(\.Avatar__media\):not\(\.avatar-media\)/);
+    assert.match(read('electron/inject/ui/bootstrap.js'), /!image\.matches\([^\n]*\.Avatar__media, \.avatar-media/);
 });

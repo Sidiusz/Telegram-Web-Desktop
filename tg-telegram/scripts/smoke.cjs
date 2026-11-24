@@ -323,6 +323,9 @@ async function telegramTarget(port) {
     await cdp.call('Input.dispatchKeyEvent', { type: 'keyDown', key: 'Shift', code: 'ShiftLeft', windowsVirtualKeyCode: 16 });
     await cdp.call('Input.dispatchKeyEvent', { type: 'keyUp', key: 'Shift', code: 'ShiftLeft', windowsVirtualKeyCode: 16 });
     const blobSaved = await cdp.eval(`(async()=>{
+      const viewer=document.createElement('dialog'); viewer.id='MediaViewer';
+      viewer.style.cssText='position:fixed;inset:0;margin:0;width:100vw;height:100vh;max-width:none;max-height:none;background:#111';
+      document.body.appendChild(viewer);viewer.showModal();
       const bytes=new Uint8Array(2*1024*1024); bytes.fill(0x5a);
       const url=URL.createObjectURL(new Blob([bytes],{type:'application/octet-stream'}));
       try{return await window.tgBridge.saveBlob(url,'smoke-stream.bin');}
@@ -330,6 +333,19 @@ async function telegramTarget(port) {
     })()`);
     assert.equal(blobSaved && blobSaved.ok, true, 'streamed blob must save successfully');
     assert.ok(Number.isInteger(blobSaved.id) && blobSaved.id > 0);
+    const viewerCard = await waitFor(() => cdp.eval(`(async()=>{
+      const viewer=document.getElementById('MediaViewer'),wrap=document.getElementById('_cnw_');
+      const cards=[...wrap.querySelectorAll('.dl_card')].filter(c=>c.textContent.includes('smoke-stream.bin'));
+      const card=cards[0],notice=card?.querySelector('.Notification');
+      if(!notice||wrap.parentNode!==viewer||!notice.querySelector('.icon-check'))return null;
+      const rect=notice.getBoundingClientRect(),hit=document.elementFromPoint(rect.x+rect.width/2,rect.y+rect.height/2);
+      if(!notice.contains(hit)||Number(getComputedStyle(card).opacity)<0.5)return null;
+      viewer.close();await Promise.resolve();const afterClose=wrap.parentNode===document.body;
+      viewer.showModal();await Promise.resolve();const afterReopen=wrap.parentNode===viewer;
+      viewer.remove();await Promise.resolve();
+      return {count:cards.length,afterClose,afterReopen,afterRemoval:wrap.parentNode===document.body&&wrap.contains(card)};
+    })()`), 4000, 'saved download card is visible above the media dialog');
+    assert.deepEqual(viewerCard, { count: 1, afterClose: true, afterReopen: true, afterRemoval: true });
     const streamed = await waitFor(async () => {
       const list = await cdp.eval('window.tgBridge.invoke("get_downloads")');
       return list.find(x => x.id === blobSaved.id && x.status === 'completed' && x.exists) || null;

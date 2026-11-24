@@ -7,6 +7,75 @@ const vm = require('node:vm');
 const { EventEmitter } = require('node:events');
 const read = name => fs.readFileSync(path.join(__dirname, '../electron', name), 'utf8');
 
+test('viewer context menus classify video posters and photos by the clicked media', async () => {
+    const source = read('inject/ui/bootstrap.js');
+    const start = source.indexOf("document.addEventListener('contextmenu'");
+    const menus = [];
+    let invokeMenu;
+    class Menu {
+        items = [];
+        insert(index, item) { this.items.splice(index, 0, item); }
+        append(item) { this.items.push(item); }
+        popup({ callback }) {
+            menus.push(this.items.map(item => item.label || item.type));
+            callback?.();
+            this.items.find(item => item.label === 'Save video')?.click();
+        }
+    }
+    const ipc = read('ipc.cjs');
+    const menuStart = ipc.indexOf("handle('show_viewer_context_menu'");
+    vm.runInNewContext(ipc.slice(menuStart, ipc.indexOf('\n    });', menuStart) + 8), {
+        handle: (_, handler) => { invokeMenu = handler; },
+        getWindow: () => ({ getContentBounds: () => ({ width: 100, height: 100 }) }),
+        Menu, MenuItem: class { constructor(options) { Object.assign(this, options); } },
+        _uiLang: 'en', isSafeImageResourceUrl: url => url === 'blob:photo',
+        normalizeDownloadId: Number, state: { downloads: [{ id: 33, path: 'saved-media' }] },
+        fs: { existsSync: () => true }, setImmediate,
+    });
+    let listener;
+    let action;
+    let clicks = 0;
+    const button = { disabled: false, click: () => { clicks++; } };
+    vm.runInNewContext(source.slice(start, source.indexOf('\n}, true);', start) + 10), {
+        document: { addEventListener: (_, handler) => { listener = handler; } },
+        window: { __tgdl: { viewerDownloadButton: () => button, viewerDownloadId: () => 33 } },
+        INV: (name, options) => {
+            assert.equal(name, 'show_viewer_context_menu');
+            if (options.mediaType === 'video') assert.equal(options.srcURL, '');
+            return action = Promise.resolve(invokeMenu({}, options));
+        },
+    });
+    const clickMedia = async ({ video = false, insidePlayer = false, active = true, protectedMedia = false, photo = true } = {}) => {
+        const content = {
+            closest: () => active ? {} : null,
+            querySelector: selector => (selector.includes('VideoPlayer') ? video : protectedMedia) ? {} : null,
+        };
+        const image = { src: 'blob:photo', matches: selector => selector.startsWith('.MediaViewerContent') && photo };
+        const target = { isConnected: true, closest: selector => ({
+            '#MediaViewer .MediaViewerContent': content,
+            img: image,
+            '.VideoPlayer, video': insidePlayer ? {} : null,
+        })[selector] };
+        let prevented = false;
+        action = null;
+        listener({ target, preventDefault: () => { prevented = true; }, stopImmediatePropagation() {} });
+        await action;
+        assert.equal(prevented, true);
+    };
+    await clickMedia({ video: true });
+    await clickMedia({ insidePlayer: true });
+    await clickMedia({ active: false });
+    await clickMedia({ protectedMedia: true });
+    await clickMedia({ photo: false });
+    await clickMedia();
+    assert.deepEqual(menus, [
+        ['Save video', 'separator', 'Open folder'],
+        ['Save video', 'separator', 'Open folder'],
+        ['Save image', 'Copy image', 'separator', 'Open folder'],
+    ]);
+    assert.equal(clicks, 2, 'video saves use the active viewer download button');
+});
+
 test('pending file RPC recovers a silent proxy socket even while another download progresses', async () => {
     let now = 0;
     const timers = new Set();

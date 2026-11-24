@@ -1,9 +1,19 @@
+let cornerWrap;
+let cornerWrapObserver;
 function ensureCornerWrap(){
-    if(document.getElementById('_cnw_')||!document.body)return;
-    const w=document.createElement('div');w.id='_cnw_';w.className='_cnotif_wrap_';document.body.appendChild(w);
+    if(!document.body)return;
+    if(!cornerWrap){
+        cornerWrap=document.getElementById('_cnw_')||document.createElement('div');
+        cornerWrap.id='_cnw_';
+        cornerWrap.className='_cnotif_wrap_';
+    }
+    // A modal dialog is above every page z-index and makes outside controls inert.
+    const host=document.querySelector('#MediaViewer[open]')||document.body;
+    if(cornerWrap.parentNode!==host)host.appendChild(cornerWrap);
+    return cornerWrap;
 }
 function _makeNativeNotice(opts){
-    opts=opts||{};ensureCornerWrap();const w=document.getElementById('_cnw_');if(!w)return null;
+    opts=opts||{};const w=ensureCornerWrap();if(!w)return null;
     const shell=document.createElement('div');shell.className='Notification-container'+(opts.shellClass?' '+opts.shellClass:'');
     const el=document.createElement('div');el.className='Notification'+(opts.noticeClass?' '+opts.noticeClass:'');
     let av=null;
@@ -25,7 +35,22 @@ function _makeNativeNotice(opts){
         el.appendChild(close);
     }
     shell.appendChild(el);w.appendChild(shell);requestAnimationFrame(()=>shell.classList.add('_in_'));
-    let closed=false;const dismiss=()=>{if(closed)return;closed=true;shell.classList.remove('_in_');shell.classList.add('_out_');setTimeout(()=>shell.remove(),220);};
+    if(!cornerWrapObserver){
+        cornerWrapObserver=new MutationObserver(ensureCornerWrap);
+        cornerWrapObserver.observe(document.body,{subtree:true,childList:true,attributes:true,attributeFilter:['open']});
+    }
+    let closed=false;
+    const dismiss=()=>{
+        if(closed)return;
+        closed=true;
+        shell.classList.remove('_in_');shell.classList.add('_out_');
+        setTimeout(()=>{
+            shell.remove();
+            if(w.childElementCount)return;
+            cornerWrapObserver?.disconnect();
+            cornerWrapObserver=null;
+        },220);
+    };
     if(close)close.addEventListener('click',e=>{e.stopPropagation();if(opts.onClose)opts.onClose(e,dismiss);else dismiss();});
     return {shell,el,av,body,title,text,close,dismiss};
 }
@@ -181,8 +206,6 @@ function _claimCard(realId, data){
 }
 function showDownloadIndicator(data){
     if(!data||!data.id||!window.tgBridge) return;
-    ensureCornerWrap();
-    var w=document.getElementById('_cnw_'); if(!w) return;
     var id=data.id;
     if(data.type==='start'){
         if(_dlCards[id]) return;

@@ -396,7 +396,7 @@ const TWD_ALLOWED_INVOKE = new Set([
     'open_folder_dialog','get_downloads','bind_download','forget_download','delete_download','cancel_download',
     'open_downloads_folder','open_logs_folder','open_download_folder','open_download_file','clear_cache','fetch_changelog','fetch_changelog_structured',
     'check_update_manual','skip_version','download_update','get_addons','delete_addon','toggle_addon','apply_addons','apply_features','prepare_extended_pins',
-    'show_image_context_menu','open_addons_folder','report_lang','get_tray_base',
+    'show_viewer_context_menu','open_addons_folder','report_lang','get_tray_base',
     'set_notifications_count','privacy_allow_read_once'
 ]);
 function twdInvoke(cmd, args) {

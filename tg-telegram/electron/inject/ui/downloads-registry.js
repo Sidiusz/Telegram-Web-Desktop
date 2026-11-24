@@ -470,16 +470,20 @@ const DL = window.__tgdl = (function(){
     // «Загрузка» и значок в углу; запоминаем id для «Открыть папку» из ПКМ-меню.
     var _pendingViewerDl = {mid:null, ts:0};
     function viewerMediaMid(){
-        var v = document.getElementById('MediaViewer'); if(!v) return null;
-        var vid = v.querySelector('#media-viewer-video, video');
+        var slide = document.querySelector('#MediaViewer .MediaViewerSlide--active'); if(!slide) return null;
+        var vid = slide.querySelector('video');
         if(vid && vid.src){
             var d = (vid.src.match(/document(\d+)/)||[])[1];
             if(d){
                 var vids = document.querySelectorAll('#MiddleColumn .Message video');
-                for(var i=0;i<vids.length;i++){ if((vids[i].src||'').indexOf(d)>=0){ var m=vids[i].closest('[data-message-id]'); if(m) return m.getAttribute('data-message-id'); } }
+                for(var i=0;i<vids.length;i++){
+                    if(vids[i].src.match(/document(\d+)/)?.[1]!==d)continue;
+                    var m=vids[i].closest('[data-message-id]'); if(m) return m.getAttribute('data-message-id');
+                }
             }
         }
-        var img = v.querySelector('.MediaViewerSlide--active img.full-media, .MediaViewerContent img:not(.thumbnail)');
+        if(vid || slide.querySelector('.VideoPlayer')) return null;
+        var img = slide.querySelector('img.full-media, .MediaViewerContent img:not(.thumbnail)');
         if(img && img.src){
             var imgs = document.querySelectorAll('#MiddleColumn .Message .media-inner img, #MiddleColumn .Message img.full-media');
             for(var j=0;j<imgs.length;j++){ if(imgs[j].src===img.src){ var mm=imgs[j].closest('[data-message-id]'); if(mm) return mm.getAttribute('data-message-id'); } }
@@ -504,13 +508,11 @@ const DL = window.__tgdl = (function(){
         for(var i=0;i<btns.length;i++){ if(btns[i].querySelector('.icon-download')) return btns[i]; }
         return null;
     }
-    var _viewerDlId=null;   // id завершённой загрузки текущего медиа (для «Открыть папку»)
     function refreshViewer(){
         var v=document.getElementById('MediaViewer');
-        if(!v){ _viewerDlId=null; return; }
+        if(!v)return;
         var mid=viewerMediaMid();
         var dl=mid?midDownload(mid):null;
-        _viewerDlId = dl?dl.id:null;
         // Галочка на кнопке «Загрузка».
         var btn=viewerDlBtn();
         if(btn){
@@ -544,10 +546,9 @@ const DL = window.__tgdl = (function(){
     window.tgBridge.onDownloadEvent(onEvent);
     refreshSaved();   // подтянуть сохранённые загрузки и восстановить статус в чате
 
-    // viewerDownloadId — id завершённой загрузки текущего медиа для «Открыть папку»
-    // в ПКМ-меню просмотрщика (core.js строит меню и берёт id отсюда).
     return { registry, byId, fmtBytes, fmtProgress, expectDownload, refreshSaved,
-             viewerDownloadId:function(){ return _viewerDlId; } };
+             viewerDownloadButton:viewerDlBtn,
+             viewerDownloadId:function(){ return midDownload(viewerMediaMid())?.id; } };
 })();
 } // end if(window.tgBridge) — блок реестра загрузок
 

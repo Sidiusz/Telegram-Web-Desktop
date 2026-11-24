@@ -489,12 +489,12 @@ function registerIpc(getWindow) {
         if (win) win.webContents.reload();
     });
 
-    handle('show_image_context_menu', (e, { srcURL, x, y, downloadId }) => {
+    handle('show_viewer_context_menu', (e, { mediaType, canSaveVideo, srcURL, x, y, downloadId } = {}) => {
         const win = getWindow();
         if (!win) return;
         const menu = new Menu();
         const ru = _uiLang === 'ru';
-        const safeSrcURL = isSafeImageResourceUrl(srcURL) ? String(srcURL) : '';
+        const safeSrcURL = mediaType === 'image' && isSafeImageResourceUrl(srcURL) ? String(srcURL) : '';
         if (safeSrcURL) {
             menu.append(new MenuItem({
                 label: ru ? 'Сохранить изображение' : 'Save image',
@@ -519,6 +519,13 @@ function registerIpc(getWindow) {
                     click: () => shell.showItemInFolder(item.path),
                 }));
             }
+        }
+        if (mediaType === 'video' && canSaveVideo === true) {
+            return new Promise(resolve => {
+                menu.insert(0, new MenuItem({ label: ru ? 'Сохранить видео' : 'Save video', click: () => resolve('save-video') }));
+                if (menu.items.length > 1) menu.insert(1, new MenuItem({ type: 'separator' }));
+                menu.popup({ window: win, callback: () => setImmediate(() => resolve(null)) });
+            });
         }
         if (menu.items.length) menu.popup({ window: win });
     });

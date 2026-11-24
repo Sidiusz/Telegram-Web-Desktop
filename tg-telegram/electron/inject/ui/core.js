@@ -29,6 +29,7 @@ html._tgreading_ .Menu.context-menu,
 html._tgreading_ .bubble.menu-container.shown{opacity:0 !important;pointer-events:none !important;transition:none !important;}
 /* Telegram Notification layout: native shell + only our content-specific helpers. */
 ._cnotif_wrap_{position:fixed;inset:0 0 auto;z-index:2147483645;pointer-events:none;}
+#MediaViewer > ._cnotif_wrap_{top:3.5rem;}
 ._cnotif_wrap_>.Notification-container{pointer-events:none;opacity:0;transform:translateY(-.75rem);transition:opacity .2s,transform .2s;}
 ._cnotif_wrap_>.Notification-container._in_{opacity:1;transform:none;}
 ._cnotif_wrap_>.Notification-container._out_{opacity:0;transform:translateY(-.5rem);}

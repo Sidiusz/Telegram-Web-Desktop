@@ -325,31 +325,42 @@ waitBody(function installUnreadBadge(){
 })();
 // ─────────────────────────────────────────────────────────────────────────────
 
-// ── ПКМ на изображении в MediaViewer ──────────────────────────────────────
+// MediaViewer can show an image alongside the active video while it loads.
 document.addEventListener('contextmenu', function(e) {
-    const viewer = document.getElementById('MediaViewer');
-    if (!viewer || !viewer.contains(e.target)) return;
-
-    const activeSlide = viewer.querySelector('.MediaViewerSlide--active');
-    if (!activeSlide) return;
-
-    const img = activeSlide.querySelector(
-        'img:not([class*="sticker"]):not(.Avatar__media):not(.avatar-media)'
-    );
-    const hasVideo = !!activeSlide.querySelector('video');
-    const dlId = (window.__tgdl && window.__tgdl.viewerDownloadId) ? window.__tgdl.viewerDownloadId() : null;
-    // Меню нужно, если есть картинка (сохранить/копировать) ИЛИ медиа уже скачано
-    // (пункт «Открыть папку» для видео/фото — как в обычных файлах).
-    if ((!img || !img.src) && dlId == null) return;
+    const target = e.target;
+    const content = target.closest?.('#MediaViewer .MediaViewerContent');
+    const image = target.closest?.('img');
+    const player = target.closest?.('.VideoPlayer, video');
+    if (!content || (!image && !player)) return;
 
     e.preventDefault();
     e.stopImmediatePropagation();
+    if (!content.closest('.MediaViewerSlide--active') || target.closest('.MediaViewerFooter, .VideoPlayerControls')) return;
+    if (content.querySelector('.protector, .is-protected')) return;
 
-    INV('show_image_context_menu', {
-        srcURL: (img && img.src) ? img.src : '',
+    const isVideo = !!player || !!content.querySelector('.VideoPlayer, video');
+    const photo = !isVideo && image?.matches('.MediaViewerContent > img, .MediaViewerContent > div > img') &&
+        !image.matches('.thumbnail, [class*="sticker"], .Avatar__media, .avatar-media');
+    if (!isVideo && !photo) return;
+
+    const downloads = window.__tgdl;
+    const button = isVideo ? downloads?.viewerDownloadButton() : null;
+    const canSaveVideo = !!button && !button.disabled;
+    const downloadId = downloads?.viewerDownloadId();
+    const srcURL = photo ? image.currentSrc || image.src : '';
+    if (!srcURL && !canSaveVideo && downloadId == null) return;
+    INV('show_viewer_context_menu', {
+        mediaType: isVideo ? 'video' : 'image',
+        canSaveVideo,
+        srcURL,
         x: e.clientX,
         y: e.clientY,
-        downloadId: dlId,
+        downloadId,
+    }).then(action => {
+        if (action === 'save-video' && canSaveVideo && target.isConnected &&
+            content.closest('.MediaViewerSlide--active') && button === downloads.viewerDownloadButton() && !button.disabled) {
+            button.click();
+        }
     }).catch(() => {});
 }, true);
 // ──────────────────────────────────────────────────────────────────────────
